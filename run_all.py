@@ -1,4 +1,6 @@
 import os
+import argparse
+from pathlib import Path
 import numpy as np
 from scipy import signal
 import pickle
@@ -6,22 +8,45 @@ import utils
 import errors
 import cv2 as cv
 from tqdm import tqdm
-import sys, getopt
+from functools import wraps
+import time
+from config_loader import load_config
 
 # Datasets class definitions
 
 class DatasetBase:
 	def __init__(self):
-		self.data_dir = '/mnt/43fba879-48e4-4e4c-afb2-dcb7e861c868/sftp/datasets/'
+		repo_root = Path(__file__).resolve().parent
+		custom_root = os.environ.get('RESPIRE_DATA_DIR')
+		if custom_root:
+			base = Path(custom_root).expanduser()
+		else:
+			base = repo_root / 'dataset'
+		self.data_dir = base.resolve()
+		self.roi_params = {
+			'chest': {},
+			'face': {}
+		}
+
+	def resolve(self, *parts):
+		return os.path.join(str(self.data_dir), *parts)
 
 	def load_dataset(self):
 		raise NotImplementedError("Subclasses must implement load_datset method")
+
+	def configure(self, cfg=None):
+		"""Apply dataset-specific configuration (ROI params, etc.)."""
+		if not cfg:
+			return
+		roi_cfg = cfg.get('roi', {}) if isinstance(cfg, dict) else {}
+		for region, params in roi_cfg.items():
+			self.roi_params.setdefault(region, {}).update(params)
 
 class BP4D(DatasetBase):
 	def __init__(self):
 		super().__init__()
 		self.name = 'bp4d'
-		self.path = self.data_dir + 'BP4Ddef/'
+		self.path = self.resolve('BP4Ddef') + os.sep
 		self.fs_gt = 1000
 		self.data = [] 
 
@@ -29,11 +54,15 @@ class BP4D(DatasetBase):
 
 		print('\nLoading dataset ' + self.name + '...')
 		for sub in utils.sort_nicely(os.listdir(self.path)):
-			sub_path = self.path + sub + '/'
+			sub_path = os.path.join(self.path, sub)
+			if not os.path.isdir(sub_path):
+				continue
 
 			for trial in utils.sort_nicely(os.listdir(sub_path)):
-				trial_path = sub_path + trial + '/'
-				video_path = trial_path + 'vid.avi'
+				trial_path = os.path.join(sub_path, trial)
+				if not os.path.isdir(trial_path):
+					continue
+				video_path = os.path.join(trial_path, 'vid.avi')
 
 				if os.path.exists(video_path):
 					d = {}
@@ -55,9 +84,15 @@ class BP4D(DatasetBase):
 
 	def extract_ROI(self, video_path, region='chest'):
 		if region == 'chest':
-			rois, _, _ = utils.get_chest_ROI(video_path, self.name, mp_complexity=1, skip_rate=10)
+			params = self.roi_params.get('chest', {})
+			mp_complexity = params.get('mp_complexity', 1)
+			skip_rate = params.get('skip_rate', 10)
+			rois, _, _ = utils.get_chest_ROI(video_path, self.name, mp_complexity=mp_complexity, skip_rate=skip_rate)
 		elif region == 'face':
-			rois = utils.get_face_ROI(video_path)
+			params = self.roi_params.get('face', {})
+			rois = utils.get_face_ROI(video_path, **params) if params else utils.get_face_ROI(video_path)
+		else:
+			rois = []
 		return rois
 
 	def extract_rppg(self, video_path, method='cpu_CHROM'):
@@ -71,18 +106,22 @@ class COHFACE(DatasetBase):
 	def __init__(self):
 		super().__init__()
 		self.name = 'cohface'
-		self.path = self.data_dir + 'cohface/data/'
+		self.path = self.resolve('COHFACE') + os.sep
 		self.fs_gt = 32
 		self.data = []
 
 	def load_dataset(self):
 		print('\nLoading dataset ' + self.name + '...')
 		for sub in utils.sort_nicely(os.listdir(self.path)):
-			sub_path = self.path + sub + '/'
+			sub_path = os.path.join(self.path, sub)
+			if not os.path.isdir(sub_path):
+				continue
 
 			for trial in utils.sort_nicely(os.listdir(sub_path)):
-				trial_path = sub_path + trial + '/'
-				video_path = trial_path + 'data.avi'
+				trial_path = os.path.join(sub_path, trial)
+				if not os.path.isdir(trial_path):
+					continue
+				video_path = os.path.join(trial_path, 'data.avi')
 
 				if os.path.exists(video_path):
 					d = {}
@@ -101,16 +140,23 @@ class COHFACE(DatasetBase):
 		import h5py
 
 		#Load GT
-		f = h5py.File(trial_path + '/data.hdf5', 'r')
+		import os
+		f = h5py.File(os.path.join(trial_path, 'data.hdf5'), 'r')
 		gt = np.array(f['respiration'])
 		gt = gt[np.arange(0, len(gt), 8)] # ???
 		return gt
 
 	def extract_ROI(self, video_path, region='chest'):
 		if region == 'chest':
-			rois, _, _ = utils.get_chest_ROI(video_path, self.name, mp_complexity=1, skip_rate=10)
+			params = self.roi_params.get('chest', {})
+			mp_complexity = params.get('mp_complexity', 1)
+			skip_rate = params.get('skip_rate', 10)
+			rois, _, _ = utils.get_chest_ROI(video_path, self.name, mp_complexity=mp_complexity, skip_rate=skip_rate)
 		elif region == 'face':
-			rois = utils.get_face_ROI(video_path)
+			params = self.roi_params.get('face', {})
+			rois = utils.get_face_ROI(video_path, **params) if params else utils.get_face_ROI(video_path)
+		else:
+			rois = []
 		return rois
 
 	def extract_rppg(self, video_path, method='cpu_CHROM'):
@@ -124,29 +170,36 @@ class MAHNOB(DatasetBase):
 	def __init__(self):
 		super().__init__()
 		self.name = 'mahnob'
-		self.path = self.data_dir + 'MAHNOB/'
+		self.path = self.resolve('MAHNOB') + os.sep
 		self.data = []
 
 	def load_gt(self, sbj_path):
-		import pybdf
+		from pyedflib import EdfReader
+		bdf_file = None
 		for fn in os.listdir(sbj_path):
-			if fn.endswith('.bdf'):
+			if fn.lower().endswith('.bdf'):
+				bdf_file = os.path.join(sbj_path, fn)
 				break
-		bdfRec = pybdf.bdfRecording(sbj_path + '/' + fn)
-		rec = bdfRec.getData(channels=[44])
-		self.fs_gt = bdfRec.sampRate[44]
-		gt = np.array(rec['data'][0])
+		if bdf_file is None:
+			raise FileNotFoundError('No .bdf file found in %s' % sbj_path)
+		channel = 44
+		reader = EdfReader(bdf_file)
+		self.fs_gt = reader.getSampleFrequency(channel)
+		gt = reader.readSignal(channel)
+		reader.close()
 		return gt
 
 
 	def load_dataset(self):
 		print('\nLoading dataset ' + self.name + '...')
 		for sub in utils.sort_nicely(os.listdir(self.path)):
-			sub_path = self.path + sub + '/'
+			sub_path = os.path.join(self.path, sub)
+			if not os.path.isdir(sub_path):
+				continue
 			for fn in os.listdir(sub_path):
 				if fn.endswith('.avi'):
 					break
-			video_path = sub_path + fn
+			video_path = os.path.join(sub_path, fn)
 
 			if os.path.exists(video_path):
 				d = {}
@@ -162,9 +215,15 @@ class MAHNOB(DatasetBase):
 
 	def extract_ROI(self, video_path, region='chest'):
 		if region == 'chest':
-			rois, _, _ = utils.get_chest_ROI(video_path, self.name, mp_complexity=1, skip_rate=10)
+			params = self.roi_params.get('chest', {})
+			mp_complexity = params.get('mp_complexity', 1)
+			skip_rate = params.get('skip_rate', 10)
+			rois, _, _ = utils.get_chest_ROI(video_path, self.name, mp_complexity=mp_complexity, skip_rate=skip_rate)
 		elif region == 'face':
-			rois = utils.get_face_ROI(video_path)
+			params = self.roi_params.get('face', {})
+			rois = utils.get_face_ROI(video_path, **params) if params else utils.get_face_ROI(video_path)
+		else:
+			rois = []
 		return rois
 
 	def extract_rppg(self, video_path, method='cpu_CHROM'):
@@ -233,7 +292,7 @@ class OF_Deep(MethodBase):
 		vert = flows.reshape(flows.shape[0],-1).cpu().detach().numpy()
 		return vert
 	
-	def process(self, data, cuda=True):
+	def process(self, data, cuda=None):
 		import ptlflow
 		import torch
 		from PIL import Image
@@ -241,11 +300,13 @@ class OF_Deep(MethodBase):
 		from ptlflow.utils.io_adapter import IOAdapter
 		import warnings
 		warnings.filterwarnings("ignore") 
+		if cuda is None:
+			cuda = _use_cuda()
 		if not cuda:
 			torch.cuda.is_available = lambda : False
-			device = 'cpu'
+			device = torch.device('cpu')
 		else:
-			device = torch.device("cuda")
+			device = torch.device(_torch_device())
 		self.OFmodel = ptlflow.get_model(self.model, pretrained_ckpt=self.ckpt)
 		self.OFmodel.to(device)
 		s = []
@@ -387,12 +448,91 @@ class bss_emd(MethodBase):
 	def process(self, data):
 		return data['rppg_obj'].extract_RIVs_from_EMD(self.nIMF)
 
-def evaluate(results_dir, metrics, win_size=30, visualize=False):
+PROFILE1D_INTERPS = ('linear', 'quadratic', 'cubic')
+
+def _dataset_results_dir(results_dir, dataset_name):
+	path = os.path.join(results_dir, dataset_name)
+	os.makedirs(path, exist_ok=True)
+	# New structure for artifacts
+	for sub in ("data", "metrics", "plots", "logs"):
+		os.makedirs(os.path.join(path, sub), exist_ok=True)
+	return path
+
+
+def _method_token(method_name):
+	if method_name.startswith('OF_Model'):
+		return 'OF'
+	if method_name.startswith('profile1D '):
+		return 'profile1D'
+	return method_name.replace(' ', '_').replace('-', '_')
+
+
+def _method_suffix(methods):
+	tokens = []
+	seen = set()
+	for m in methods:
+		token = _method_token(m.name)
+		if token in seen:
+			continue
+		seen.add(token)
+		tokens.append(token)
+	return '_'.join(tokens)
+
+
+def timed_step(label=None):
+	def decorator(func):
+		step_name = label or func.__name__
+		@wraps(func)
+		def wrapper(*args, **kwargs):
+			start = time.time()
+			result = func(*args, **kwargs)
+			duration = time.time() - start
+			print(f"[timing] {step_name} completed in {duration:.2f}s")
+			return result
+		return wrapper
+	return decorator
+
+
+def _filter_valid_rois(rois):
+	filtered = []
+	for roi in rois or []:
+		arr = np.asarray(roi)
+		if arr.size > 0:
+			filtered.append(roi)
+	return filtered
+
+
+@timed_step('evaluate')
+def evaluate(results_dir, metrics, win_size=30, stride=1, visualize=True):
 	print('\n> Loading extracted data from ' + results_dir + '...')
 
 	method_metrics = {}
 
-	files = utils.sort_nicely(os.listdir(results_dir))
+	# Prefer new structure: results_dir/data/*.pkl, fallback to flat files
+	data_dir = os.path.join(results_dir, 'data')
+	if os.path.isdir(data_dir):
+		files = [os.path.join('data', f) for f in utils.sort_nicely(os.listdir(data_dir)) if f.endswith('.pkl')]
+	else:
+		# If results_dir appears to be root with multiple runs, try to resolve uniquely
+		candidate_runs = []
+		for entry in utils.sort_nicely(os.listdir(results_dir)):
+			full = os.path.join(results_dir, entry)
+			if os.path.isdir(os.path.join(full, 'data')):
+				candidate_runs.append(full)
+		if len(candidate_runs) == 1:
+			# Re-root evaluation under the single discovered run directory
+			results_dir = candidate_runs[0]
+			data_dir = os.path.join(results_dir, 'data')
+			files = [os.path.join('data', f) for f in utils.sort_nicely(os.listdir(data_dir)) if f.endswith('.pkl')]
+		else:
+			# Fallback: recursively search for .pkl under results_dir (could mix runs)
+			files = []
+			for root, dirs, fnames in os.walk(results_dir):
+				for fn in utils.sort_nicely(fnames):
+					if fn.endswith('.pkl') and not fn.startswith('metrics'):
+						# store relative path from results_dir
+						rel = os.path.relpath(os.path.join(root, fn), results_dir)
+						files.append(rel)
 	ofdeep_models = ['_raft', '_raft_small', '_gma', '_irr_pwc', '_lcv_raft', '_craft']
 
 	for filepath in tqdm(files, desc="Processing files"):
@@ -402,7 +542,7 @@ def evaluate(results_dir, metrics, win_size=30, visualize=False):
 			continue
 
 		# Open the file with pickled data
-		file = open(results_dir + filepath, 'rb')
+		file = open(os.path.join(results_dir, filepath), 'rb')
 		data = pickle.load(file)
 		file.close()
 
@@ -421,7 +561,7 @@ def evaluate(results_dir, metrics, win_size=30, visualize=False):
 		tqdm.write("> Length: %.2f sec" % (len(gt) / int(fs_gt)))
 
 		# Apply windowing to ground truth
-		gt_win, t_gt = utils.sig_windowing(filt_gt, fs_gt, ws)
+		gt_win, t_gt = utils.sig_windowing(filt_gt, fs_gt, ws, stride=stride)
 
 		# Extract ground truth RPM using Welch with (win_size/1.5)
 		gt_rpm = utils.sig_to_RPM(gt_win, fs_gt, int(ws/1.5), 0.2, 0.5)
@@ -463,7 +603,7 @@ def evaluate(results_dir, metrics, win_size=30, visualize=False):
 			sig_rpm = []
 			for d in range(filt_sig.shape[0]):
 				# Apply windowing to the estimation
-				sig_win, t_sig = utils.sig_windowing(filt_sig[d,:], fps, ws)
+				sig_win, t_sig = utils.sig_windowing(filt_sig[d,:], fps, ws, stride=stride)
 				# Extract estimated RPM
 				sig_rpm.append(utils.sig_to_RPM(sig_win, fps, int(ws/1.5), 0.2, 0.5))
 
@@ -473,14 +613,26 @@ def evaluate(results_dir, metrics, win_size=30, visualize=False):
 
 			method_metrics.setdefault(cur_method, []).append((e))
 
+	# Choose metrics output directory (new structure prefers results_dir/metrics)
+	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
 	if win_size == 'video':
 		fn = 'metrics_1w.pkl'
 	else:
 		fn = 'metrics.pkl'
 	# Save the results of the applied methods
-	with open(results_dir + fn, 'wb') as fp:
+	with open(os.path.join(metrics_dir, fn), 'wb') as fp:
 		pickle.dump([metrics, method_metrics] , fp)
 		print('> Metrics saved!\n')
+
+	# Save human-readable table and plots (best-effort)
+	try:
+		summaries = _save_metrics_table(metrics_dir, method_metrics, metrics, win_size == 'video')
+		if visualize:
+			_generate_plots(results_dir, summaries, metrics, win_size == 'video', stride=stride)
+	except Exception as e:
+		print(f"> Plot/log generation skipped due to error: {e}")
+	return method_metrics
+
 
 def print_metrics(results_dir, unique_window=False):
 	from prettytable import PrettyTable
@@ -493,8 +645,9 @@ def print_metrics(results_dir, unique_window=False):
 		print("Considering time windowing per each video\n")
 		fn = 'metrics.pkl'
 
-	# Load the calculated metrics
-	with open(results_dir + fn, 'rb') as f: 
+	# Load the calculated metrics (prefer new structure metrics/)
+	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
+	with open(os.path.join(metrics_dir, fn), 'rb') as f: 
 		metrics, method_metrics = pickle.load(f)
 
 	t = PrettyTable(['Method'] + metrics)
@@ -506,13 +659,14 @@ def print_metrics(results_dir, unique_window=False):
 		if unique_window:
 			from errors import RMSEerror, MAEerror, MAPEerror, PearsonCorr, LinCorr
 			bpmsEst = np.stack([np.squeeze(metric[-1][0]) for metric in metrics_value])[np.newaxis,:]
-			bpmsGT = np.stack([np.squeeze(metric[-1][1]) for metric in metrics_value])			
+			bpmsGT = np.stack([np.squeeze(metric[-1][1]) for metric in metrics_value])		
 			rmse = RMSEerror(bpmsEst, bpmsGT)
 			mae = MAEerror(bpmsEst, bpmsGT)
 			mape = MAPEerror(bpmsEst, bpmsGT)
-			pcc = PearsonCorr(bpmsEst, bpmsGT)
-			ccc = LinCorr(bpmsEst, bpmsGT)			
-			vals = [rmse, mae, mape, pcc, ccc]
+			corr = PearsonCorr(bpmsEst, bpmsGT)
+			pcc = corr
+			ccc = LinCorr(bpmsEst, bpmsGT)		
+			vals = [rmse, mae, mape, corr, pcc, ccc]
 		else:
 			vals = []
 			for i, m in enumerate(metrics):
@@ -523,19 +677,32 @@ def print_metrics(results_dir, unique_window=False):
 		t.add_row([method] + vals)
 
 	print(t)
+	# Save alongside pkl for reporting
+	try:
+		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
+			fp.write(str(t) + "\n")
+	except Exception:
+		pass
 
+
+@timed_step('extract_respiration')
 def extract_respiration(datasets, methods, results_dir):
+	os.makedirs(results_dir, exist_ok=True)
+	method_suffix = _method_suffix(methods)
 
 	for dataset in datasets:
+		dir_name = f"{dataset.name.upper()}_{method_suffix}"
+		dataset_results_dir = _dataset_results_dir(results_dir, dir_name)
+		data_dir = os.path.join(dataset_results_dir, 'data')
 
 		dataset.load_dataset()
 		# Loop over the dataset
 		for d in tqdm(dataset.data, desc="Processing files"):
 
 			if 'trial' in d.keys(): 
-				outfilename = results_dir + dataset.name + '_' + d['subject'] + '_' + d['trial'] + '.pkl'
+				outfilename = os.path.join(data_dir, dataset.name + '_' + d['subject'] + '_' + d['trial'] + '.pkl')
 			else:
-				outfilename = results_dir + dataset.name + '_' + d['subject'] + '.pkl'
+				outfilename = os.path.join(data_dir, dataset.name + '_' + d['subject'] + '.pkl')
 
 			if os.path.exists(outfilename):
 				tqdm.write("> File %s already exists! Skipping..." % outfilename)
@@ -554,75 +721,518 @@ def extract_respiration(datasets, methods, results_dir):
 			else:
 				tqdm.write("> Processing video %s\n> fps: %d" % (d['subject'], d['fps']))
 
-			# Apply every method to each video
-			for m in methods:
-
-				tqdm.write("> Applying method %s ..." % m.name)
-
-		 		# If method process rois, extract them first
-				if m.data_type == 'chest' and not d['chest_rois']:
-					d['chest_rois'] = dataset.extract_ROI(d['video_path'], m.data_type)
-
-				elif m.data_type == 'face' and not d['face_rois']:
-					d['face_rois'] = dataset.extract_ROI(d['video_path'], m.data_type)
-		 		
-		 		# If method process rppg, extract it first
-				elif m.data_type == 'rppg' and not d['rppg_obj']:
+		# Apply every method to each video
+		for m in methods:
+			tqdm.write("> Applying method %s ..." % m.name)
+			skip_method = False
+			if m.data_type == 'chest':
+				if not d['chest_rois']:
+					d['chest_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
+				else:
+					d['chest_rois'] = _filter_valid_rois(d['chest_rois'])
+				if not d['chest_rois']:
+					tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
+					skip_method = True
+			elif m.data_type == 'face':
+				if not d['face_rois']:
+					d['face_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
+				else:
+					d['face_rois'] = _filter_valid_rois(d['face_rois'])
+				if not d['face_rois']:
+					tqdm.write(f"> Skipping method {m.name} (no valid face ROIs)")
+					skip_method = True
+			elif m.data_type == 'rppg':
+				if not d['rppg_obj']:
 					d['rppg_obj'] = dataset.extract_rppg(d['video_path'])
 
-				output = {'method': m.name,
-						  'estimate': m.process(d)}
+			if skip_method:
+				continue
 
-				results['estimates'].append(output)
+			estimate = m.process(d)
+			results['estimates'].append({'method': m.name, 'estimate': estimate})
 
-			d['chest_rois'] = []	#release some memory
-			d['face_rois'] = []	#release some memory
+		# release some memory between videos
+		d['chest_rois'] = []
+		d['face_rois'] = []
+		d['rppg_obj'] = None
 
-			# Save the results of the applied methods
-			with open(outfilename, 'wb') as fp:
-				pickle.dump(results, fp)
-				tqdm.write('> Results saved!\n')
+		# Save the results of the applied methods
+		with open(outfilename, 'wb') as fp:
+			pickle.dump(results, fp)
+			tqdm.write('> Results saved!\n')
 
-def main(argv):
-	# Define the path where to save results
-	results_dir = 'results/'
-	what = 0 # 0: Estimate signals, 1: Perform results evalution, 2: Print metrics
+def _summaries_with_samples(method_metrics, metrics, unique_window):
+	"""Compute aggregated metrics and retain representative samples for plotting."""
+	summaries = {}
+	if not method_metrics:
+		return summaries
+	if unique_window:
+		from errors import RMSEerror, MAEerror, MAPEerror, PearsonCorr, LinCorr
+	for method, records in method_metrics.items():
+		sample_est = None
+		sample_gt = None
+		if records:
+			try:
+				sample_est = np.atleast_1d(np.squeeze(records[0][-1][0])).astype(float)
+				sample_gt = np.atleast_1d(np.squeeze(records[0][-1][1])).astype(float)
+			except Exception:
+				sample_est = sample_gt = None
+		values = {}
+		variability = {}
+		if unique_window:
+			est_vals = []
+			gt_vals = []
+			for record in records:
+				est = np.atleast_1d(np.squeeze(record[-1][0])).astype(float)
+				gt = np.atleast_1d(np.squeeze(record[-1][1])).astype(float)
+				n = min(est.shape[-1] if est.ndim else 1, gt.shape[-1] if gt.ndim else 1)
+				if n == 0:
+					continue
+				est_vals.append(est.reshape(-1)[:n])
+				gt_vals.append(gt.reshape(-1)[:n])
+			if est_vals and gt_vals:
+				est_concat = np.concatenate(est_vals).reshape(1, -1)
+				gt_concat = np.concatenate(gt_vals)
+				values['RMSE'] = RMSEerror(est_concat, gt_concat)
+				values['MAE'] = MAEerror(est_concat, gt_concat)
+				values['MAPE'] = MAPEerror(est_concat, gt_concat)
+				corr = PearsonCorr(est_concat, gt_concat)
+				values['CORR'] = corr
+				values['PCC'] = corr
+				values['CCC'] = LinCorr(est_concat, gt_concat)
+			else:
+				values = {k: float('nan') for k in ['RMSE','MAE','MAPE','CORR','PCC','CCC']}
+		else:
+			for idx, metric_name in enumerate(metrics):
+				data = [record[idx] for record in records]
+				avg = np.nanmedian(data)
+				std = np.nanstd(data)
+				values[metric_name] = float(avg)
+				variability[f'{metric_name}_std'] = float(std)
+		summaries[method] = {
+			'values': values,
+			'variability': variability,
+			'sample': {'est': sample_est, 'gt': sample_gt}
+		}
+	return summaries
 
-	opts, args = getopt.getopt(argv,"ha:d:",["action=","dir="])
-	for opt, arg in opts:
-		if opt == '-h':
-			print ('run_all.py -a <action> -d <results_dir>')
-			sys.exit()
-		elif opt in ("-a", "--action"):
-			what = int(arg)
-		elif opt in ("-d", "--dir"):
-			results_dir = arg
-	print ('Action is ', what)
-	print ('Results dir is ', results_dir)
 
-	if what == 0: 
+def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window):
+	"""Save a pretty metrics summary table to text for reporting."""
+	from prettytable import PrettyTable
+	summaries = _summaries_with_samples(method_metrics, metrics, unique_window)
+	if unique_window:
+		table_headers = ['Method', 'RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+	else:
+		table_headers = ['Method'] + [f"{m} (median±std)" for m in metrics]
+	t = PrettyTable(table_headers)
+	for method, summary in summaries.items():
+		values = summary['values']
+		if unique_window:
+			row = [method] + [values.get(metric, float('nan')) for metric in ['RMSE','MAE','MAPE','CORR','PCC','CCC']]
+		else:
+			row = [method]
+			for metric in metrics:
+				median = values.get(metric, float('nan'))
+				std = summary['variability'].get(f'{metric}_std', float('nan'))
+				row.append(f"{median:.3f} (±{std:.2f})")
+			# ensure consistent columns
+		t.add_row(row)
 
-		# Initialize a list of methods
-		#methods = [peak(), morph(), bss_ssa(), bss_emd()]
-		methods = [BigSmall(), MTTS_CAN()]
+	try:
+		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
+			fp.write(str(t) + "\n")
+	except Exception:
+		pass
+	return summaries
 
-		# Initialize a list of datasets
-		datasets = [BP4D(), COHFACE()]
+def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
+	"""Generate full set of plots for reporting."""
+	import matplotlib.pyplot as plt
+	from scipy import signal
 
-		extract_respiration(datasets, methods, results_dir)
+	plots_dir = os.path.join(results_dir, 'plots') if os.path.isdir(os.path.join(results_dir, 'plots')) else results_dir
+	os.makedirs(plots_dir, exist_ok=True)
 
-	elif what == 1:
+	methods = list(summaries.keys())
+	if methods:
+		if unique_window:
+			ordered = ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+		else:
+			ordered = metrics
+		for met in ordered:
+			xs = np.arange(len(methods))
+			ys = [summaries[m]['values'].get(met, np.nan) for m in methods]
+			plt.figure(figsize=(8, 4))
+			plt.bar(xs, ys)
+			plt.xticks(xs, methods, rotation=30, ha='right')
+			plt.title(met)
+			plt.tight_layout()
+			plt.savefig(os.path.join(plots_dir, f'{met}.png'))
+			plt.close()
 
-		# Define list of metrics to evaluate
-		metrics = ['RMSE', 'MAE', 'MAPE', 'PCC', 'CCC']
+	for method, summary in summaries.items():
+		sample = summary.get('sample', {})
+		est = sample.get('est')
+		gt = sample.get('gt')
+		if est is None or gt is None:
+			continue
+		est = np.atleast_1d(est).astype(float)
+		gt = np.atleast_1d(gt).astype(float)
+		n = min(est.shape[-1], gt.shape[-1]) if est.ndim and gt.ndim else 0
+		if n < 2:
+			continue
+		# Scatter
+		plt.figure(figsize=(5, 5))
+		plt.scatter(gt[:n], est[:n], s=6, alpha=0.5)
+		plt.xlabel('GT (RPM)')
+		plt.ylabel('EST (RPM)')
+		lims = [np.nanmin([gt[:n].min(), est[:n].min()]), np.nanmax([gt[:n].max(), est[:n].max()])]
+		plt.plot(lims, lims, 'r--', linewidth=1)
+		plt.title(f'{method}: GT vs EST')
+		plt.tight_layout()
+		plt.savefig(os.path.join(plots_dir, f'scatter_{method}.png'))
+		plt.close()
+		# Time overlay
+		times = np.arange(n) * stride
+		plt.figure(figsize=(8, 4))
+		plt.plot(times, gt[:n], label='GT', linewidth=1.5)
+		plt.plot(times, est[:n], label='Estimate', linewidth=1.2, alpha=0.8)
+		plt.xlabel('Time (s)')
+		plt.ylabel('RPM')
+		plt.title(f'{method}: RPM over time')
+		plt.legend()
+		plt.tight_layout()
+		plt.savefig(os.path.join(plots_dir, f'time_{method}.png'))
+		plt.close()
+		# Welch PSD
+		if stride > 0:
+			fs = 1.0 / stride
+			f_est, psd_est = signal.welch(est[:n], fs=fs, nperseg=min(n, 256))
+			f_gt, psd_gt = signal.welch(gt[:n], fs=fs, nperseg=min(n, 256))
+			plt.figure(figsize=(8, 4))
+			plt.semilogy(f_gt, psd_gt + 1e-12, label='GT')
+			plt.semilogy(f_est, psd_est + 1e-12, label='Estimate')
+			plt.xlabel('Frequency (Hz)')
+			plt.ylabel('PSD')
+			plt.title(f'{method}: Welch PSD')
+			plt.legend()
+			plt.tight_layout()
+			plt.savefig(os.path.join(plots_dir, f'welch_{method}.png'))
+			plt.close()
+		# Bland-Altman
+		diff = est[:n] - gt[:n]
+		mean_vals = 0.5 * (est[:n] + gt[:n])
+		if np.all(np.isnan(diff)):
+			continue
+		mean_diff = float(np.nanmean(diff))
+		sd_diff = float(np.nanstd(diff))
+		upper = mean_diff + 1.96 * sd_diff
+		lower = mean_diff - 1.96 * sd_diff
+		plt.figure(figsize=(8, 4))
+		plt.scatter(mean_vals, diff, s=6, alpha=0.5)
+		plt.axhline(mean_diff, color='r', linestyle='--', linewidth=1.2, label='Mean diff')
+		plt.axhline(upper, color='k', linestyle=':', linewidth=1.0, label='±1.96 SD')
+		plt.axhline(lower, color='k', linestyle=':', linewidth=1.0)
+		plt.xlabel('Mean RPM')
+		plt.ylabel('Difference (EST - GT)')
+		plt.title(f'{method}: Bland-Altman')
+		plt.legend()
+		plt.tight_layout()
+		plt.savefig(os.path.join(plots_dir, f'bland_altman_{method}.png'))
+		plt.close()
 
-		evaluate(results_dir, metrics, win_size='video')
 
-	elif what == 2:
+@timed_step('aggregate_runs')
+def aggregate_runs(run_dirs, output_dir, prefer_unique=False):
+	"""Aggregate metrics across multiple run directories into a single report."""
+	import csv
+	from prettytable import PrettyTable
 
-		# Just print the metrics values
-		print_metrics(results_dir, unique_window=True)
+	os.makedirs(output_dir, exist_ok=True)
+	records = []
+	for run_dir in run_dirs:
+		run_dir = os.path.abspath(run_dir)
+		metrics_dir = os.path.join(run_dir, 'metrics') if os.path.isdir(os.path.join(run_dir, 'metrics')) else run_dir
+		candidates = []
+		if prefer_unique:
+			candidates = ['metrics_1w.pkl', 'metrics.pkl']
+		else:
+			candidates = ['metrics.pkl', 'metrics_1w.pkl']
+		metrics_path = None
+		unique_window = False
+		for cand in candidates:
+			cand_path = os.path.join(metrics_dir, cand)
+			if os.path.exists(cand_path):
+				metrics_path = cand_path
+				unique_window = cand == 'metrics_1w.pkl'
+				break
+		if metrics_path is None:
+			print(f"> Skipping {run_dir}: no metrics file found")
+			continue
+		with open(metrics_path, 'rb') as fp:
+			metric_names, method_metrics = pickle.load(fp)
+		summaries = _summaries_with_samples(method_metrics, metric_names, unique_window)
+		for method, summary in summaries.items():
+			row = {
+				'run': os.path.basename(os.path.normpath(run_dir)),
+				'run_path': run_dir,
+				'metrics_file': os.path.basename(metrics_path),
+				'unique_window': unique_window,
+				'method': method
+			}
+			for key, val in summary['values'].items():
+				row[key] = val
+			for key, val in summary['variability'].items():
+				row[key] = val
+			records.append(row)
+
+	if not records:
+		print('> No records aggregated. Skipping report generation.')
+		return None
+
+	# Prepare CSV
+	fieldnames = ['run', 'run_path', 'method', 'unique_window', 'metrics_file']
+	extra_fields = sorted({key for rec in records for key in rec.keys() if key not in fieldnames})
+	fieldnames.extend(extra_fields)
+	csv_path = os.path.join(output_dir, 'combined_metrics.csv')
+	with open(csv_path, 'w', newline='') as csvfile:
+		writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+		writer.writeheader()
+		for rec in records:
+			writer.writerow({k: rec.get(k, '') for k in fieldnames})
+
+	# Pretty summary table
+	t = PrettyTable(fieldnames)
+	for rec in records:
+		row = []
+		for key in fieldnames:
+			val = rec.get(key, '')
+			if isinstance(val, (int, float, np.floating)):
+				if np.isnan(float(val)):
+					row.append('nan')
+				else:
+					row.append(f"{float(val):.3f}")
+			else:
+				row.append(val)
+		t.add_row(row)
+	with open(os.path.join(output_dir, 'combined_metrics.txt'), 'w') as fp:
+		fp.write(str(t) + "\n")
+
+	print(f"> Aggregated report saved to {csv_path}")
+	return csv_path
+
+
+def _build_methods(cfg_list):
+	methods = []
+	for item in cfg_list:
+		if isinstance(item, str):
+			name = item
+			params = {}
+		else:
+			name = item.get('name')
+			if not name:
+				raise ValueError("Method entry requires a 'name'")
+			params = item
+		if name == 'OF_Model':
+			methods.append(OF_Model())
+		elif name == 'DoF':
+			methods.append(DoF())
+		elif name == 'profile1D':
+			interps = params.get('interp')
+			if interps is None:
+				target_interps = PROFILE1D_INTERPS
+			elif isinstance(interps, (list, tuple, set)):
+				target_interps = tuple(interps)
+			else:
+				target_interps = (interps,)
+			for interp in target_interps:
+				if interp not in PROFILE1D_INTERPS:
+					raise ValueError(f"Unsupported profile1D interpolation '{interp}'. Supported: {PROFILE1D_INTERPS}")
+				methods.append(profile1D(interp))
+		elif name == 'OF_Deep':
+			model = params.get('model', 'raft_small')
+			bs = int(params.get('batch_size', 64))
+			methods.append(OF_Deep(model=model, batch_size=bs))
+		elif name == 'MTTS_CAN':
+			methods.append(MTTS_CAN())
+		elif name == 'BigSmall':
+			methods.append(BigSmall())
+		elif name == 'peak':
+			methods.append(peak())
+		elif name == 'morph':
+			methods.append(morph())
+		elif name == 'bss_ssa':
+			methods.append(bss_ssa())
+		elif name == 'bss_emd':
+			methods.append(bss_emd())
+		else:
+			raise ValueError(f"Unknown method in config: {name}")
+	return methods
+
+def _build_datasets(cfg_list):
+	ds = []
+	for item in cfg_list:
+		if isinstance(item, str):
+			name = item
+			params = {}
+		else:
+			name = item.get('name')
+			if not name:
+				raise ValueError('Dataset configuration requires "name" field')
+			params = item
+		lname = name.lower()
+		if lname == 'cohface':
+			dset = COHFACE()
+		elif lname == 'bp4d':
+			dset = BP4D()
+		elif lname == 'mahnob':
+			dset = MAHNOB()
+		else:
+			raise ValueError(f"Unknown dataset in config: {name}")
+		dset.configure(params)
+		ds.append(dset)
+	return ds
+
+def _derive_run_dirs(results_root, datasets, methods):
+	method_suffix = _method_suffix(methods)
+	run_dirs = []
+	for dataset in datasets:
+		run_dirs.append(os.path.join(results_root, f"{dataset.name.upper()}_{method_suffix}"))
+	return run_dirs
+
+
+def _resolve_paths(base, paths):
+	resolved = []
+	for p in paths:
+		if os.path.isabs(p):
+			resolved.append(p)
+		else:
+			resolved.append(os.path.abspath(os.path.join(base, p)))
+	return resolved
+
+
+def main(argv=None):
+	parser = argparse.ArgumentParser(description="Run resPyre pipelines using config-driven steps.")
+	parser.add_argument('-c', '--config', help='JSON config file describing datasets/methods/parameters')
+	parser.add_argument('-s', '--step', choices=['estimate','evaluate','metrics','report','all'], nargs='+', help='Pipeline steps to execute')
+	parser.add_argument('-d', '--results', help='Override results root directory')
+	parser.add_argument('-a', '--action', type=int, help='Legacy action flag (0=estimate,1=evaluate,2=metrics,3=report)')
+	parser.add_argument('--win', help='Override evaluation window (seconds or "video")')
+	parser.add_argument('--stride', type=float, help='Override evaluation stride (seconds)')
+	parser.add_argument('--runs', nargs='+', help='Explicit run directories for evaluate/metrics/report steps')
+	parser.add_argument('--prefer-unique', action='store_true', help='Prefer metrics_1w.pkl during aggregation')
+	args = parser.parse_args(argv)
+
+	cfg = load_config(args.config)
+
+	# Determine steps
+	if args.step:
+		steps = ['report' if step == 'all' else step for step in args.step]
+	elif args.action is not None:
+		legacy_map = {0: ['estimate'], 1: ['evaluate'], 2: ['metrics'], 3: ['report']}
+		steps = legacy_map.get(args.action, ['estimate'])
+	elif cfg and cfg.get('steps'):
+		steps = cfg['steps']
+	else:
+		steps = ['estimate']
+
+	steps = [step.lower() for step in steps]
+	if 'all' in steps:
+		steps = ['estimate','evaluate','metrics']
+
+	results_root = os.path.abspath(args.results or cfg['results_dir'])
+	os.makedirs(results_root, exist_ok=True)
+
+	methods = _build_methods(cfg.get('methods', []))
+	datasets = _build_datasets(cfg.get('datasets', []))
+
+	# Runtime device from config (optional)
+	if cfg.get('runtime', {}).get('device'):
+		os.environ.setdefault('DEVICE', cfg['runtime']['device'])
+
+	eval_cfg = cfg.get('eval', {})
+	report_cfg = cfg.get('report', {})
+
+	metrics = ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+	win_override = args.win or eval_cfg.get('win_size', 'video')
+	if isinstance(win_override, str) and win_override.lower() == 'video':
+		win_size = 'video'
+	else:
+		try:
+			win_size = float(win_override)
+		except Exception:
+			win_size = 'video'
+	stride = args.stride if args.stride is not None else eval_cfg.get('stride', 1)
+	visualize = True
+
+	# Determine run directories for steps other than estimate
+	derived_run_dirs = _derive_run_dirs(results_root, datasets, methods)
+	if args.runs:
+		run_dirs = _resolve_paths(results_root, args.runs)
+	else:
+		run_dirs = derived_run_dirs
+
+	if 'estimate' in steps:
+		print(f"Executing estimate step -> output root: {results_root}")
+		extract_respiration(datasets, methods, results_root)
+
+	if 'evaluate' in steps:
+		print("Executing evaluate step")
+		for run_dir in run_dirs:
+			if not os.path.isdir(run_dir):
+				print(f"> Warning: run directory {run_dir} not found, skipping evaluation")
+				continue
+			print(f"> Evaluating run: {run_dir}")
+			evaluate(run_dir, metrics, win_size=win_size, stride=stride, visualize=visualize)
+
+	if 'metrics' in steps:
+		print("Executing metrics display step")
+		for run_dir in run_dirs:
+			metrics_dir = os.path.join(run_dir, 'metrics') if os.path.isdir(os.path.join(run_dir, 'metrics')) else run_dir
+			unique_window = os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
+			print(f"\n== Metrics for {run_dir} ==")
+			print_metrics(run_dir, unique_window=unique_window)
+
+	if 'report' in steps:
+		report_runs = report_cfg.get('runs', []) if cfg else []
+		if args.runs:
+			report_runs = args.runs
+		elif report_runs:
+			report_runs = report_runs
+		else:
+			report_runs = [os.path.relpath(rd, results_root) for rd in derived_run_dirs]
+		report_runs_abs = _resolve_paths(results_root, report_runs)
+		output_rel = report_cfg.get('output', 'reports/combined') if cfg else 'reports/combined'
+		output_dir = output_rel
+		if not os.path.isabs(output_dir):
+			output_dir = os.path.abspath(os.path.join(results_root, output_dir))
+		prefer_unique = args.prefer_unique or report_cfg.get('unique_window', False)
+		print(f"Executing report aggregation -> {output_dir}")
+		aggregate_runs(report_runs_abs, output_dir, prefer_unique=prefer_unique)
+
+	print('\nDone.')
 
 
 if __name__ == "__main__":
-	main(sys.argv[1:])
+	main()
+def _runtime_config():
+	def _get_env(name, default=None):
+		return os.environ.get(name, default)
+
+	cfg = {}
+	cfg['device'] = _get_env('DEVICE', 'cuda:0')
+	return cfg
+
+
+RUNTIME_CONFIG = _runtime_config()
+
+
+def _use_cuda():
+	device = RUNTIME_CONFIG.get('device', 'cuda:0')
+	return isinstance(device, str) and device.lower().startswith('cuda')
+
+
+def _torch_device():
+	device = RUNTIME_CONFIG.get('device', 'cuda:0')
+	return device if _use_cuda() else 'cpu'
