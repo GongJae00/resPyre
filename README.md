@@ -150,13 +150,20 @@ extract_respiration(datasets, methods, "results/")
 
 ## Requirements
 
-Required packages are listed in [requirements.txt](requirements.txt). Key dependencies include:
+Use `setup/setup.sh` for a reproducible environment (single unified requirements file `setup/requirements.txt`).
 
-- TensorFlow 2.2-2.4
-- OpenCV
-- SciPy
-- NumPy
-- Matplotlib
+Quickstart:
+
+```bash
+# Full stack (auto-detect GPU)
+./setup/setup.sh
+
+# Force CPU-only
+./setup/setup.sh --cpu-only
+
+# Explicit CUDA 11.7 for PyTorch 1.13.1
+./setup/setup.sh --cuda 117
+```
 
 ## Reference
 
