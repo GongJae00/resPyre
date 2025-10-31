@@ -1,0 +1,29 @@
+{
+  "name": "cohface_motion",
+  "results_dir": "results",
+  "datasets": [
+    {
+      "name": "COHFACE",
+      "roi": {
+        "chest": {
+          "mp_complexity": 1,
+          "skip_rate": 10
+        }
+      }
+    }
+  ],
+  "methods": [
+    "OF_Model",
+    "DoF",
+    "profile1D"
+  ],
+  "eval": {
+    "win_size": 30,
+    "stride": 1
+  },
+  "report": {
+    "output": "reports/cohface_motion",
+    "unique_window": false
+  },
+  "steps": ["estimate", "evaluate", "metrics"]
+}

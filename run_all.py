@@ -635,9 +635,6 @@ def evaluate(results_dir, metrics, win_size=30, stride=1, visualize=True):
 
 
 def print_metrics(results_dir, unique_window=False):
-	from prettytable import PrettyTable
-	from errors import concordance_correlation_coefficient
-
 	if unique_window:
 		print("Considering one window per video\n")
 		fn = 'metrics_1w.pkl'
@@ -650,7 +647,8 @@ def print_metrics(results_dir, unique_window=False):
 	with open(os.path.join(metrics_dir, fn), 'rb') as f: 
 		metrics, method_metrics = pickle.load(f)
 
-	t = PrettyTable(['Method'] + metrics)
+	headers = ['Method'] + metrics
+	table_rows = []
 
 	for method, metrics_value in method_metrics.items():
 
@@ -667,20 +665,27 @@ def print_metrics(results_dir, unique_window=False):
 			pcc = corr
 			ccc = LinCorr(bpmsEst, bpmsGT)		
 			vals = [rmse, mae, mape, corr, pcc, ccc]
+			formatted_vals = [_format_scalar(v) for v in vals]
 		else:
 			vals = []
 			for i, m in enumerate(metrics):
+				# 원본 구현은 중앙값(robust)을 사용
 				avg = np.nanmedian([metric[i] for metric in metrics_value])
 				std = np.nanstd([metric[i] for metric in metrics_value])
-				vals.append(f"%.3f (%.2f)" % (float(avg), float(std)))
+				mean_txt = _format_scalar(avg)
+				std_txt = _format_scalar(std, decimals=2)
+				vals.append(f"{mean_txt} ({std_txt})")
+			formatted_vals = vals
 
-		t.add_row([method] + vals)
+		table_rows.append([method] + formatted_vals)
 
-	print(t)
+	table_str = _render_table(headers, table_rows)
+
+	print(table_str)
 	# Save alongside pkl for reporting
 	try:
 		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
-			fp.write(str(t) + "\n")
+			fp.write(table_str + "\n")
 	except Exception:
 		pass
 
@@ -721,45 +726,47 @@ def extract_respiration(datasets, methods, results_dir):
 			else:
 				tqdm.write("> Processing video %s\n> fps: %d" % (d['subject'], d['fps']))
 
-		# Apply every method to each video
-		for m in methods:
-			tqdm.write("> Applying method %s ..." % m.name)
-			skip_method = False
-			if m.data_type == 'chest':
-				if not d['chest_rois']:
-					d['chest_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
-				else:
-					d['chest_rois'] = _filter_valid_rois(d['chest_rois'])
-				if not d['chest_rois']:
-					tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
-					skip_method = True
-			elif m.data_type == 'face':
-				if not d['face_rois']:
-					d['face_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
-				else:
-					d['face_rois'] = _filter_valid_rois(d['face_rois'])
-				if not d['face_rois']:
-					tqdm.write(f"> Skipping method {m.name} (no valid face ROIs)")
-					skip_method = True
-			elif m.data_type == 'rppg':
-				if not d['rppg_obj']:
-					d['rppg_obj'] = dataset.extract_rppg(d['video_path'])
+			# Apply every method to each video
+			for m in methods:
+				# Apply individual method
+				tqdm.write("> Applying method %s ..." % m.name)
+				skip_method = False
 
-			if skip_method:
-				continue
+				if m.data_type == 'chest':
+					if not d['chest_rois']:
+						d['chest_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
+					else:
+						d['chest_rois'] = _filter_valid_rois(d['chest_rois'])
+					if not d['chest_rois']:
+						tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
+						skip_method = True
+				elif m.data_type == 'face':
+					if not d['face_rois']:
+						d['face_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
+					else:
+						d['face_rois'] = _filter_valid_rois(d['face_rois'])
+					if not d['face_rois']:
+						tqdm.write(f"> Skipping method {m.name} (no valid face ROIs)")
+						skip_method = True
+				elif m.data_type == 'rppg':
+					if not d['rppg_obj']:
+						d['rppg_obj'] = dataset.extract_rppg(d['video_path'])
 
-			estimate = m.process(d)
-			results['estimates'].append({'method': m.name, 'estimate': estimate})
+				if skip_method:
+					continue
 
-		# release some memory between videos
-		d['chest_rois'] = []
-		d['face_rois'] = []
-		d['rppg_obj'] = None
+				estimate = m.process(d)
+				results['estimates'].append({'method': m.name, 'estimate': estimate})
 
-		# Save the results of the applied methods
-		with open(outfilename, 'wb') as fp:
-			pickle.dump(results, fp)
-			tqdm.write('> Results saved!\n')
+			# release some memory between videos
+			d['chest_rois'] = []
+			d['face_rois'] = []
+			d['rppg_obj'] = None
+
+			# Save the results of the applied methods
+			with open(outfilename, 'wb') as fp:
+				pickle.dump(results, fp)
+				tqdm.write('> Results saved!\n')
 
 def _summaries_with_samples(method_metrics, metrics, unique_window):
 	"""Compute aggregated metrics and retain representative samples for plotting."""
@@ -805,9 +812,10 @@ def _summaries_with_samples(method_metrics, metrics, unique_window):
 		else:
 			for idx, metric_name in enumerate(metrics):
 				data = [record[idx] for record in records]
-				avg = np.nanmedian(data)
+				# 중앙값(robust)으로 요약
+				med = np.nanmedian(data)
 				std = np.nanstd(data)
-				values[metric_name] = float(avg)
+				values[metric_name] = float(med)
 				variability[f'{metric_name}_std'] = float(std)
 		summaries[method] = {
 			'values': values,
@@ -817,31 +825,72 @@ def _summaries_with_samples(method_metrics, metrics, unique_window):
 	return summaries
 
 
+def _format_scalar(value, decimals=3):
+	if isinstance(value, (float, np.floating)):
+		if np.isnan(value):
+			return "nan"
+		return f"{float(value):.{decimals}f}"
+	return str(value)
+
+
+def _render_table(headers, rows):
+	try:
+		from prettytable import PrettyTable  # Optional dependency
+	except ModuleNotFoundError:
+		PrettyTable = None
+
+	if PrettyTable is not None:
+		t = PrettyTable(headers)
+		for row in rows:
+			t.add_row(row)
+		return t.get_string()
+
+	col_widths = [len(h) for h in headers]
+	for row in rows:
+		for idx, cell in enumerate(row):
+			col_widths[idx] = max(col_widths[idx], len(cell))
+
+	def _fmt_row(cells):
+		return "|" + "|".join(f" {cell.ljust(col_widths[i])} " for i, cell in enumerate(cells)) + "|"
+
+	separator = "+" + "+".join("-" * (w + 2) for w in col_widths) + "+"
+	lines = [separator, _fmt_row(headers), separator]
+	for row in rows:
+		lines.append(_fmt_row(row))
+	lines.append(separator)
+	return "\n".join(lines)
+
+
+
 def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window):
 	"""Save a pretty metrics summary table to text for reporting."""
-	from prettytable import PrettyTable
 	summaries = _summaries_with_samples(method_metrics, metrics, unique_window)
 	if unique_window:
 		table_headers = ['Method', 'RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
 	else:
+		# 원본 구현과 동일: 중앙값±표준편차
 		table_headers = ['Method'] + [f"{m} (median±std)" for m in metrics]
-	t = PrettyTable(table_headers)
+	table_rows = []
 	for method, summary in summaries.items():
 		values = summary['values']
 		if unique_window:
-			row = [method] + [values.get(metric, float('nan')) for metric in ['RMSE','MAE','MAPE','CORR','PCC','CCC']]
+			row = [method]
+			for metric in ['RMSE','MAE','MAPE','CORR','PCC','CCC']:
+				val = values.get(metric, float('nan'))
+				row.append(_format_scalar(val))
 		else:
 			row = [method]
 			for metric in metrics:
-				median = values.get(metric, float('nan'))
+				median_val = values.get(metric, float('nan'))
 				std = summary['variability'].get(f'{metric}_std', float('nan'))
-				row.append(f"{median:.3f} (±{std:.2f})")
-			# ensure consistent columns
-		t.add_row(row)
+				row.append(f"{_format_scalar(median_val)} (±{_format_scalar(std, decimals=2)})")
+		table_rows.append(row)
+
+	table_str = _render_table(table_headers, table_rows)
 
 	try:
 		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
-			fp.write(str(t) + "\n")
+			fp.write(table_str + "\n")
 	except Exception:
 		pass
 	return summaries
@@ -947,7 +996,6 @@ def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
 def aggregate_runs(run_dirs, output_dir, prefer_unique=False):
 	"""Aggregate metrics across multiple run directories into a single report."""
 	import csv
-	from prettytable import PrettyTable
 
 	os.makedirs(output_dir, exist_ok=True)
 	records = []
@@ -1003,21 +1051,20 @@ def aggregate_runs(run_dirs, output_dir, prefer_unique=False):
 			writer.writerow({k: rec.get(k, '') for k in fieldnames})
 
 	# Pretty summary table
-	t = PrettyTable(fieldnames)
+	table_rows = []
 	for rec in records:
 		row = []
 		for key in fieldnames:
 			val = rec.get(key, '')
 			if isinstance(val, (int, float, np.floating)):
-				if np.isnan(float(val)):
-					row.append('nan')
-				else:
-					row.append(f"{float(val):.3f}")
+				row.append(_format_scalar(float(val)))
 			else:
 				row.append(val)
-		t.add_row(row)
+		table_rows.append(row)
+
+	table_str = _render_table(fieldnames, table_rows)
 	with open(os.path.join(output_dir, 'combined_metrics.txt'), 'w') as fp:
-		fp.write(str(t) + "\n")
+		fp.write(table_str + "\n")
 
 	print(f"> Aggregated report saved to {csv_path}")
 	return csv_path

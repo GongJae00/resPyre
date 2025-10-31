@@ -109,7 +109,7 @@ def detect_face(img):
     mybbox = [max(int(xmin), 0), min(int(xmax), img.shape[1]), max(int(ymin), 0), min(int(ymax), img.shape[0])]
     return mybbox
 
-def get_face_ROI(video_path):
+def get_face_ROI(video_path, **kwargs):
     import cv2
     print("\nExtracting face ROIs...")
     i = 0
@@ -136,24 +136,21 @@ def get_chest_ROI(video_path, dataset, mp_complexity=2, skip_rate=1):
 
     _, fps = get_vid_stats(video_path)
 
-    skip_rate *= fps
+    skip_rate *= fps  # 유지하지만, 원본 구현은 첫 프레임에서만 landmark 추출
     i = 0
     mp_pose = mp.solutions.pose
 
     frames = []
 
-    #Run MediaPipe Pose and draw pose landmarks.
+    # Run MediaPipe Pose and draw pose landmarks.
     with mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5, model_complexity=mp_complexity) as pose:
         t = tqdm(extract_frames_yield(video_path))
         for frame in t:
-            
+
             frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-            
+
+            # 원본 의도: Optical Flow ROI의 크기가 변하면 흐름이 불안정해지므로, 첫 프레임에서만 landmark 사용
             if (i == 0):
-            # Estrarre i landmark durante l'esecuzione potrebbe far cambiare la dimensione della ROI
-            # e optical flow si arrabbia!!
-            #if (i % skip_rate == 0):
-                # Process frame with MediaPipe Pose.
                 results = pose.process(frame)
 
             image_height, image_width, _ = frame.shape
@@ -639,5 +636,3 @@ def sliding_straded_win_idx(N, wsize, stride, fps):
         s += stride_fr
         timesES.append(wsize/2+stride*i)
     return idx, np.array(timesES, dtype=np.float32)
-
-
