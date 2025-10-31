@@ -162,5 +162,4 @@ cython_debug/
 results/
 ptlflow_logs/
 
-external/
 notes/
