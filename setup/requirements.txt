@@ -1,0 +1,54 @@
+# 통합 요구사항 (모션+SOMATA 중심, Py 3.10 권장)
+# - 기본: 모션/ROI/rPPG/평가 + SOMATA 의존성 + PyTorch/PTLFlow
+# - 딥스택(TensorFlow/TVM)은 3.10에서 충돌 가능성이 있어 기본에서 제외(필요 시 별도 설치 가이드 참고)
+
+# 핵심 과학 스택 (Py 3.10 + CUDA 12.x)
+# numpy/scipy/matplotlib/pandas/h5py는 setup.sh에서 conda 빌드로 설치합니다.
+tqdm==4.66.4
+Pillow==10.3.0
+
+# 비전/신호처리
+opencv-python==4.7.0.72
+opencv-contrib-python==4.7.0.68
+mediapipe==0.10.10
+scikit-image==0.21.0
+
+# 모델/런타임 (PyTorch는 설치 스크립트가 cu117 휠 자동 선택)
+torch==1.13.1
+torchvision==0.14.1
+torchmetrics==0.11.4
+lightning==1.9.5
+einops==0.6.1
+
+# 고급 Optical Flow (딥 OF)
+ptlflow==0.3.2
+timm==0.9.16
+tabulate==0.9.0
+kaleido==0.2.1
+pypng==0.20220715.0
+tensorboard==2.15.1
+
+# rPPG 및 분해
+pyVHR==2.0
+pyts==0.13.0
+emd==0.6.2
+pyEDFlib==0.1.32
+
+# 리포팅/메트릭
+prettytable==3.8.0
+plotly==5.3.1
+
+# SOMATA 런타임 의존성 (로컬 패키지 설치는 setup.sh가 처리)
+cmdstanpy
+codetiming
+colorcet
+joblib
+kneed
+mne
+spectrum
+statsmodels
+
+# 주의
+# - TensorFlow/TVM은 Py 3.10에서 환경별 제약이 커 기본에서 제외했습니다.
+#   필요 시 CPU 용도 기준 예: tensorflow==2.13.* (코드 호환성 확인 필요)
+# - MAHNOB(BDF) 로더는 pybdf 사용. 플랫폼 제약이 있어 기본 설치에서 제외.

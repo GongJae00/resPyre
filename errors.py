@@ -1,5 +1,9 @@
 import numpy as np
-import plotly.graph_objects as go
+
+try:
+    import plotly.graph_objects as go
+except ModuleNotFoundError:
+    go = None  # Optional dependency used only for interactive plots
 
 def getErrors(bpmES, bpmGT, timesES, timesGT, metrics):
     """ Computes various error/quality measures (multiple time windows case)"""
@@ -18,6 +22,8 @@ def getErrors(bpmES, bpmGT, timesES, timesGT, metrics):
             e = MAPEerror(bpmES, bpmGT, timesES, timesGT)
         elif m == 'MAX':
             e = MAXError(bpmES, bpmGT, timesES, timesGT)
+        elif m == 'CORR':
+            e = PearsonCorr(bpmES, bpmGT, timesES, timesGT)
         elif m == 'PCC':
             e = PearsonCorr(bpmES, bpmGT, timesES, timesGT)
         elif m == 'CCC':
@@ -89,9 +95,16 @@ def PearsonCorr(bpmES, bpmGT, timesES=None, timesGT=None):
         return np.nan
 
     CC = np.zeros(n)
+    eps = 1e-8
     for c in range(n):
-        # -- corr
-        r, p = stats.pearsonr(diff[c, :]+bpmES[c, :], bpmES[c, :])
+        x = diff[c, :] + bpmES[c, :]
+        y = bpmES[c, :]
+        if np.std(x) < eps or np.std(y) < eps:
+            # Constant input -> correlation undefined
+            # Avoid scipy ConstantInputWarning / numpy divide warnings
+            CC[c] = np.nan
+            continue
+        r, _ = stats.pearsonr(x, y)
         CC[c] = r
     return round(float(CC),2)
 
@@ -106,9 +119,15 @@ def LinCorr(bpmES, bpmGT, timesES=None, timesGT=None):
         return np.nan
 
     CCC = np.zeros(n)
+    eps = 1e-8
     for c in range(n):
+        x = bpmES[c, :]
+        y = diff[c, :] + bpmES[c, :]
+        if np.std(x) < eps or np.std(y) < eps:
+            CCC[c] = np.nan
+            continue
         # -- Lin's Concordance Correlation Coefficient
-        ccc = concordance_correlation_coefficient(bpmES[c, :], diff[c, :]+bpmES[c, :])
+        ccc = concordance_correlation_coefficient(x, y)
         CCC[c] = ccc
     return round(float(CCC),2)
 
@@ -120,6 +139,10 @@ def printErrors(RMSE, MAE, MAX, PCC, CCC):
 
 def displayErrors(bpmES, bpmGT, timesES=None, timesGT=None):
     """"Plots errors"""
+    if go is None:
+        raise ImportError(
+            "Plotly is required for displayErrors(), but the 'plotly' package is not installed."
+        )
     if type(bpmES) == list:
         bpmES = np.expand_dims(bpmES, axis=0)
     if type(bpmES) == np.ndarray:
@@ -196,6 +219,9 @@ def bpm_diff(bpmES, bpmGT, timesES=None, timesGT=None, normalize=False):
     return diff
 
 def concordance_correlation_coefficient(bpm_true, bpm_pred):
+    # Guard against constant inputs
+    if np.std(bpm_true) < 1e-8 or np.std(bpm_pred) < 1e-8:
+        return np.nan
     cor=np.corrcoef(bpm_true, bpm_pred)[0][1]
     mean_true = np.mean(bpm_true)
     mean_pred = np.mean(bpm_pred)
@@ -210,5 +236,3 @@ def concordance_correlation_coefficient(bpm_true, bpm_pred):
     denominator = var_true + var_pred + (mean_true - mean_pred)**2
 
     return numerator/denominator
-
-

@@ -161,3 +161,6 @@ cython_debug/
 #.idea/
 results/
 ptlflow_logs/
+
+external/
+notes/

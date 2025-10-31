@@ -148,9 +148,12 @@ datasets = [NewDataset()]
 extract_respiration(datasets, methods, "results/")
 ```
 
-## Requirements
+## Paths & Requirements
 
-Use `setup/setup.sh` for a reproducible environment (single unified requirements file `setup/requirements.txt`).
+- **Datasets**: By default the code looks under `<repo>/dataset/` (e.g., `dataset/COHFACE/<subject>/<trial>`). To point elsewhere, set `RESPIRE_DATA_DIR=/absolute/path/to/your/datasets` before running `run_all.py`.
+- **Results**: Outputs live under `results/<DATASET>_<methods>/...` (e.g., `results/COHFACE_OF_DoF_profile1D/cohface_1_0.pkl`). `-d custom_dir` behaves the same way but under your custom base.
+- **MAHNOB dependency**: Reading MAHNOB ground-truth BDF files requires `pyEDFlib` (installed via `setup/requirements.txt`). If you use a different reader, edit `MAHNOB.load_gt` accordingly.
+- **Environment**: Use `setup/setup.sh` (single `setup/requirements.txt`). Run `eval "$(python setup/auto_profile.py)"` beforehand to set `DEVICE`/`NUM_WORKERS` 등 런타임 변수; `run_all.py` 는 `DEVICE` 값(`cuda:0`, `cuda:1`, `cpu` 등)에 맞춰 OF_Deep 등의 GPU 사용을 자동 설정합니다.
 
 Quickstart:
 
