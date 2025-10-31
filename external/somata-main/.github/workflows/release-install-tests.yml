@@ -1,0 +1,129 @@
+name: Release install
+
+on:
+  workflow_dispatch:
+  release:
+    types: [released]
+  push:
+    branches:
+      - main
+
+env:
+  PACKAGE_NAME: somata
+  RELEASE_HTTP: https://github.com/mh105/somata/releases/latest
+
+jobs:
+  pip-install:
+    name: pip-install-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: "Create environment for 'pip install' on Unix"
+      if: runner.os != 'Windows'
+      uses: mamba-org/setup-micromamba@v1
+      with:
+        environment-name: pip_env
+        create-args:
+          pip
+          cmdstanpy  # avoids having to run 'install_cmdstan' after pip install
+
+    - name: "Create environment for 'pip install' on Windows"
+      if: runner.os == 'Windows'
+      uses: mamba-org/setup-micromamba@v1
+      with:
+        environment-name: pip_env
+        create-args:
+          pip
+          cmdstanpy
+          numpy<2
+          spectrum  # avoids building 'spectrum' on Windows that requires VC++ v14+
+
+    - name: "- Pip install ${{ env.PACKAGE_NAME }}"
+      run: pip install ${{ env.PACKAGE_NAME }}
+
+    - name: "- Pip list"
+      run: pip list
+
+    - name: "- Get the latest release version"
+      run: |
+        python --version
+        latest_version=$(python -c "import requests; url = '${{ env.RELEASE_HTTP }}'; r = requests.get(url); print(r.url.split('/')[-1])" | awk '{print substr($0, 2)}')
+        if [ -n "$latest_version" ]; then
+          echo "latest_version extracted from GitHub releases: $latest_version"
+          echo "latest_version=$latest_version" >> $GITHUB_ENV
+        else
+          echo "failed to retrieve latest_version."
+          exit 1 
+        fi
+
+    - name: "- Verify installed package version"
+      run: |
+        installed_version=$(pip show ${{ env.PACKAGE_NAME }} | grep Version | awk '{print $2}')
+        if [ "$installed_version" != "${{ env.latest_version }}" ]; then
+          echo "Installed version from PyPI ($installed_version) does not match the latest release version on GitHub (${{ env.latest_version }})."
+          exit 1
+        else
+          echo "Installed version from PyPI ($installed_version) matches the latest release version on GitHub (${{ env.latest_version }})."
+        fi
+
+    - name: "- Run tests with pytest"
+      run: |
+        pip install pytest
+        pytest -vv
+
+  conda-install:
+    name: conda-install-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: "Install ${{ env.PACKAGE_NAME }} with 'conda create'"
+      uses: mamba-org/setup-micromamba@v1
+      with:
+        environment-name: conda_env
+        create-args:
+          -c pytorch
+          -c conda-forge
+          ${{ env.PACKAGE_NAME }}
+
+    - name: "- Get the latest release version"
+      run: |
+        python --version
+        latest_version=$(python -c "import requests; url = '${{ env.RELEASE_HTTP }}'; r = requests.get(url); print(r.url.split('/')[-1])" | awk '{print substr($0, 2)}')
+        if [ -n "$latest_version" ]; then
+          echo "latest_version extracted from GitHub releases: $latest_version"
+          echo "latest_version=$latest_version" >> $GITHUB_ENV
+        else
+          echo "failed to retrieve latest_version."
+          exit 1 
+        fi
+
+    - name: "- Verify installed package version"
+      run: |
+        installed_version=$(micromamba list ${{ env.PACKAGE_NAME }} | grep ${{ env.PACKAGE_NAME }} | awk '{print $2}')
+        if [ "$installed_version" != "${{ env.latest_version }}" ]; then
+          echo "Installed version from conda-forge ($installed_version) does not match the latest release version on GitHub (${{ env.latest_version }})."
+          exit 1
+        else
+          echo "Installed version from conda-forge ($installed_version) matches the latest release version on GitHub (${{ env.latest_version }})."
+        fi
+
+    - name: "- Run tests with pytest"
+      run: |
+        micromamba install pytest
+        pytest -vv
