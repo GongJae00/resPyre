@@ -1,5 +1,9 @@
 import os
 import argparse
+import json
+import hashlib
+import shutil
+import copy
 from pathlib import Path
 import numpy as np
 from scipy import signal
@@ -107,7 +111,9 @@ class COHFACE(DatasetBase):
 		super().__init__()
 		self.name = 'cohface'
 		self.path = self.resolve('COHFACE') + os.sep
-		self.fs_gt = 32
+		self._target_fs_gt = 32.0
+		self.fs_gt = None
+		self._raw_fs_gt = None
 		self.data = []
 
 	def load_dataset(self):
@@ -139,12 +145,30 @@ class COHFACE(DatasetBase):
 	def load_gt(self, trial_path):
 		import h5py
 
-		#Load GT
 		import os
-		f = h5py.File(os.path.join(trial_path, 'data.hdf5'), 'r')
-		gt = np.array(f['respiration'])
-		gt = gt[np.arange(0, len(gt), 8)] # ???
-		return gt
+		with h5py.File(os.path.join(trial_path, 'data.hdf5'), 'r') as f:
+			resp = f['respiration']
+			raw_gt = np.array(resp)
+			raw_fs = None
+			for key in ('fs', 'frequency', 'sampling_frequency', 'sample_rate', 'samplingrate'):
+				if key in resp.attrs:
+					raw_fs = float(resp.attrs[key])
+					break
+			if raw_fs is None:
+				raw_fs = self._raw_fs_gt or 256.0
+			self._raw_fs_gt = raw_fs
+
+		target_fs = self._target_fs_gt
+		decim = max(1, int(round(raw_fs / target_fs)))
+		effective_fs = float(raw_fs / decim)
+		if decim > 1:
+			gt = raw_gt[::decim]
+		else:
+			gt = raw_gt
+
+		if self.fs_gt is None or abs(self.fs_gt - effective_fs) > 1e-6:
+			self.fs_gt = effective_fs
+		return gt.astype(np.float32)
 
 	def extract_ROI(self, video_path, region='chest'):
 		if region == 'chest':
@@ -460,11 +484,17 @@ def _dataset_results_dir(results_dir, dataset_name):
 
 
 def _method_token(method_name):
-	if method_name.startswith('OF_Model'):
-		return 'OF'
-	if method_name.startswith('profile1D '):
-		return 'profile1D'
-	return method_name.replace(' ', '_').replace('-', '_')
+	name = method_name.strip()
+	lname = name.lower()
+	if lname in ('of_model', 'of', 'of_farneback'):
+		return 'of_farneback'
+	if lname == 'dof':
+		return 'dof'
+	if lname.startswith('profile1d'):
+		return lname.replace(' ', '_')
+	if '__' in name:
+		return name.replace(' ', '_')
+	return name.replace(' ', '_').replace('-', '_')
 
 
 def _method_suffix(methods):
@@ -476,8 +506,53 @@ def _method_suffix(methods):
 			continue
 		seen.add(token)
 		tokens.append(token)
-	return '_'.join(tokens)
+	suffix = '_'.join(tokens)
+	if len(suffix) <= 64:
+		return suffix
+	digest = hashlib.sha1(suffix.encode('utf-8')).hexdigest()[:10]
+	return f"{len(tokens)}m_{digest}"
 
+
+def _sanitize_run_label(label):
+	if not label:
+		return None
+	label = label.strip()
+	if not label:
+		return None
+	sanitized = ''.join(c if c.isalnum() or c in ('_', '-') else '_' for c in label)
+	sanitized = sanitized.strip('_-')
+	return sanitized or None
+
+
+def _base_of_method(name):
+	if not name:
+		return ''
+	return name.split('__', 1)[0].lower()
+
+
+def _ensure_dir(path):
+	os.makedirs(path, exist_ok=True)
+	return path
+
+
+def _json_float(value):
+	try:
+		val = float(value)
+	except (TypeError, ValueError):
+		return None
+	if np.isnan(val) or np.isinf(val):
+		return None
+	return val
+
+
+def _json_list(arr, max_len=None):
+	try:
+		iterable = np.asarray(arr).tolist()
+	except Exception:
+		return None
+	if max_len is not None and isinstance(iterable, list) and len(iterable) > max_len:
+		return iterable[:max_len]
+	return iterable
 
 def timed_step(label=None):
 	def decorator(func):
@@ -503,8 +578,39 @@ def _filter_valid_rois(rois):
 
 
 @timed_step('evaluate')
-def evaluate(results_dir, metrics, win_size=30, stride=1, visualize=True):
+def evaluate(
+	results_dir,
+	metrics,
+	win_size=30,
+	stride=1,
+	visualize=True,
+	min_hz=0.08,
+	max_hz=0.5,
+	use_track=False,
+	track_std_min_bpm=0.3,
+	track_unique_min=0.05,
+	track_saturation_max=0.15
+):
 	print('\n> Loading extracted data from ' + results_dir + '...')
+
+	try:
+		track_std_min_bpm = float(track_std_min_bpm)
+	except (TypeError, ValueError):
+		track_std_min_bpm = 0.0
+	track_std_min_bpm = max(0.0, track_std_min_bpm)
+	try:
+		track_unique_min = float(track_unique_min)
+	except (TypeError, ValueError):
+		track_unique_min = 0.0
+	track_unique_min = max(0.0, track_unique_min)
+	try:
+		track_saturation_max = float(track_saturation_max)
+	except (TypeError, ValueError):
+		track_saturation_max = 0.15
+	if track_saturation_max < 0.0:
+		track_saturation_max = 0.0
+	if track_saturation_max > 1.0:
+		track_saturation_max = 1.0
 
 	method_metrics = {}
 
@@ -549,9 +655,13 @@ def evaluate(results_dir, metrics, win_size=30, stride=1, visualize=True):
 		# Extract ground truth data
 		fs_gt = data['fs_gt']
 		gt = data['gt']
+		base_name = os.path.splitext(os.path.basename(filepath))[0]
+		name_parts = base_name.split('_')
+		dataset_slug = name_parts[0] if name_parts else ''
+		trial_key = base_name[len(dataset_slug) + 1:] if dataset_slug and len(base_name) > len(dataset_slug) + 1 else base_name
 
 		# Filter ground truth
-		filt_gt = utils.filter_RW(gt, fs_gt)
+		filt_gt = utils.filter_RW(gt, fs_gt, lo=min_hz, hi=max_hz)
 
 		if win_size == 'video':
 			ws = filt_gt.shape[1] / fs_gt
@@ -564,10 +674,15 @@ def evaluate(results_dir, metrics, win_size=30, stride=1, visualize=True):
 		gt_win, t_gt = utils.sig_windowing(filt_gt, fs_gt, ws, stride=stride)
 
 		# Extract ground truth RPM using Welch with (win_size/1.5)
-		gt_rpm = utils.sig_to_RPM(gt_win, fs_gt, int(ws/1.5), 0.2, 0.5)
+		gt_rpm = utils.sig_to_RPM(gt_win, fs_gt, int(ws/1.5), min_hz, max_hz)
 
 		# Extract estimation data
 		fps = data['fps']
+
+		gt_rpm = np.squeeze(np.asarray(gt_rpm, dtype=np.float64))
+		if gt_rpm.ndim == 0:
+			gt_rpm = gt_rpm.reshape(1)
+		target_len = gt_rpm.shape[-1]
 
 		for i, est in enumerate(data['estimates']):
 
@@ -593,25 +708,179 @@ def evaluate(results_dir, metrics, win_size=30, stride=1, visualize=True):
 			# Filter estimated signal over all dimensions
 			filt_sig = []
 			for d in range(sig.shape[0]):
-				filt_sig.append(utils.filter_RW(sig[d,:], fps))
+				filt_sig.append(utils.filter_RW(sig[d,:], fps, lo=min_hz, hi=max_hz))
 
 			filt_sig = np.vstack(filt_sig)
 
 			if cur_method in ['bss_emd', 'bss_ssa']:
-				filt_sig = utils.select_component(filt_sig, fps, int(ws/1.5), 0.2, 0.5)
+				filt_sig = utils.select_component(filt_sig, fps, int(ws/1.5), min_hz, max_hz)
 
-			sig_rpm = []
-			for d in range(filt_sig.shape[0]):
-				# Apply windowing to the estimation
-				sig_win, t_sig = utils.sig_windowing(filt_sig[d,:], fps, ws, stride=stride)
-				# Extract estimated RPM
-				sig_rpm.append(utils.sig_to_RPM(sig_win, fps, int(ws/1.5), 0.2, 0.5))
+			method_storage_name = est['method']
+			sanitized_method = method_storage_name.replace(' ', '_')
+			sig_rpm_values = None
+			t_sig = None
+			track_used = False
+			degenerate_track = False
+			degenerate_reason = None
+			track_stats = {}
 
-			sig_rpm = np.mean(sig_rpm, axis=0)
+			if use_track:
+				aux_dir = os.path.join(results_dir, 'aux', sanitized_method)
+				aux_file = os.path.join(aux_dir, f"{trial_key}.npz")
+				if os.path.exists(aux_file):
+					try:
+						with np.load(aux_file) as aux_data:
+							if 'track_hz' in aux_data:
+								track_series = np.asarray(aux_data['track_hz'], dtype=np.float64).reshape(-1)
+								if track_series.size:
+									track_series = np.clip(track_series, min_hz, max_hz)
+									track_win, t_sig = utils.sig_windowing(track_series, fps, ws, stride=stride)
+									if track_win:
+										win_array = np.vstack([np.squeeze(w) for w in track_win])
+										sig_rpm_values = np.median(win_array, axis=1) * 60.0
+										track_used = True
+										finite_mask_rpm = np.isfinite(sig_rpm_values)
+										finite_rpm = sig_rpm_values[finite_mask_rpm]
+										if finite_rpm.size:
+											est_std = float(np.std(finite_rpm, dtype=np.float64))
+											unique_vals = np.unique(finite_rpm)
+											nuniq_frac = float(unique_vals.size / max(1, finite_rpm.size))
+											mean_rpm = float(np.mean(finite_rpm))
+										else:
+											est_std = float('nan')
+											nuniq_frac = 0.0
+											mean_rpm = float('nan')
+										finite_track = track_series[np.isfinite(track_series)]
+										if finite_track.size:
+											sat_mask = (finite_track <= (min_hz + 1e-6)) | (finite_track >= (max_hz - 1e-6))
+											sat_frac = float(np.mean(sat_mask))
+										else:
+											sat_frac = 1.0
+										track_stats = {
+											'mean_bpm': mean_rpm if np.isfinite(mean_rpm) else float('nan'),
+											'std_bpm': est_std if np.isfinite(est_std) else float('nan'),
+											'unique_fraction': nuniq_frac,
+											'saturation_fraction': sat_frac,
+											'n_windows': int(sig_rpm_values.size)
+										}
+										trigger_reason = None
+										if not np.isfinite(est_std) or est_std < float(track_std_min_bpm):
+											trigger_reason = 'low_std'
+										elif nuniq_frac < float(track_unique_min):
+											trigger_reason = 'low_unique'
+										elif sat_frac > float(track_saturation_max):
+											trigger_reason = 'high_saturation'
+										if trigger_reason:
+											track_used = False
+											sig_rpm_values = None
+											degenerate_track = True
+											degenerate_reason = trigger_reason
+							if (not track_used) and ('rr_bpm' in aux_data):
+								rr_vals = np.asarray(aux_data['rr_bpm'], dtype=np.float64).reshape(-1)
+								if rr_vals.size:
+									sig_rpm_values = np.full(target_len, rr_vals[-1], dtype=np.float64)
+									t_sig = t_gt
+									track_used = True
+					except Exception as exc:
+						tqdm.write(f"> Warning: failed to read aux track for {method_storage_name}: {exc}")
 
-			e = errors.getErrors(sig_rpm, gt_rpm, t_sig, t_gt, metrics)
+			if track_used and sig_rpm_values is not None and not track_stats:
+				finite_mask_rpm = np.isfinite(sig_rpm_values)
+				finite_rpm = sig_rpm_values[finite_mask_rpm]
+				if finite_rpm.size:
+					est_std = float(np.std(finite_rpm, dtype=np.float64))
+					nuniq_frac = float(np.unique(finite_rpm).size / finite_rpm.size)
+					mean_rpm = float(np.mean(finite_rpm))
+				else:
+					est_std = float('nan')
+					nuniq_frac = 0.0
+					mean_rpm = float('nan')
+				track_stats = {
+					'mean_bpm': mean_rpm if np.isfinite(mean_rpm) else float('nan'),
+					'std_bpm': est_std if np.isfinite(est_std) else float('nan'),
+					'unique_fraction': nuniq_frac,
+					'saturation_fraction': float('nan'),
+					'n_windows': int(sig_rpm_values.size)
+				}
+				if not np.isfinite(est_std) or est_std < float(track_std_min_bpm):
+					degenerate_track = True
+					degenerate_reason = 'low_std'
+					track_used = False
+					sig_rpm_values = None
+				elif nuniq_frac < float(track_unique_min):
+					degenerate_track = True
+					degenerate_reason = 'low_unique'
+					track_used = False
+					sig_rpm_values = None
 
-			method_metrics.setdefault(cur_method, []).append((e))
+			if not track_used:
+				tqdm.write(f"> Warning: track unavailable for {method_storage_name}::{trial_key}, falling back to spectral RPM")
+				sig_rpm_list = []
+				for d in range(filt_sig.shape[0]):
+					# Apply windowing to the estimation
+					sig_win, t_sig = utils.sig_windowing(filt_sig[d,:], fps, ws, stride=stride)
+					# Extract estimated RPM
+					rpm_segment = np.asarray(utils.sig_to_RPM(sig_win, fps, int(ws/1.5), min_hz, max_hz), dtype=np.float64).reshape(-1)
+					sig_rpm_list.append(rpm_segment)
+				if sig_rpm_list:
+					sig_rpm_values = np.mean(np.vstack(sig_rpm_list), axis=0)
+				else:
+					sig_rpm_values = np.zeros(target_len, dtype=np.float64)
+
+			sig_rpm_values = np.asarray(sig_rpm_values, dtype=np.float64).reshape(-1)
+
+			if sig_rpm_values.size and np.any(np.isfinite(sig_rpm_values)):
+				est_mean_val = float(np.nanmean(sig_rpm_values))
+				est_std_val = float(np.nanstd(sig_rpm_values))
+			else:
+				est_mean_val = float('nan')
+				est_std_val = float('nan')
+			if gt_rpm.size and np.any(np.isfinite(gt_rpm)):
+				gt_mean_val = float(np.nanmean(gt_rpm))
+				gt_std_val = float(np.nanstd(gt_rpm))
+			else:
+				gt_mean_val = float('nan')
+				gt_std_val = float('nan')
+			finite_mask_pair = np.isfinite(sig_rpm_values) & np.isfinite(gt_rpm)
+			if finite_mask_pair.sum() >= 2:
+				try:
+					scatter_slope, scatter_intercept = np.polyfit(gt_rpm[finite_mask_pair], sig_rpm_values[finite_mask_pair], 1)
+				except Exception:
+					scatter_slope = scatter_intercept = float('nan')
+			else:
+				scatter_slope = scatter_intercept = float('nan')
+
+			e = errors.getErrors(sig_rpm_values, gt_rpm, t_sig, t_gt, metrics)
+			raw_metrics = e[:-1]
+			pair = e[-1]
+			metric_values = []
+			for val in raw_metrics:
+				try:
+					metric_values.append(float(val))
+				except Exception:
+					try:
+						val_arr = np.atleast_1d(val).astype(float)
+						metric_values.append(float(val_arr.flat[0]))
+					except Exception:
+						metric_values.append(float('nan'))
+			record = {
+				'metrics': metric_values,
+				'pair': pair,
+				'source': 'track' if track_used else 'spectral',
+				'stride': stride,
+				'times_est': np.asarray(t_sig).astype(float) if t_sig is not None else None,
+				'times_gt': np.asarray(t_gt).astype(float) if t_gt is not None else None,
+				'degenerate_track': bool(degenerate_track),
+				'degenerate_reason': degenerate_reason,
+				'track_stats': track_stats,
+				'est_mean': est_mean_val,
+				'est_std': est_std_val,
+				'gt_mean': gt_mean_val,
+				'gt_std': gt_std_val,
+				'scatter_slope': float(scatter_slope) if np.isfinite(scatter_slope) else float('nan'),
+				'scatter_intercept': float(scatter_intercept) if np.isfinite(scatter_intercept) else float('nan')
+			}
+			method_metrics.setdefault(cur_method, []).append(record)
 
 	# Choose metrics output directory (new structure prefers results_dir/metrics)
 	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
@@ -619,14 +888,28 @@ def evaluate(results_dir, metrics, win_size=30, stride=1, visualize=True):
 		fn = 'metrics_1w.pkl'
 	else:
 		fn = 'metrics.pkl'
+	settings_path = os.path.join(metrics_dir, 'eval_settings.json')
+	try:
+		with open(settings_path, 'w') as fp:
+			json.dump({
+				"win_size": win_size,
+				"stride": stride,
+				"min_hz": min_hz,
+				"max_hz": max_hz,
+				"use_track": use_track
+			}, fp, indent=2)
+	except Exception as exc:
+		print(f"> Warning: failed to write evaluation settings ({exc})")
 	# Save the results of the applied methods
+	print(f"> Saving metrics to {os.path.join(metrics_dir, fn)}")
 	with open(os.path.join(metrics_dir, fn), 'wb') as fp:
 		pickle.dump([metrics, method_metrics] , fp)
 		print('> Metrics saved!\n')
 
 	# Save human-readable table and plots (best-effort)
 	try:
-		summaries = _save_metrics_table(metrics_dir, method_metrics, metrics, win_size == 'video')
+		annotation = f"# eval_band [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={use_track}"
+		summaries = _save_metrics_table(metrics_dir, method_metrics, metrics, win_size == 'video', annotation=annotation)
 		if visualize:
 			_generate_plots(results_dir, summaries, metrics, win_size == 'video', stride=stride)
 	except Exception as e:
@@ -646,38 +929,40 @@ def print_metrics(results_dir, unique_window=False):
 	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
 	with open(os.path.join(metrics_dir, fn), 'rb') as f: 
 		metrics, method_metrics = pickle.load(f)
+	settings_path = os.path.join(metrics_dir, 'eval_settings.json')
+	if os.path.exists(settings_path):
+		try:
+			with open(settings_path, 'r') as fp:
+				eval_settings = json.load(fp)
+			min_hz = eval_settings.get('min_hz')
+			max_hz = eval_settings.get('max_hz')
+			use_track = eval_settings.get('use_track')
+			if min_hz is not None and max_hz is not None:
+				print(f"Evaluation band: [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={bool(use_track)}\n")
+		except Exception:
+			pass
 
-	headers = ['Method'] + metrics
+	summaries = _summaries_with_samples(method_metrics, metrics, unique_window)
+
+	if unique_window:
+		headers = ['Method', 'RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+	else:
+		headers = ['Method'] + metrics
 	table_rows = []
 
-	for method, metrics_value in method_metrics.items():
-
-		#import code; code.interact(local=locals())
-
+	for method, summary in summaries.items():
+		values = summary['values']
 		if unique_window:
-			from errors import RMSEerror, MAEerror, MAPEerror, PearsonCorr, LinCorr
-			bpmsEst = np.stack([np.squeeze(metric[-1][0]) for metric in metrics_value])[np.newaxis,:]
-			bpmsGT = np.stack([np.squeeze(metric[-1][1]) for metric in metrics_value])		
-			rmse = RMSEerror(bpmsEst, bpmsGT)
-			mae = MAEerror(bpmsEst, bpmsGT)
-			mape = MAPEerror(bpmsEst, bpmsGT)
-			corr = PearsonCorr(bpmsEst, bpmsGT)
-			pcc = corr
-			ccc = LinCorr(bpmsEst, bpmsGT)		
-			vals = [rmse, mae, mape, corr, pcc, ccc]
-			formatted_vals = [_format_scalar(v) for v in vals]
+			row_vals = [method]
+			for key in ['RMSE','MAE','MAPE','CORR','PCC','CCC']:
+				row_vals.append(_format_scalar(values.get(key, float('nan'))))
 		else:
-			vals = []
-			for i, m in enumerate(metrics):
-				# 원본 구현은 중앙값(robust)을 사용
-				avg = np.nanmedian([metric[i] for metric in metrics_value])
-				std = np.nanstd([metric[i] for metric in metrics_value])
-				mean_txt = _format_scalar(avg)
-				std_txt = _format_scalar(std, decimals=2)
-				vals.append(f"{mean_txt} ({std_txt})")
-			formatted_vals = vals
-
-		table_rows.append([method] + formatted_vals)
+			row_vals = [method]
+			for metric in metrics:
+				med = values.get(metric, float('nan'))
+				std = summary['variability'].get(f'{metric}_std', float('nan'))
+				row_vals.append(f"{_format_scalar(med)} ({_format_scalar(std, decimals=2)})")
+		table_rows.append(row_vals)
 
 	table_str = _render_table(headers, table_rows)
 
@@ -691,14 +976,28 @@ def print_metrics(results_dir, unique_window=False):
 
 
 @timed_step('extract_respiration')
-def extract_respiration(datasets, methods, results_dir):
+def extract_respiration(datasets, methods, results_dir, run_label=None):
 	os.makedirs(results_dir, exist_ok=True)
 	method_suffix = _method_suffix(methods)
+	sanitized_label = _sanitize_run_label(run_label) if run_label else None
+	single_dataset = len(datasets) == 1
 
 	for dataset in datasets:
-		dir_name = f"{dataset.name.upper()}_{method_suffix}"
+		if sanitized_label:
+			if single_dataset:
+				dir_name = sanitized_label
+			else:
+				dir_name = f"{sanitized_label}_{dataset.name.upper()}"
+		else:
+			dir_name = f"{dataset.name.upper()}_{method_suffix}"
 		dataset_results_dir = _dataset_results_dir(results_dir, dir_name)
 		data_dir = os.path.join(dataset_results_dir, 'data')
+		manifest_path = os.path.join(dataset_results_dir, 'methods.json')
+		try:
+			with open(manifest_path, 'w') as fp:
+				json.dump([m.name for m in methods], fp, indent=2)
+		except Exception as exc:
+			print(f"> Warning: failed to write methods manifest ({exc})")
 
 		dataset.load_dataset()
 		# Loop over the dataset
@@ -706,20 +1005,23 @@ def extract_respiration(datasets, methods, results_dir):
 
 			if 'trial' in d.keys(): 
 				outfilename = os.path.join(data_dir, dataset.name + '_' + d['subject'] + '_' + d['trial'] + '.pkl')
+				trial_key = f"{d['subject']}_{d['trial']}"
 			else:
 				outfilename = os.path.join(data_dir, dataset.name + '_' + d['subject'] + '.pkl')
+				trial_key = d['subject']
 
 			if os.path.exists(outfilename):
 				tqdm.write("> File %s already exists! Skipping..." % outfilename)
 				continue
 
 			_, d['fps'] = utils.get_vid_stats(d['video_path'])
+			d['trial_key'] = trial_key
 
 			results = {'video_path': d['video_path'],
-					   'fps': d['fps'],
-					   'gt' : d['gt'],
-					   'fs_gt': dataset.fs_gt,
-					   'estimates': [] }
+			           'fps': d['fps'],
+			           'gt' : d['gt'],
+			           'fs_gt': float(dataset.fs_gt) if dataset.fs_gt is not None else None,
+			           'estimates': [] }
 
 			if 'trial' in d.keys(): 
 				tqdm.write("> Processing video %s/%s\n> fps: %d" % (d['subject'], d['trial'], d['fps']))
@@ -731,6 +1033,8 @@ def extract_respiration(datasets, methods, results_dir):
 				# Apply individual method
 				tqdm.write("> Applying method %s ..." % m.name)
 				skip_method = False
+				aux_dir = os.path.join(dataset_results_dir, 'aux', m.name.replace(' ', '_'))
+				d['aux_save_dir'] = aux_dir
 
 				if m.data_type == 'chest':
 					if not d['chest_rois']:
@@ -759,6 +1063,8 @@ def extract_respiration(datasets, methods, results_dir):
 				results['estimates'].append({'method': m.name, 'estimate': estimate})
 
 			# release some memory between videos
+			d.pop('aux_save_dir', None)
+			d.pop('trial_key', None)
 			d['chest_rois'] = []
 			d['face_rois'] = []
 			d['rppg_obj'] = None
@@ -776,23 +1082,38 @@ def _summaries_with_samples(method_metrics, metrics, unique_window):
 	if unique_window:
 		from errors import RMSEerror, MAEerror, MAPEerror, PearsonCorr, LinCorr
 	for method, records in method_metrics.items():
-		sample_est = None
-		sample_gt = None
-		if records:
-			try:
-				sample_est = np.atleast_1d(np.squeeze(records[0][-1][0])).astype(float)
-				sample_gt = np.atleast_1d(np.squeeze(records[0][-1][1])).astype(float)
-			except Exception:
-				sample_est = sample_gt = None
+		if not records:
+			summaries[method] = {
+				'values': {m: float('nan') for m in metrics},
+				'variability': {f'{m}_std': float('nan') for m in metrics},
+				'sample': {'est': None, 'gt': None},
+				'source': 'unknown',
+				'record': None
+			}
+			continue
+		first_record = records[0]
+		pair = first_record.get('pair')
+		try:
+			sample_est = np.atleast_1d(np.squeeze(pair[0])).astype(float) if pair is not None else None
+			sample_gt = np.atleast_1d(np.squeeze(pair[1])).astype(float) if pair is not None else None
+		except Exception:
+			sample_est = sample_gt = None
+
 		values = {}
 		variability = {}
 		if unique_window:
 			est_vals = []
 			gt_vals = []
 			for record in records:
-				est = np.atleast_1d(np.squeeze(record[-1][0])).astype(float)
-				gt = np.atleast_1d(np.squeeze(record[-1][1])).astype(float)
-				n = min(est.shape[-1] if est.ndim else 1, gt.shape[-1] if gt.ndim else 1)
+				pair = record.get('pair')
+				if pair is None:
+					continue
+				try:
+					est = np.atleast_1d(np.squeeze(pair[0])).astype(float)
+					gt = np.atleast_1d(np.squeeze(pair[1])).astype(float)
+				except Exception:
+					continue
+				n = min(est.shape[-1] if est.ndim else est.size, gt.shape[-1] if gt.ndim else gt.size)
 				if n == 0:
 					continue
 				est_vals.append(est.reshape(-1)[:n])
@@ -808,19 +1129,32 @@ def _summaries_with_samples(method_metrics, metrics, unique_window):
 				values['PCC'] = corr
 				values['CCC'] = LinCorr(est_concat, gt_concat)
 			else:
-				values = {k: float('nan') for k in ['RMSE','MAE','MAPE','CORR','PCC','CCC']}
+				for key in ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']:
+					values[key] = float('nan')
 		else:
 			for idx, metric_name in enumerate(metrics):
-				data = [record[idx] for record in records]
-				# 중앙값(robust)으로 요약
-				med = np.nanmedian(data)
-				std = np.nanstd(data)
-				values[metric_name] = float(med)
-				variability[f'{metric_name}_std'] = float(std)
+				data = []
+				for record in records:
+					vals = record.get('metrics', [])
+					if idx < len(vals):
+						data.append(vals[idx])
+				finite_data = [float(d) for d in data if isinstance(d, (int, float, np.floating)) and np.isfinite(d)]
+				if finite_data:
+					arr = np.asarray(finite_data, dtype=np.float64)
+					med = float(np.median(arr))
+					std = float(np.std(arr, dtype=np.float64))
+				else:
+					med = float('nan')
+					std = float('nan')
+				values[metric_name] = float(med) if not np.isnan(med) else float('nan')
+				variability[f'{metric_name}_std'] = float(std) if not np.isnan(std) else float('nan')
+
 		summaries[method] = {
 			'values': values,
 			'variability': variability,
-			'sample': {'est': sample_est, 'gt': sample_gt}
+			'sample': {'est': sample_est, 'gt': sample_gt},
+			'source': first_record.get('source', 'unknown'),
+			'record': first_record
 		}
 	return summaries
 
@@ -862,7 +1196,7 @@ def _render_table(headers, rows):
 
 
 
-def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window):
+def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window, annotation=None):
 	"""Save a pretty metrics summary table to text for reporting."""
 	summaries = _summaries_with_samples(method_metrics, metrics, unique_window)
 	if unique_window:
@@ -890,6 +1224,8 @@ def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window):
 
 	try:
 		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
+			if annotation:
+				fp.write(annotation.rstrip() + "\n")
 			fp.write(table_str + "\n")
 	except Exception:
 		pass
@@ -900,8 +1236,21 @@ def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
 	import matplotlib.pyplot as plt
 	from scipy import signal
 
-	plots_dir = os.path.join(results_dir, 'plots') if os.path.isdir(os.path.join(results_dir, 'plots')) else results_dir
-	os.makedirs(plots_dir, exist_ok=True)
+	plots_dir = _ensure_dir(os.path.join(results_dir, 'plots'))
+	replot_root = _ensure_dir(os.path.join(results_dir, 'replot'))
+	print(f"> replot root: {replot_root}")
+
+	settings_path = os.path.join(results_dir, 'metrics', 'eval_settings.json')
+	eval_meta = {}
+	if os.path.exists(settings_path):
+		try:
+			with open(settings_path, 'r') as fp:
+				eval_meta = json.load(fp)
+		except Exception as exc:
+			print(f"> Warning: failed to load eval settings ({exc})")
+	min_hz = eval_meta.get('min_hz')
+	max_hz = eval_meta.get('max_hz')
+	use_track = eval_meta.get('use_track')
 
 	methods = list(summaries.keys())
 	if methods:
@@ -920,76 +1269,260 @@ def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
 			plt.savefig(os.path.join(plots_dir, f'{met}.png'))
 			plt.close()
 
+	aggregate_payload = []
+
 	for method, summary in summaries.items():
 		sample = summary.get('sample', {})
+		record = summary.get('record')
 		est = sample.get('est')
 		gt = sample.get('gt')
-		if est is None or gt is None:
+		if est is None or gt is None or record is None:
 			continue
-		est = np.atleast_1d(est).astype(float)
-		gt = np.atleast_1d(gt).astype(float)
-		n = min(est.shape[-1], gt.shape[-1]) if est.ndim and gt.ndim else 0
+		try:
+			est = np.atleast_1d(np.squeeze(est)).astype(float)
+			gt = np.atleast_1d(np.squeeze(gt)).astype(float)
+		except Exception:
+			continue
+		n = min(est.size, gt.size)
 		if n < 2:
 			continue
-		# Scatter
+		est = est[:n]
+		gt = gt[:n]
+		valid_mask = ~(np.isnan(est) | np.isnan(gt))
+		est_valid = est[valid_mask]
+		gt_valid = gt[valid_mask]
+		n_valid = est_valid.size
+		if n_valid < 2:
+			continue
+
+		base = _base_of_method(method)
+		base_dir = _ensure_dir(os.path.join(replot_root, base))
+		method_dir = os.path.join(base_dir, method)
+		if os.path.isdir(method_dir):
+			shutil.rmtree(method_dir)
+		_ensure_dir(method_dir)
+
+		source = summary.get('source', 'unknown')
+
+		# Scatter statistics
+		try:
+			r = float(np.corrcoef(gt_valid, est_valid)[0, 1])
+		except Exception:
+			r = float('nan')
+		try:
+			slope, intercept = np.polyfit(gt_valid, est_valid, 1)
+		except Exception:
+			slope = intercept = float('nan')
+		r2 = r * r if not np.isnan(r) else float('nan')
+		scatter_info = {
+			'pearson_r': _json_float(r),
+			'slope': _json_float(slope),
+			'intercept': _json_float(intercept),
+			'r2': _json_float(r2),
+			'n': int(n_valid)
+		}
+
+		# Time-domain stats
+		diff = est_valid - gt_valid
+		rpm_rmse = np.sqrt(np.nanmean(diff ** 2)) if n_valid > 0 else float('nan')
+		abs_err = np.abs(diff)
+		p50_err = np.nanmedian(abs_err) if n_valid > 0 else float('nan')
+		effective_stride = record.get('stride', stride)
+		if effective_stride is None:
+			effective_stride = stride
+		fs_rpm = (1.0 / effective_stride) if effective_stride and effective_stride > 0 else None
+		gt_mean = np.nanmean(gt_valid) if n_valid > 0 else float('nan')
+		est_mean = np.nanmean(est_valid) if n_valid > 0 else float('nan')
+		gt_std = np.nanstd(gt_valid) if n_valid > 0 else float('nan')
+		est_std = np.nanstd(est_valid) if n_valid > 0 else float('nan')
+		rpm_info = {
+			'len': int(n_valid),
+			'fs_rpm': _json_float(fs_rpm),
+			'gt_mean': _json_float(gt_mean),
+			'est_mean': _json_float(est_mean),
+			'gt_std': _json_float(gt_std),
+			'est_std': _json_float(est_std),
+			'rmse_series': _json_float(rpm_rmse),
+			'p50_abs_err': _json_float(p50_err)
+		}
+
+		# Welch spectra
+		welch_info = None
+		if effective_stride and effective_stride > 0 and n_valid >= 4:
+			fs = 1.0 / effective_stride
+			nperseg = min(n_valid, 256)
+			try:
+				f_est, psd_est = signal.welch(est_valid, fs=fs, nperseg=nperseg)
+				f_gt, psd_gt = signal.welch(gt_valid, fs=fs, nperseg=nperseg)
+				peak_hz_est = f_est[int(np.argmax(psd_est))] if f_est.size else float('nan')
+				peak_hz_gt = f_gt[int(np.argmax(psd_gt))] if f_gt.size else float('nan')
+				if min_hz is not None and max_hz is not None:
+					bw_mask_est = (f_est >= min_hz) & (f_est <= max_hz)
+					bw_mask_gt = (f_gt >= min_hz) & (f_gt <= max_hz)
+				else:
+					bw_mask_est = slice(None)
+					bw_mask_gt = slice(None)
+				f_est_band = f_est[bw_mask_est] if isinstance(bw_mask_est, np.ndarray) else f_est
+				psd_est_band = psd_est[bw_mask_est] if isinstance(bw_mask_est, np.ndarray) else psd_est
+				f_gt_band = f_gt[bw_mask_gt] if isinstance(bw_mask_gt, np.ndarray) else f_gt
+				psd_gt_band = psd_gt[bw_mask_gt] if isinstance(bw_mask_gt, np.ndarray) else psd_gt
+				bandpower_est = np.trapz(psd_est_band, f_est_band) if f_est_band.size else float('nan')
+				bandpower_gt = np.trapz(psd_gt_band, f_gt_band) if f_gt_band.size else float('nan')
+				welch_info = {
+					'fs': _json_float(fs),
+					'nperseg': int(nperseg),
+					'peak_hz_est': _json_float(peak_hz_est),
+					'peak_hz_gt': _json_float(peak_hz_gt),
+					'bandpower_est': _json_float(bandpower_est),
+					'bandpower_gt': _json_float(bandpower_gt)
+				}
+				# Welch plot
+				plt.figure(figsize=(8, 4))
+				plt.semilogy(f_gt, psd_gt + 1e-12, label='GT')
+				plt.semilogy(f_est, psd_est + 1e-12, label='Estimate')
+				plt.xlabel('Frequency (Hz)')
+				plt.ylabel('PSD')
+				plt.title(f'{method}: Welch PSD')
+				plt.legend()
+				plt.tight_layout()
+				plt.savefig(os.path.join(method_dir, 'welch.png'))
+				plt.close()
+			except Exception as exc:
+				print(f"> Warning: Welch computation failed for {method}: {exc}")
+				welch_info = None
+		else:
+			welch_info = None
+
+		# Scatter plot
 		plt.figure(figsize=(5, 5))
-		plt.scatter(gt[:n], est[:n], s=6, alpha=0.5)
+		plt.scatter(gt_valid, est_valid, s=6, alpha=0.5)
+		min_lim = np.nanmin([gt_valid.min(), est_valid.min()])
+		max_lim = np.nanmax([gt_valid.max(), est_valid.max()])
+		plt.plot([min_lim, max_lim], [min_lim, max_lim], 'r--', linewidth=1)
 		plt.xlabel('GT (RPM)')
 		plt.ylabel('EST (RPM)')
-		lims = [np.nanmin([gt[:n].min(), est[:n].min()]), np.nanmax([gt[:n].max(), est[:n].max()])]
-		plt.plot(lims, lims, 'r--', linewidth=1)
 		plt.title(f'{method}: GT vs EST')
 		plt.tight_layout()
-		plt.savefig(os.path.join(plots_dir, f'scatter_{method}.png'))
+		plt.savefig(os.path.join(method_dir, 'scatter.png'))
 		plt.close()
+
 		# Time overlay
-		times = np.arange(n) * stride
+		time_step = effective_stride if effective_stride and effective_stride > 0 else 1.0
+		times = np.arange(n_valid) * time_step
 		plt.figure(figsize=(8, 4))
-		plt.plot(times, gt[:n], label='GT', linewidth=1.5)
-		plt.plot(times, est[:n], label='Estimate', linewidth=1.2, alpha=0.8)
+		plt.plot(times, gt_valid, label='GT', linewidth=1.5)
+		plt.plot(times, est_valid, label='Estimate', linewidth=1.2, alpha=0.8)
 		plt.xlabel('Time (s)')
 		plt.ylabel('RPM')
 		plt.title(f'{method}: RPM over time')
 		plt.legend()
 		plt.tight_layout()
-		plt.savefig(os.path.join(plots_dir, f'time_{method}.png'))
+		plt.savefig(os.path.join(method_dir, 'time.png'))
 		plt.close()
-		# Welch PSD
-		if stride > 0:
-			fs = 1.0 / stride
-			f_est, psd_est = signal.welch(est[:n], fs=fs, nperseg=min(n, 256))
-			f_gt, psd_gt = signal.welch(gt[:n], fs=fs, nperseg=min(n, 256))
-			plt.figure(figsize=(8, 4))
-			plt.semilogy(f_gt, psd_gt + 1e-12, label='GT')
-			plt.semilogy(f_est, psd_est + 1e-12, label='Estimate')
-			plt.xlabel('Frequency (Hz)')
-			plt.ylabel('PSD')
-			plt.title(f'{method}: Welch PSD')
-			plt.legend()
-			plt.tight_layout()
-			plt.savefig(os.path.join(plots_dir, f'welch_{method}.png'))
-			plt.close()
-		# Bland-Altman
-		diff = est[:n] - gt[:n]
-		mean_vals = 0.5 * (est[:n] + gt[:n])
-		if np.all(np.isnan(diff)):
-			continue
-		mean_diff = float(np.nanmean(diff))
-		sd_diff = float(np.nanstd(diff))
+
+		# Bland-Altman plot
+		mean_vals = 0.5 * (gt_valid + est_valid)
+		mean_diff = np.nanmean(diff)
+		sd_diff = np.nanstd(diff)
 		upper = mean_diff + 1.96 * sd_diff
 		lower = mean_diff - 1.96 * sd_diff
 		plt.figure(figsize=(8, 4))
 		plt.scatter(mean_vals, diff, s=6, alpha=0.5)
-		plt.axhline(mean_diff, color='r', linestyle='--', linewidth=1.2, label='Mean diff')
-		plt.axhline(upper, color='k', linestyle=':', linewidth=1.0, label='±1.96 SD')
-		plt.axhline(lower, color='k', linestyle=':', linewidth=1.0)
+		if not np.isnan(mean_diff):
+			plt.axhline(mean_diff, color='r', linestyle='--', linewidth=1.2, label='Mean diff')
+		if not np.isnan(upper):
+			plt.axhline(upper, color='k', linestyle=':', linewidth=1.0, label='±1.96 SD')
+		if not np.isnan(lower):
+			plt.axhline(lower, color='k', linestyle=':', linewidth=1.0)
 		plt.xlabel('Mean RPM')
 		plt.ylabel('Difference (EST - GT)')
 		plt.title(f'{method}: Bland-Altman')
 		plt.legend()
 		plt.tight_layout()
-		plt.savefig(os.path.join(plots_dir, f'bland_altman_{method}.png'))
+		plt.savefig(os.path.join(method_dir, 'bland_altman.png'))
 		plt.close()
+
+		bland_info = {
+			'mean_diff': _json_float(mean_diff),
+			'sd_diff': _json_float(sd_diff),
+			'loa_lower': _json_float(lower),
+			'loa_upper': _json_float(upper),
+			'n': int(n_valid)
+		}
+
+		record_track_stats = record.get('track_stats') or {}
+		n_windows_track = record_track_stats.get('n_windows', n_valid) if record_track_stats else n_valid
+		try:
+			n_windows_track = int(n_windows_track)
+		except (TypeError, ValueError):
+			n_windows_track = int(n_valid)
+		track_info = {
+			'mean_bpm': _json_float(record_track_stats.get('mean_bpm')),
+			'std_bpm': _json_float(record_track_stats.get('std_bpm')),
+			'unique_fraction': _json_float(record_track_stats.get('unique_fraction')),
+			'saturation_fraction': _json_float(record_track_stats.get('saturation_fraction')),
+			'n_windows': n_windows_track
+		}
+		series_stats = {
+			'est_mean': _json_float(record.get('est_mean')),
+			'est_std': _json_float(record.get('est_std')),
+			'gt_mean': _json_float(record.get('gt_mean')),
+			'gt_std': _json_float(record.get('gt_std')),
+			'slope': _json_float(record.get('scatter_slope')),
+			'intercept': _json_float(record.get('scatter_intercept'))
+		}
+
+		metrics_json = {m: _json_float(summary['values'].get(m, float('nan'))) for m in metrics}
+		var_json = {f'{m}_std': _json_float(summary['variability'].get(f'{m}_std', float('nan'))) for m in metrics}
+		json_payload = {
+			'method': method,
+			'base': base,
+			'n_windows': int(n_valid),
+			'metrics': metrics_json,
+			'metrics_std': var_json,
+			'bland_altman': bland_info,
+			'scatter': scatter_info,
+			'rpm_time': rpm_info,
+			'welch': welch_info,
+			'eval': {
+				'min_hz': _json_float(min_hz),
+				'max_hz': _json_float(max_hz),
+				'use_track': bool(use_track) if isinstance(use_track, bool) else use_track
+			},
+			'source': source,
+			'track': {
+				'degenerate': bool(record.get('degenerate_track', False)),
+				'degenerate_reason': record.get('degenerate_reason'),
+				'stats': track_info
+			},
+			'series_stats': series_stats
+		}
+		json_path = os.path.join(method_dir, 'summary.json')
+		with open(json_path, 'w', encoding='utf-8') as fp:
+			json.dump(json_payload, fp, ensure_ascii=False, indent=2)
+		print(f"> saved {method}/summary.json")
+		aggregate_payload.append({
+			**json_payload,
+			'plots': {
+				'scatter': os.path.join(base, method, 'scatter.png'),
+				'time': os.path.join(base, method, 'time.png'),
+				'welch': os.path.join(base, method, 'welch.png'),
+				'bland_altman': os.path.join(base, method, 'bland_altman.png')
+			}
+		})
+
+	if aggregate_payload:
+		root_summary = {
+			'eval': {
+				'min_hz': _json_float(min_hz),
+				'max_hz': _json_float(max_hz),
+				'use_track': bool(use_track) if isinstance(use_track, bool) else use_track
+			},
+			'methods': aggregate_payload
+		}
+		with open(os.path.join(replot_root, 'summary.json'), 'w', encoding='utf-8') as fp:
+			json.dump(root_summary, fp, ensure_ascii=False, indent=2)
+		print(f"> aggregated summary saved to {os.path.join(replot_root, 'summary.json')}")
 
 
 @timed_step('aggregate_runs')
@@ -1070,7 +1603,10 @@ def aggregate_runs(run_dirs, output_dir, prefer_unique=False):
 	return csv_path
 
 
-def _build_methods(cfg_list):
+def _build_methods(cfg_list, global_cfg=None):
+	osc_defaults = {}
+	if isinstance(global_cfg, dict):
+		osc_defaults = copy.deepcopy(global_cfg.get('oscillator', {})) if 'oscillator' in global_cfg else {}
 	methods = []
 	for item in cfg_list:
 		if isinstance(item, str):
@@ -1081,11 +1617,17 @@ def _build_methods(cfg_list):
 			if not name:
 				raise ValueError("Method entry requires a 'name'")
 			params = item
-		if name == 'OF_Model':
-			methods.append(OF_Model())
-		elif name == 'DoF':
-			methods.append(DoF())
-		elif name == 'profile1D':
+		lname = name.lower()
+
+		if lname in ('of_model', 'of', 'of_farneback'):
+			method = OF_Model()
+			method.name = 'of_farneback'
+			methods.append(method)
+		elif lname == 'dof':
+			method = DoF()
+			method.name = 'dof'
+			methods.append(method)
+		elif lname in ('profile1d', 'profile1d_all'):
 			interps = params.get('interp')
 			if interps is None:
 				target_interps = PROFILE1D_INTERPS
@@ -1096,7 +1638,22 @@ def _build_methods(cfg_list):
 			for interp in target_interps:
 				if interp not in PROFILE1D_INTERPS:
 					raise ValueError(f"Unsupported profile1D interpolation '{interp}'. Supported: {PROFILE1D_INTERPS}")
-				methods.append(profile1D(interp))
+				method = profile1D(interp)
+				method.name = f'profile1d_{interp}'
+				methods.append(method)
+		elif lname.startswith('profile1d_') and lname.split('_')[-1] in PROFILE1D_INTERPS:
+			interp = lname.split('_')[-1]
+			method = profile1D(interp)
+			method.name = f'profile1d_{interp}'
+			methods.append(method)
+		elif '__' in lname:
+			from motion.method_oscillator_wrapped import create_wrapped_method
+			local_params = copy.deepcopy(params)
+			if osc_defaults:
+				local_params.setdefault('oscillator', {})
+				for key, value in osc_defaults.items():
+					local_params['oscillator'].setdefault(key, value)
+			methods.append(create_wrapped_method(lname, local_params))
 		elif name == 'OF_Deep':
 			model = params.get('model', 'raft_small')
 			bs = int(params.get('batch_size', 64))
@@ -1141,11 +1698,20 @@ def _build_datasets(cfg_list):
 		ds.append(dset)
 	return ds
 
-def _derive_run_dirs(results_root, datasets, methods):
+def _derive_run_dirs(results_root, datasets, methods, run_label=None):
 	method_suffix = _method_suffix(methods)
+	sanitized_label = _sanitize_run_label(run_label) if run_label else None
+	single_dataset = len(datasets) == 1
 	run_dirs = []
 	for dataset in datasets:
-		run_dirs.append(os.path.join(results_root, f"{dataset.name.upper()}_{method_suffix}"))
+		if sanitized_label:
+			if single_dataset:
+				dir_name = sanitized_label
+			else:
+				dir_name = f"{sanitized_label}_{dataset.name.upper()}"
+		else:
+			dir_name = f"{dataset.name.upper()}_{method_suffix}"
+		run_dirs.append(os.path.join(results_root, dir_name))
 	return run_dirs
 
 
@@ -1172,6 +1738,7 @@ def main(argv=None):
 	args = parser.parse_args(argv)
 
 	cfg = load_config(args.config)
+	run_label = cfg.get('name') if cfg else None
 
 	# Determine steps
 	if args.step:
@@ -1191,7 +1758,7 @@ def main(argv=None):
 	results_root = os.path.abspath(args.results or cfg['results_dir'])
 	os.makedirs(results_root, exist_ok=True)
 
-	methods = _build_methods(cfg.get('methods', []))
+	methods = _build_methods(cfg.get('methods', []), cfg)
 	datasets = _build_datasets(cfg.get('datasets', []))
 
 	# Runtime device from config (optional)
@@ -1202,6 +1769,12 @@ def main(argv=None):
 	report_cfg = cfg.get('report', {})
 
 	metrics = ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+	min_hz = eval_cfg.get('min_hz', 0.08)
+	max_hz = eval_cfg.get('max_hz', 0.5)
+	use_track = eval_cfg.get('use_track', False)
+	track_std_min_bpm = eval_cfg.get('track_std_min_bpm', 0.3)
+	track_unique_min = eval_cfg.get('track_unique_min', 0.05)
+	track_saturation_max = eval_cfg.get('track_saturation_max', 0.15)
 	win_override = args.win or eval_cfg.get('win_size', 'video')
 	if isinstance(win_override, str) and win_override.lower() == 'video':
 		win_size = 'video'
@@ -1214,7 +1787,7 @@ def main(argv=None):
 	visualize = True
 
 	# Determine run directories for steps other than estimate
-	derived_run_dirs = _derive_run_dirs(results_root, datasets, methods)
+	derived_run_dirs = _derive_run_dirs(results_root, datasets, methods, run_label=run_label)
 	if args.runs:
 		run_dirs = _resolve_paths(results_root, args.runs)
 	else:
@@ -1222,7 +1795,7 @@ def main(argv=None):
 
 	if 'estimate' in steps:
 		print(f"Executing estimate step -> output root: {results_root}")
-		extract_respiration(datasets, methods, results_root)
+		extract_respiration(datasets, methods, results_root, run_label=run_label)
 
 	if 'evaluate' in steps:
 		print("Executing evaluate step")
@@ -1231,14 +1804,50 @@ def main(argv=None):
 				print(f"> Warning: run directory {run_dir} not found, skipping evaluation")
 				continue
 			print(f"> Evaluating run: {run_dir}")
-			evaluate(run_dir, metrics, win_size=win_size, stride=stride, visualize=visualize)
+			evaluate(
+				run_dir,
+				metrics,
+				win_size=win_size,
+				stride=stride,
+				visualize=visualize,
+				min_hz=min_hz,
+				max_hz=max_hz,
+				use_track=use_track,
+				track_std_min_bpm=track_std_min_bpm,
+				track_unique_min=track_unique_min,
+				track_saturation_max=track_saturation_max
+			)
 
 	if 'metrics' in steps:
 		print("Executing metrics display step")
 		for run_dir in run_dirs:
-			metrics_dir = os.path.join(run_dir, 'metrics') if os.path.isdir(os.path.join(run_dir, 'metrics')) else run_dir
+			metrics_subdir = os.path.join(run_dir, 'metrics')
+			if os.path.isdir(metrics_subdir):
+				metrics_dir = metrics_subdir
+			else:
+				metrics_dir = run_dir
+			metrics_filename = 'metrics_1w.pkl' if win_size == 'video' else 'metrics.pkl'
+			metrics_path = os.path.join(metrics_dir, metrics_filename)
+			if not os.path.exists(metrics_path):
+				print(f"> Metrics file missing for {run_dir}; running evaluate first.")
+				evaluate(
+					run_dir,
+					metrics,
+					win_size=win_size,
+					stride=stride,
+					visualize=True,
+					min_hz=min_hz,
+					max_hz=max_hz,
+					use_track=use_track,
+					track_std_min_bpm=track_std_min_bpm,
+					track_unique_min=track_unique_min,
+					track_saturation_max=track_saturation_max
+				)
 			unique_window = os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
 			print(f"\n== Metrics for {run_dir} ==")
+			if not os.path.exists(metrics_path):
+				print(f"> Metrics still unavailable for {run_dir}. Please rerun evaluate step.")
+				continue
 			print_metrics(run_dir, unique_window=unique_window)
 
 	if 'report' in steps:
