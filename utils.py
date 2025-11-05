@@ -294,7 +294,7 @@ def average_filter(sig, win_length = 5):
         res.append(1/(1+2*win_length)*window)
     return res
 
-def filter_RW(sig, fps, lo=0.1, hi=0.5):
+def filter_RW(sig, fps, lo=0.08, hi=0.5):
     """
     This method performs posptprocessing steps of fiedler methods; the postprocessing process performs on the signal a normalization, computes the gradient of the signal and applies a band-pass filter
 
