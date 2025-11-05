@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 
 try:
     import plotly.graph_objects as go
@@ -84,52 +85,80 @@ def MAXError(bpmES, bpmGT, timesES=None, timesGT=None):
 
 
 def PearsonCorr(bpmES, bpmGT, timesES=None, timesGT=None):
-    """ Computes PCC """
+    """Computes Pearson correlation coefficient with guards against degenerate input."""
     from scipy import stats
 
-    diff = bpm_diff(bpmES, bpmGT, timesES, timesGT)
-    n, m = diff.shape  # n = num channels, m = bpm length
+    bpmES_arr = np.asarray(bpmES, dtype=np.float64)
+    if bpmES_arr.ndim == 1:
+        bpmES_arr = np.expand_dims(bpmES_arr, axis=0)
+    bpmGT_arr = np.asarray(bpmGT, dtype=np.float64).reshape(-1)
 
+    diff = bpm_diff(bpmES_arr, bpmGT_arr, timesES, timesGT)
+    n, m = diff.shape
     if m < 2:
-        print('> Warning: Correlation cannot be calculated for signals with len < 2. Returning NaN')
-        return np.nan
+        return float('nan')
 
-    CC = np.zeros(n)
-    eps = 1e-8
+    CC = np.full(n, np.nan, dtype=np.float64)
+    eps = 1e-6
     for c in range(n):
-        x = diff[c, :] + bpmES[c, :]
-        y = bpmES[c, :]
-        if np.std(x) < eps or np.std(y) < eps:
-            # Constant input -> correlation undefined
-            # Avoid scipy ConstantInputWarning / numpy divide warnings
-            CC[c] = np.nan
+        x = diff[c, :] + bpmES_arr[c, :]
+        y = bpmES_arr[c, :]
+        finite_mask = np.isfinite(x) & np.isfinite(y)
+        if np.count_nonzero(finite_mask) < 2:
             continue
-        r, _ = stats.pearsonr(x, y)
-        CC[c] = r
-    return round(float(CC),2)
+        x_valid = x[finite_mask]
+        y_valid = y[finite_mask]
+        sx = np.std(x_valid, dtype=np.float64)
+        sy = np.std(y_valid, dtype=np.float64)
+        if (not np.isfinite(sx)) or (sx < eps) or (not np.isfinite(sy)) or (sy < eps):
+            continue
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', category=RuntimeWarning)
+            try:
+                r, _ = stats.pearsonr(x_valid, y_valid)
+            except Exception:
+                r = np.nan
+        CC[c] = r if np.isfinite(r) else np.nan
+
+    result = CC[0] if CC.size else np.nan
+    if not np.isfinite(result):
+        return float('nan')
+    return round(float(result), 2)
 
 
 def LinCorr(bpmES, bpmGT, timesES=None, timesGT=None):
-    """ Computes CCC """
-    diff = bpm_diff(bpmES, bpmGT, timesES, timesGT)
-    n, m = diff.shape  # n = num channels, m = bpm length
+    """Computes Lin's Concordance Correlation Coefficient with degenerate-input guards."""
+    bpmES_arr = np.asarray(bpmES, dtype=np.float64)
+    if bpmES_arr.ndim == 1:
+        bpmES_arr = np.expand_dims(bpmES_arr, axis=0)
+    bpmGT_arr = np.asarray(bpmGT, dtype=np.float64).reshape(-1)
 
+    diff = bpm_diff(bpmES_arr, bpmGT_arr, timesES, timesGT)
+    n, m = diff.shape
     if m < 2:
-        print('> Warning: Correlation cannot be calculated for signals with len < 2. Returning NaN')
-        return np.nan
+        return float('nan')
 
-    CCC = np.zeros(n)
-    eps = 1e-8
+    CCC = np.full(n, np.nan, dtype=np.float64)
+    eps = 1e-6
     for c in range(n):
-        x = bpmES[c, :]
-        y = diff[c, :] + bpmES[c, :]
-        if np.std(x) < eps or np.std(y) < eps:
-            CCC[c] = np.nan
+        x = bpmES_arr[c, :]
+        y = diff[c, :] + bpmES_arr[c, :]
+        finite_mask = np.isfinite(x) & np.isfinite(y)
+        if np.count_nonzero(finite_mask) < 2:
             continue
-        # -- Lin's Concordance Correlation Coefficient
-        ccc = concordance_correlation_coefficient(x, y)
-        CCC[c] = ccc
-    return round(float(CCC),2)
+        x_valid = x[finite_mask]
+        y_valid = y[finite_mask]
+        sx = np.std(x_valid, dtype=np.float64)
+        sy = np.std(y_valid, dtype=np.float64)
+        if (not np.isfinite(sx)) or (sx < eps) or (not np.isfinite(sy)) or (sy < eps):
+            continue
+        ccc = concordance_correlation_coefficient(x_valid, y_valid)
+        CCC[c] = ccc if np.isfinite(ccc) else np.nan
+
+    result = CCC[0] if CCC.size else np.nan
+    if not np.isfinite(result):
+        return float('nan')
+    return round(float(result), 2)
 
 
 def printErrors(RMSE, MAE, MAX, PCC, CCC):
@@ -218,21 +247,32 @@ def bpm_diff(bpmES, bpmGT, timesES=None, timesGT=None, normalize=False):
                 diff[c, j] = (bpmGT[i]-bpmES[c, j]) / bpmGT[i]
     return diff
 
-def concordance_correlation_coefficient(bpm_true, bpm_pred):
-    # Guard against constant inputs
-    if np.std(bpm_true) < 1e-8 or np.std(bpm_pred) < 1e-8:
+def concordance_correlation_coefficient(series_a, series_b):
+    """Compute Lin's concordance correlation coefficient with robust guards."""
+    arr_a = np.asarray(series_a, dtype=np.float64)
+    arr_b = np.asarray(series_b, dtype=np.float64)
+    finite_mask = np.isfinite(arr_a) & np.isfinite(arr_b)
+    if np.count_nonzero(finite_mask) < 2:
         return np.nan
-    cor=np.corrcoef(bpm_true, bpm_pred)[0][1]
-    mean_true = np.mean(bpm_true)
-    mean_pred = np.mean(bpm_pred)
-    
-    var_true = np.var(bpm_true)
-    var_pred = np.var(bpm_pred)
-    
-    sd_true = np.std(bpm_true)
-    sd_pred = np.std(bpm_pred)
-    
-    numerator = 2*cor*sd_true*sd_pred
-    denominator = var_true + var_pred + (mean_true - mean_pred)**2
-
-    return numerator/denominator
+    a = arr_a[finite_mask]
+    b = arr_b[finite_mask]
+    eps = 1e-6
+    std_a = np.std(a, dtype=np.float64)
+    std_b = np.std(b, dtype=np.float64)
+    if (not np.isfinite(std_a)) or (std_a < eps) or (not np.isfinite(std_b)) or (std_b < eps):
+        return np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', category=RuntimeWarning)
+        corr_matrix = np.corrcoef(a, b)
+    if corr_matrix.shape[0] < 2 or not np.isfinite(corr_matrix[0, 1]):
+        return np.nan
+    rho = corr_matrix[0, 1]
+    mean_a = np.mean(a)
+    mean_b = np.mean(b)
+    var_a = np.var(a)
+    var_b = np.var(b)
+    numerator = 2 * rho * std_a * std_b
+    denominator = var_a + var_b + (mean_a - mean_b) ** 2
+    if denominator == 0 or not np.isfinite(denominator):
+        return np.nan
+    return numerator / denominator

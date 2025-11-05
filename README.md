@@ -50,6 +50,12 @@ The following methods are implemented:
 - [`bss_ssa`](run_all.py): Blind Source Separation with SSA
 - [`bss_emd`](run_all.py): Blind Source Separation with EMD
 
+**Oscillator Heads**
+- Baseline motion estimators (`of_farneback`, `dof`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`) can be paired with four oscillator refinement heads (`kfstd`, `ukffreq`, `spec_ridge`, `pll`) for 20 additional method names such as `of_farneback__kfstd`.
+- Use `configs/cohface_motion_oscillator.json` to run all 25 variants on COHFACE with `python run_all.py --config configs/cohface_motion_oscillator.json --step estimate evaluate metrics`.
+- Each wrapped method writes its smoothed waveform to the main pickle file and stores detailed diagnostics (signal, frequency track, RR summary) under `results/<run_name>/aux/<method>/<trial>.npz` when the config defines a `name` (falling back to the legacy layout otherwise).
+- Evaluation-wide frequency bands are controlled via `eval.min_hz`/`eval.max_hz` (default `0.08–0.5 Hz`), and setting `eval.use_track=true` makes the scorer consume the oscillator-provided `track_hz`/`rr_bpm` instead of a Welch fallback.
+
 ## Supported Datasets 
 
 The code works with the following datasets:
@@ -151,7 +157,8 @@ extract_respiration(datasets, methods, "results/")
 ## Paths & Requirements
 
 - **Datasets**: By default the code looks under `<repo>/dataset/` (e.g., `dataset/COHFACE/<subject>/<trial>`). To point elsewhere, set `RESPIRE_DATA_DIR=/absolute/path/to/your/datasets` before running `run_all.py`.
-- **Results**: Outputs live under `results/<DATASET>_<methods>/...` (e.g., `results/COHFACE_OF_DoF_profile1D/cohface_1_0.pkl`). `-d custom_dir` behaves the same way but under your custom base.
+- **Run directories**: If the JSON config declares `"name"`, outputs are organized under `results/<name>/...`; otherwise the legacy `results/<DATASET>_<methods>/...` folders are used.
+- **Results**: Each dataset still produces pickled artifacts in its run directory (e.g., `results/cohface_motion_oscillator/data/cohface_1_0.pkl`). Passing `-d custom_dir` relocates the base directory while keeping the same structure.
 - **MAHNOB dependency**: Reading MAHNOB ground-truth BDF files requires `pyEDFlib` (installed via `setup/requirements.txt`). If you use a different reader, edit `MAHNOB.load_gt` accordingly.
 - **Environment**: Use `setup/setup.sh` (single `setup/requirements.txt`). Run `eval "$(python setup/auto_profile.py)"` beforehand to set `DEVICE`/`NUM_WORKERS` 등 런타임 변수; `run_all.py` 는 `DEVICE` 값(`cuda:0`, `cuda:1`, `cpu` 등)에 맞춰 OF_Deep 등의 GPU 사용을 자동 설정합니다.
 

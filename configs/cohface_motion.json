@@ -19,7 +19,10 @@
   ],
   "eval": {
     "win_size": 30,
-    "stride": 1
+    "stride": 1,
+    "track_std_min_bpm": 0.3,
+    "track_unique_min": 0.05,
+    "track_saturation_max": 0.15
   },
   "report": {
     "output": "reports/cohface_motion",
