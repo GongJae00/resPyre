@@ -1,0 +1,68 @@
+{
+  "name": "cohface_motion_oscillator",
+  "results_dir": "results",
+  "datasets": [
+    {
+      "name": "COHFACE",
+      "roi": {
+        "chest": {
+          "mp_complexity": 1,
+          "skip_rate": 10
+        }
+      }
+    }
+  ],
+  "methods": [
+    "of_farneback",
+    "dof",
+    "profile1d_linear",
+    "profile1d_quadratic",
+    "profile1d_cubic",
+    "of_farneback__kfstd",
+    "of_farneback__ukffreq",
+    "of_farneback__spec_ridge",
+    "of_farneback__pll",
+    "dof__kfstd",
+    "dof__ukffreq",
+    "dof__spec_ridge",
+    "dof__pll",
+    "profile1d_linear__kfstd",
+    "profile1d_linear__ukffreq",
+    "profile1d_linear__spec_ridge",
+    "profile1d_linear__pll",
+    "profile1d_quadratic__kfstd",
+    "profile1d_quadratic__ukffreq",
+    "profile1d_quadratic__spec_ridge",
+    "profile1d_quadratic__pll",
+    "profile1d_cubic__kfstd",
+    "profile1d_cubic__ukffreq",
+    "profile1d_cubic__spec_ridge",
+    "profile1d_cubic__pll"
+  ],
+  "eval": {
+    "win_size": 30,
+    "stride": 1,
+    "min_hz": 0.08,
+    "max_hz": 0.5,
+    "use_track": true,
+    "track_std_min_bpm": 0.3,
+    "track_unique_min": 0.05,
+    "track_saturation_max": 0.15
+  },
+  "oscillator": {
+    "f_min": 0.08,
+    "f_max": 0.5
+  },
+  "report": {
+    "output": "reports/cohface_motion_oscillator",
+    "unique_window": false
+  },
+  "runtime": {
+    "device": "cpu"
+  },
+  "steps": [
+    "estimate",
+    "evaluate",
+    "metrics"
+  ]
+}

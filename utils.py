@@ -247,7 +247,12 @@ def Welch_rpm(resp, fps, winsize, minHz=0.1, maxHz=0.4, fRes=0.1):
 
     return Pfreqs, Power
 
-def sig_to_RPM(sig, fps, winsize, minHz=0.1, maxHz=0.4):
+def sig_to_RPM(sig, fps, winsize, minHz=None, maxHz=None):
+    """Estimate RPM sequence from signal windows using Welch spectrum within [minHz, maxHz]."""
+    if minHz is None or maxHz is None:
+        raise ValueError("sig_to_RPM requires explicit minHz and maxHz values.")
+    if minHz <= 0 or maxHz <= 0 or minHz >= maxHz:
+        raise ValueError(f"Invalid band passed to sig_to_RPM: minHz={minHz}, maxHz={maxHz}")
     sig = np.vstack(sig)
 
     Pfreqs, Power = Welch_rpm(sig, fps, winsize, minHz, maxHz)
