@@ -14,6 +14,7 @@ class OscillatorParams:
     fs: float = 64.0
     f_min: float = 0.08
     f_max: float = 0.50
+    init_margin_hz: float = 0.01  # interior guard in Hz to prevent boundary-locked initialisation
     rho: float = 0.0  # legacy manual override
     tau_env: float = 30.0
     qx: float = 0.0  # legacy manual override
@@ -47,6 +48,7 @@ class _BaseOscillatorHead:
     def __init__(self, params: Optional[OscillatorParams] = None):
         self.params = params or OscillatorParams()
         self._last_sigma_y = None
+        self._last_init_freq = None
 
     def _preprocess(self, signal: np.ndarray, fs: float) -> np.ndarray:
         p = self.params
@@ -97,7 +99,31 @@ class _BaseOscillatorHead:
         freq = float(freqs[mask][np.argmax(power[mask])])
         if not np.isfinite(freq):
             freq = 0.5 * (p.f_min + p.f_max)
-        return float(np.clip(freq, p.f_min, p.f_max))
+        freq_raw = float(freq)
+        margin = getattr(p, "init_margin_hz", 0.0) or 0.0
+        try:
+            margin = float(margin)
+        except (TypeError, ValueError):
+            margin = 0.0
+        if not np.isfinite(margin) or margin < 0.0:
+            margin = 0.0
+        band = float(p.f_max) - float(p.f_min)
+        if band > 0.0 and (margin * 2.0) >= band:
+            margin = max(0.0, 0.5 * band - 1e-8)
+        if margin > 0.0 and p.f_max > p.f_min:
+            # Start oscillators inside the band to avoid edge-locking in low SNR regimes.
+            interior_low = float(p.f_min) + margin
+            interior_high = float(p.f_max) - margin
+            if interior_low <= interior_high:
+                freq = float(np.clip(freq, interior_low, interior_high))
+        freq_interior = float(freq)
+        freq_final = float(np.clip(freq, p.f_min, p.f_max))
+        self._last_init_freq = {
+            "raw_hz": float(freq_raw),
+            "interior_hz": float(freq_interior),
+            "final_hz": float(freq_final)
+        }
+        return freq_final
 
     def _effective_params(self, fs: float) -> Dict[str, float]:
         p = self.params
@@ -148,6 +174,17 @@ class _BaseOscillatorHead:
             "track_frac_saturated": frac_saturated,
             "track_dyn_range_hz": dyn_range
         }
+        init_freq = getattr(self, "_last_init_freq", None)
+        if isinstance(init_freq, dict):
+            raw_val = init_freq.get("raw_hz")
+            if raw_val is not None and np.isfinite(raw_val):
+                meta["init_freq_raw_hz"] = float(raw_val)
+            interior_val = init_freq.get("interior_hz")
+            if interior_val is not None and np.isfinite(interior_val):
+                meta["init_freq_interior_hz"] = float(interior_val)
+            final_val = init_freq.get("final_hz")
+            if final_val is not None and np.isfinite(final_val):
+                meta["init_freq_final_hz"] = float(final_val)
         if meta_extra:
             meta.update(meta_extra)
         return {
