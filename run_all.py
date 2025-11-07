@@ -805,8 +805,19 @@ def evaluate(
 	use_track=False,
 	track_std_min_bpm=0.3,
 	track_unique_min=0.05,
-	track_saturation_max=0.15
+	track_saturation_max=0.15,
+	saturation_margin_hz=0.0,
+	saturation_persist_sec=0.0,
+	constant_ptp_max_hz=0.0
 ):
+	"""
+	Evaluate respiration tracks against ground truth and persist per-method metrics.
+
+	Key gating knobs (all disabled when 0.0):
+	  * saturation_margin_hz: absolute edge guard in Hz; recommended 0.005 for production runs.
+	  * saturation_persist_sec: minimum continuous edge duration in seconds before flagging saturation.
+	  * constant_ptp_max_hz: robust frequency range (Hz, P95−P5) below which tracks are treated as constant.
+	"""
 	print('\n> Loading extracted data from ' + results_dir + '...')
 
 	try:
@@ -827,6 +838,36 @@ def evaluate(
 		track_saturation_max = 0.0
 	if track_saturation_max > 1.0:
 		track_saturation_max = 1.0
+	try:
+		if saturation_margin_hz is None:
+			saturation_margin_hz = 0.0
+		saturation_margin_hz = float(saturation_margin_hz)
+	except (TypeError, ValueError):
+		saturation_margin_hz = 0.0
+	if not np.isfinite(saturation_margin_hz):
+		saturation_margin_hz = 0.0
+	if saturation_margin_hz < 0.0:
+		saturation_margin_hz = 0.0
+	try:
+		if saturation_persist_sec is None:
+			saturation_persist_sec = 0.0
+		saturation_persist_sec = float(saturation_persist_sec)
+	except (TypeError, ValueError):
+		saturation_persist_sec = 0.0
+	if not np.isfinite(saturation_persist_sec):
+		saturation_persist_sec = 0.0
+	if saturation_persist_sec < 0.0:
+		saturation_persist_sec = 0.0
+	try:
+		if constant_ptp_max_hz is None:
+			constant_ptp_max_hz = 0.0
+		constant_ptp_max_hz = float(constant_ptp_max_hz)
+	except (TypeError, ValueError):
+		constant_ptp_max_hz = 0.0
+	if not np.isfinite(constant_ptp_max_hz):
+		constant_ptp_max_hz = 0.0
+	if constant_ptp_max_hz < 0.0:
+		constant_ptp_max_hz = 0.0
 
 	method_metrics = {}
 
@@ -856,6 +897,15 @@ def evaluate(
 						rel = os.path.relpath(os.path.join(root, fn), results_dir)
 						files.append(rel)
 	ofdeep_models = ['_raft', '_raft_small', '_gma', '_irr_pwc', '_lcv_raft', '_craft']
+
+	# Ensure logs directory exists early for debugging
+	try:
+		logs_dir = os.path.join(results_dir, 'logs')
+		os.makedirs(logs_dir, exist_ok=True)
+		debug_log_path = os.path.join(logs_dir, 'evaluate_appends.log')
+	except Exception:
+		logs_dir = None
+		debug_log_path = None
 
 	for filepath in tqdm(files, desc="Processing files"):
 		tqdm.write("> Processing file %s" % (filepath))
@@ -1025,53 +1075,78 @@ def evaluate(
 		fps = data['fps']
 
 		for i, est in enumerate(data['estimates']):
-
 			cur_method = est['method']
 			if cur_method == 'OF_Deep':
 				cur_method += ofdeep_models[i]
 			elif cur_method == 'OF_Model':
 				cur_method = 'OF_Farneback'
 
-			sig = np.squeeze(est['estimate'])
+			# Begin per-method processing with robust fallback to ensure every method gets a record
+			try:
+				sig = np.squeeze(est['estimate'])
 
-			if win_size == 'video':
-				if sig.ndim == 1:
-					ws = len(sig) / fps
+				if win_size == 'video':
+					if sig.ndim == 1:
+						ws = len(sig) / fps
+					else:
+						ws = sig.shape[1] / fps
 				else:
-					ws = sig.shape[1] / fps
-			else:
-				ws = win_size
+					ws = win_size
 
-			if (sig.ndim == 1):
-				sig = sig[np.newaxis,:]
+				if (sig.ndim == 1):
+					sig = sig[np.newaxis,:]
 
-			# Filter estimated signal over all dimensions
-			filt_sig = []
-			for d in range(sig.shape[0]):
-				filt_sig.append(utils.filter_RW(sig[d,:], fps, lo=min_hz, hi=max_hz))
+				# Filter estimated signal over all dimensions
+				filt_sig = []
+				for d in range(sig.shape[0]):
+					filt_sig.append(utils.filter_RW(sig[d,:], fps, lo=min_hz, hi=max_hz))
 
-			filt_sig = np.vstack(filt_sig)
+				filt_sig = np.vstack(filt_sig)
 
-			if cur_method in ['bss_emd', 'bss_ssa']:
-				filt_sig = utils.select_component(filt_sig, fps, int(ws/1.5), min_hz, max_hz)
+				if cur_method in ['bss_emd', 'bss_ssa']:
+					filt_sig = utils.select_component(filt_sig, fps, int(ws/1.5), min_hz, max_hz)
 
-			method_storage_name = est['method']
-			sanitized_method = method_storage_name.replace(' ', '_')
-			sig_rpm_values = None
-			t_sig = None
-			track_used = False
-			degenerate_track = False
-			degenerate_reason = None
-			track_stats = {}
-			track_candidate_present = False
-			track_series = None
+				method_storage_name = est['method']
+				sanitized_method = method_storage_name.replace(' ', '_')
+				sig_rpm_values = None
+				t_sig = None
+				track_used = False
+				degenerate_track = False
+				degenerate_reason = None
+				track_stats = {}
+				track_candidate_present = False
+				track_series = None
+				track_meta = {}
+				rr_vals = None
+
+			except Exception as exc:
+				# Early fail-safe to keep evaluation running; downstream blocks proceed
+				pass
 
 			if use_track:
 				aux_dir = os.path.join(results_dir, 'aux', sanitized_method)
 				aux_file = os.path.join(aux_dir, f"{trial_key}.npz")
 				if os.path.exists(aux_file):
 					try:
-						with np.load(aux_file) as aux_data:
+						with np.load(aux_file, allow_pickle=True) as aux_data:
+							if 'meta' in aux_data:
+								try:
+									meta_raw = aux_data['meta']
+									meta_item = None
+									if isinstance(meta_raw, np.ndarray):
+										if meta_raw.size:
+											meta_item = meta_raw.flat[0]
+									else:
+										meta_item = meta_raw
+									if isinstance(meta_item, bytes):
+										meta_item = meta_item.decode('utf-8', errors='ignore')
+									if isinstance(meta_item, str):
+										track_meta = json.loads(meta_item)
+									elif isinstance(meta_item, dict):
+										track_meta = meta_item
+								except Exception as exc:
+									track_meta = {}
+									tqdm.write(f"> Warning: failed to parse aux meta for {method_storage_name}: {exc}")
 							if 'track_hz' in aux_data:
 								track_candidate_present = True
 								track_series = np.asarray(aux_data['track_hz'], dtype=np.float64).reshape(-1)
@@ -1082,220 +1157,339 @@ def evaluate(
 										win_array = np.vstack([np.squeeze(w) for w in track_win])
 										sig_rpm_values = np.median(win_array, axis=1) * 60.0
 										track_used = True
-							if (not track_used) and ('rr_bpm' in aux_data):
+							if 'rr_bpm' in aux_data:
 								track_candidate_present = True
 								rr_vals = np.asarray(aux_data['rr_bpm'], dtype=np.float64).reshape(-1)
-								if rr_vals.size:
-									if win_size == 'video':
-										rr_val = float(rr_vals[-1])
-										sig_rpm_values = np.asarray([rr_val], dtype=np.float64)
-										if t_gt_full.size:
-											t_sig = np.asarray(t_gt_full[:1], dtype=np.float64)
-										else:
-											t_sig = np.asarray([], dtype=np.float64)
-										track_used = True
-									else:
-										degenerate_track = True
-										if degenerate_reason is None:
-											degenerate_reason = 'low_unique'
 					except Exception as exc:
 						tqdm.write(f"> Warning: failed to read aux track for {method_storage_name}: {exc}")
 
-			if track_used and sig_rpm_values is not None:
-				finite_mask_rpm = np.isfinite(sig_rpm_values)
-				finite_rpm = sig_rpm_values[finite_mask_rpm]
-				n_windows_est = int(sig_rpm_values.size)
-				if finite_rpm.size:
-					with np.errstate(invalid='ignore'):
-						est_std = float(np.nanstd(finite_rpm))
-						mean_rpm = float(np.nanmean(finite_rpm))
-					unique_vals = np.unique(finite_rpm)
-					nuniq_frac = float(unique_vals.size / max(1, finite_rpm.size))
-				else:
-					est_std = float('nan')
-					mean_rpm = float('nan')
-					nuniq_frac = 0.0
-				if track_series is not None:
-					finite_track = track_series[np.isfinite(track_series)]
-					if finite_track.size:
-						sat_mask = (finite_track <= (min_hz + 1e-6)) | (finite_track >= (max_hz - 1e-6))
-						sat_frac = float(np.mean(sat_mask))
+		if (not track_used) and (rr_vals is not None):
+			if rr_vals.size:
+				if win_size == 'video':
+					rr_val = float(rr_vals[-1])
+					sig_rpm_values = np.asarray([rr_val], dtype=np.float64)
+					if t_gt_full.size:
+						t_sig = np.asarray(t_gt_full[:1], dtype=np.float64)
 					else:
-						sat_frac = 1.0
+						t_sig = np.asarray([], dtype=np.float64)
+					track_used = True
+				else:
+					if rr_vals.size == target_len and target_len == t_gt_full.size and target_len > 0:
+						sig_rpm_values = rr_vals.astype(np.float64)
+						t_sig = np.asarray(t_gt_full[:rr_vals.size], dtype=np.float64)
+						track_used = True
+					else:
+						degenerate_track = True
+						if degenerate_reason is None:
+							degenerate_reason = 'length_mismatch'
+			else:
+				degenerate_track = True
+				if degenerate_reason is None:
+					degenerate_reason = 'low_unique'
+
+		# Absolute margin in Hz prevents penalising physiologic extremes near the band edges.
+		band_hz = float(max_hz) - float(min_hz)
+		edge_margin_hz = float(saturation_margin_hz)
+		if not np.isfinite(edge_margin_hz):
+			edge_margin_hz = 0.0
+		if band_hz > 0.0:
+			max_margin = max(0.0, 0.5 * band_hz - 1e-8)
+			if edge_margin_hz > max_margin:
+				edge_margin_hz = max_margin
+		else:
+			edge_margin_hz = 0.0
+		lower_edge = float(min_hz) + edge_margin_hz
+		upper_edge = float(max_hz) - edge_margin_hz
+
+		finite_track = np.asarray([], dtype=np.float64)
+		sat_frac = float('nan')
+		median_track_hz = float('nan')
+		persist_samples = 1
+		if saturation_persist_sec > 0.0 and fps > 0:
+			persist_samples = max(1, int(round(float(saturation_persist_sec) * float(fps))))
+		if track_series is not None:
+			finite_track = track_series[np.isfinite(track_series)]
+			if finite_track.size:
+				median_track_hz = float(np.nanmedian(finite_track))
+				if lower_edge <= upper_edge:
+					sat_mask_raw = (finite_track <= (lower_edge + 1e-12)) | (finite_track >= (upper_edge - 1e-12))
+				else:
+					sat_mask_raw = (finite_track <= float(min_hz)) | (finite_track >= float(max_hz))
+				if sat_mask_raw.size:
+					if persist_samples > 1:
+						kernel = np.ones(persist_samples, dtype=np.int32)
+						convolved = np.convolve(sat_mask_raw.astype(np.int32), kernel, mode='same')
+						sat_mask = convolved >= persist_samples
+					else:
+						sat_mask = sat_mask_raw
+					sat_frac = float(np.mean(sat_mask))
 				else:
 					sat_frac = float('nan')
-				track_stats = {
-					'mean_bpm': mean_rpm if np.isfinite(mean_rpm) else float('nan'),
-					'std_bpm': est_std if np.isfinite(est_std) else float('nan'),
-					'unique_fraction': nuniq_frac,
-					'saturation_fraction': sat_frac,
-					'n_windows': int(n_windows_est)
-				}
-				trigger_reason = None
-				if finite_rpm.size == 0:
-					trigger_reason = 'empty_or_allnan'
-				elif finite_rpm.size < 2 and win_size != 'video':
-					trigger_reason = 'empty_or_allnan'
-				elif win_size != 'video':
-					if (not np.isfinite(est_std)) or (est_std < float(track_std_min_bpm)):
-						trigger_reason = 'low_std'
-					elif nuniq_frac < float(track_unique_min):
-						trigger_reason = 'low_unique'
-					elif np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)):
-						trigger_reason = 'high_saturation'
-				if trigger_reason:
-					track_used = False
-					sig_rpm_values = None
-					degenerate_track = True
-					if degenerate_reason is None:
-						degenerate_reason = trigger_reason
+			else:
+				sat_frac = 1.0
+
+		mean_rpm = float('nan')
+		est_std = float('nan')
+		nuniq_frac = 0.0
+		n_windows_est = 0
+		finite_rpm = np.asarray([], dtype=np.float64)
+		allow_constant_track = bool(track_meta.get('is_constant_track')) if isinstance(track_meta, dict) else False
+		meta_for_stats = dict(track_meta) if isinstance(track_meta, dict) else {}
+		meta_for_stats['track_frac_saturated_eval'] = float(sat_frac) if np.isfinite(sat_frac) else float('nan')
+		meta_for_stats['saturation_margin_hz_used'] = float(edge_margin_hz)
+		meta_for_stats['saturation_persist_samples'] = int(persist_samples)
+		meta_for_stats['saturation_persist_sec'] = float(saturation_persist_sec)
+		constant_promoted = False
+
+		if track_used and sig_rpm_values is not None:
+			finite_mask_rpm = np.isfinite(sig_rpm_values)
+			finite_rpm = sig_rpm_values[finite_mask_rpm]
+			n_windows_est = int(sig_rpm_values.size)
+			if finite_rpm.size:
+				with np.errstate(invalid='ignore'):
+					est_std = float(np.nanstd(finite_rpm))
+					mean_rpm = float(np.nanmean(finite_rpm))
+				unique_vals = np.unique(finite_rpm)
+				nuniq_frac = float(unique_vals.size / max(1, finite_rpm.size))
+
+		if constant_ptp_max_hz > 0.0 and finite_track.size:
+			# Robust range (P95−P5) guards against transient spikes while detecting quasi-constant tracks.
+			perc5 = float(np.percentile(finite_track, 5))
+			perc95 = float(np.percentile(finite_track, 95))
+			robust_range = float(max(0.0, perc95 - perc5))
+			meta_for_stats['track_range_hz_p5_p95'] = robust_range if np.isfinite(robust_range) else float('nan')
+			meta_for_stats['track_range_hz_ptp'] = float(np.ptp(finite_track))
+			if np.isfinite(robust_range) and robust_range <= float(constant_ptp_max_hz):
+				interior_ok = False
+				if np.isfinite(median_track_hz):
+					if lower_edge <= upper_edge:
+						interior_ok = (median_track_hz >= lower_edge) and (median_track_hz <= upper_edge)
+					else:
+						interior_ok = (median_track_hz >= float(min_hz)) and (median_track_hz <= float(max_hz))
+				if interior_ok:
+					if not allow_constant_track:
+						constant_promoted = True
+					allow_constant_track = True
+					if meta_for_stats is not None:
+						meta_for_stats.setdefault('constant_track_promoted', True)
+
+		track_stats = {
+			'mean_bpm': mean_rpm if np.isfinite(mean_rpm) else float('nan'),
+			'std_bpm': est_std if np.isfinite(est_std) else float('nan'),
+			'unique_fraction': nuniq_frac,
+			'saturation_fraction': sat_frac,
+			'n_windows': int(n_windows_est),
+			'meta': meta_for_stats
+		}
+		trigger_reason = None
+		if track_used and sig_rpm_values is not None:
+			if finite_rpm.size == 0:
+				trigger_reason = 'empty_or_allnan'
+			elif finite_rpm.size < 2 and win_size != 'video':
+				trigger_reason = 'empty_or_allnan'
+			elif win_size != 'video':
+				if ((not np.isfinite(est_std)) or (est_std < float(track_std_min_bpm))) and not allow_constant_track:
+					trigger_reason = 'low_std'
+				elif (nuniq_frac < float(track_unique_min)) and (not allow_constant_track):
+					trigger_reason = 'low_unique'
+				elif np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)):
+					sat_repr = f"{sat_frac:.3f}" if np.isfinite(sat_frac) else "nan"
+					med_repr = f"{median_track_hz:.3f}" if np.isfinite(median_track_hz) else "nan"
+					const_repr = 'promoted' if constant_promoted else ('true' if allow_constant_track else 'false')
+					persist_repr = f"{persist_samples}x@{float(saturation_persist_sec):.2f}s"
+					band_repr = f"{float(min_hz):.3f}-{float(max_hz):.3f}"
+					reason_detail = (
+						f"high_saturation@{edge_margin_hz:.3f}"
+						f"[band={band_repr};sat={sat_repr};med={med_repr};const={const_repr};persist={persist_repr}]"
+					)
+					should_trigger = True
+					if allow_constant_track and finite_track.size:
+						at_edge = False
+						if np.isfinite(median_track_hz):
+							if lower_edge <= upper_edge:
+								at_edge = (median_track_hz <= lower_edge) or (median_track_hz >= upper_edge)
+							else:
+								at_edge = (median_track_hz <= float(min_hz)) or (median_track_hz >= float(max_hz))
+						if (not at_edge) or sat_frac < 0.98:
+							should_trigger = False
+					if should_trigger:
+						trigger_reason = reason_detail
+		if trigger_reason:
+			track_used = False
+			sig_rpm_values = None
+			degenerate_track = True
+			if degenerate_reason is None:
+				degenerate_reason = trigger_reason
 
 			if track_candidate_present and (not track_used) and degenerate_reason is None:
 				degenerate_track = True
 				degenerate_reason = 'empty_or_allnan'
 
-			if not track_used:
-				if use_track:
-					tqdm.write(f"> Warning: track unavailable for {method_storage_name}::{trial_key}, falling back to spectral RPM")
-				sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
-
-			recomputed_spectral = False
-			while True:
-				if sig_rpm_values is None:
-					sig_array_raw = np.asarray([], dtype=np.float64)
-				else:
-					sig_array_raw = np.asarray(sig_rpm_values, dtype=np.float64).reshape(-1)
-				pred_len_raw = int(sig_array_raw.size)
-				if t_sig is None:
-					t_sig_array = np.asarray([], dtype=np.float64)
-				else:
-					t_sig_array = np.asarray(t_sig, dtype=np.float64).reshape(-1)
-				if pred_len_raw and t_sig_array.size and pred_len_raw != t_sig_array.size:
-					min_len_local = min(pred_len_raw, t_sig_array.size)
-					sig_array = sig_array_raw[:min_len_local]
-					t_sig_local = t_sig_array[:min_len_local]
-				else:
-					sig_array = sig_array_raw
-					t_sig_local = t_sig_array
-				sig_aligned_tmp, gt_aligned_tmp, times_aligned_tmp, align_meta = _align_to_gt_grid(t_sig_local, sig_array)
-				align_meta['len_pred'] = pred_len_raw
-				align_meta['len_gt'] = int(gt_rpm_full.size)
-				sig_aligned_tmp = np.asarray(sig_aligned_tmp, dtype=np.float64).reshape(-1)
-				gt_aligned_tmp = np.asarray(gt_aligned_tmp, dtype=np.float64).reshape(-1)
-				times_aligned_tmp = np.asarray(times_aligned_tmp, dtype=np.float64).reshape(-1)
-				min_len_aligned = min(sig_aligned_tmp.size, gt_aligned_tmp.size, times_aligned_tmp.size)
-				if min_len_aligned:
-					sig_aligned_tmp = sig_aligned_tmp[:min_len_aligned]
-					gt_aligned_tmp = gt_aligned_tmp[:min_len_aligned]
-					times_aligned_tmp = times_aligned_tmp[:min_len_aligned]
-				else:
-					sig_aligned_tmp = np.asarray([], dtype=np.float64)
-					gt_aligned_tmp = np.asarray([], dtype=np.float64)
-					times_aligned_tmp = np.asarray([], dtype=np.float64)
-				align_meta['len_final'] = int(min_len_aligned)
-				finite_mask_pair = np.isfinite(sig_aligned_tmp) & np.isfinite(gt_aligned_tmp)
-				valid_count = int(finite_mask_pair.sum())
-				align_meta['len_valid'] = valid_count
-				if valid_count:
-					sig_valid_tmp = sig_aligned_tmp[finite_mask_pair]
-					gt_valid_tmp = gt_aligned_tmp[finite_mask_pair]
-					times_valid_tmp = times_aligned_tmp[finite_mask_pair]
-				else:
-					sig_valid_tmp = np.asarray([], dtype=np.float64)
-					gt_valid_tmp = np.asarray([], dtype=np.float64)
-					times_valid_tmp = np.asarray([], dtype=np.float64)
-				if track_used and (align_meta['len_final'] == 0 or valid_count < 2) and not recomputed_spectral:
-					degenerate_track = True
+		if not track_used:
+			if use_track:
+				if track_candidate_present:
+					reason = degenerate_reason or 'unknown'
+					tqdm.write(f"> Warning: track rejected for {method_storage_name}::{trial_key} [reason: {reason}], falling back to spectral RPM")
+				elif '__' in sanitized_method:
 					if degenerate_reason is None:
-						degenerate_reason = 'empty_or_allnan'
-					track_used = False
-					sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
-					recomputed_spectral = True
-					continue
-				sig_aligned = sig_aligned_tmp
-				gt_aligned = gt_aligned_tmp
-				times_aligned = times_aligned_tmp
-				sig_valid = sig_valid_tmp
-				gt_valid = gt_valid_tmp
-				times_valid = times_valid_tmp
-				alignment_meta = align_meta
-				break
-
-			sig_finite = sig_valid[np.isfinite(sig_valid)] if sig_valid.size else np.asarray([], dtype=np.float64)
-			gt_finite = gt_valid[np.isfinite(gt_valid)] if gt_valid.size else np.asarray([], dtype=np.float64)
-
-			if sig_finite.size:
-				with np.errstate(invalid='ignore'):
-					est_mean_val = float(np.mean(sig_finite, dtype=np.float64))
-					est_std_val = float(np.std(sig_finite, dtype=np.float64))
-			else:
-				est_mean_val = float('nan')
-				est_std_val = float('nan')
-
-			if gt_finite.size:
-				with np.errstate(invalid='ignore'):
-					gt_mean_val = float(np.mean(gt_finite, dtype=np.float64))
-					gt_std_val = float(np.std(gt_finite, dtype=np.float64))
-			else:
-				gt_mean_val = float('nan')
-				gt_std_val = float('nan')
-
-			if sig_valid.size >= 2:
-				with np.errstate(invalid='ignore'):
-					std_pair_est = float(np.std(sig_valid, dtype=np.float64))
-			else:
-				std_pair_est = float('nan')
-			if gt_valid.size >= 2:
-				with np.errstate(invalid='ignore'):
-					std_pair_gt = float(np.std(gt_valid, dtype=np.float64))
-			else:
-				std_pair_gt = float('nan')
-
-			if sig_valid.size >= 2 and gt_valid.size >= 2:
-				if (np.isfinite(std_pair_gt) and std_pair_gt < 1e-12) or (np.isfinite(std_pair_est) and std_pair_est < 1e-12):
-					scatter_slope = scatter_intercept = float('nan')
+						degenerate_reason = 'missing_track'
+					degenerate_track = True
+					tqdm.write(f"> Warning: track missing for {method_storage_name}::{trial_key}; falling back to spectral RPM")
 				else:
-					with np.errstate(invalid='ignore'):
-						try:
-							scatter_slope, scatter_intercept = np.polyfit(gt_valid, sig_valid, 1)
-						except Exception:
-							scatter_slope = scatter_intercept = float('nan')
+					tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
+			sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
+
+		source_label = 'track' if track_used else 'spectral'
+
+		recomputed_spectral = False
+		while True:
+			if sig_rpm_values is None:
+				sig_array_raw = np.asarray([], dtype=np.float64)
 			else:
+				sig_array_raw = np.asarray(sig_rpm_values, dtype=np.float64).reshape(-1)
+			pred_len_raw = int(sig_array_raw.size)
+			if t_sig is None:
+				t_sig_array = np.asarray([], dtype=np.float64)
+			else:
+				t_sig_array = np.asarray(t_sig, dtype=np.float64).reshape(-1)
+			if pred_len_raw and t_sig_array.size and pred_len_raw != t_sig_array.size:
+				min_len_local = min(pred_len_raw, t_sig_array.size)
+				sig_array = sig_array_raw[:min_len_local]
+				t_sig_local = t_sig_array[:min_len_local]
+			else:
+				sig_array = sig_array_raw
+				t_sig_local = t_sig_array
+			sig_aligned_tmp, gt_aligned_tmp, times_aligned_tmp, align_meta = _align_to_gt_grid(t_sig_local, sig_array)
+			align_meta['len_pred'] = pred_len_raw
+			align_meta['len_gt'] = int(gt_rpm_full.size)
+			sig_aligned_tmp = np.asarray(sig_aligned_tmp, dtype=np.float64).reshape(-1)
+			gt_aligned_tmp = np.asarray(gt_aligned_tmp, dtype=np.float64).reshape(-1)
+			times_aligned_tmp = np.asarray(times_aligned_tmp, dtype=np.float64).reshape(-1)
+			min_len_aligned = min(sig_aligned_tmp.size, gt_aligned_tmp.size, times_aligned_tmp.size)
+			if min_len_aligned:
+				sig_aligned_tmp = sig_aligned_tmp[:min_len_aligned]
+				gt_aligned_tmp = gt_aligned_tmp[:min_len_aligned]
+				times_aligned_tmp = times_aligned_tmp[:min_len_aligned]
+			else:
+				sig_aligned_tmp = np.asarray([], dtype=np.float64)
+				gt_aligned_tmp = np.asarray([], dtype=np.float64)
+				times_aligned_tmp = np.asarray([], dtype=np.float64)
+			align_meta['len_final'] = int(min_len_aligned)
+			finite_mask_pair = np.isfinite(sig_aligned_tmp) & np.isfinite(gt_aligned_tmp)
+			valid_count = int(finite_mask_pair.sum())
+			align_meta['len_valid'] = valid_count
+			if valid_count:
+				sig_valid_tmp = sig_aligned_tmp[finite_mask_pair]
+				gt_valid_tmp = gt_aligned_tmp[finite_mask_pair]
+				times_valid_tmp = times_aligned_tmp[finite_mask_pair]
+			else:
+				sig_valid_tmp = np.asarray([], dtype=np.float64)
+				gt_valid_tmp = np.asarray([], dtype=np.float64)
+				times_valid_tmp = np.asarray([], dtype=np.float64)
+			if source_label == 'track' and (align_meta['len_final'] == 0 or valid_count < 2) and not recomputed_spectral:
+				degenerate_track = True
+				if degenerate_reason is None:
+					degenerate_reason = 'empty_or_allnan'
+				track_used = False
+				source_label = 'spectral'
+				if use_track:
+					if track_candidate_present:
+						reason = degenerate_reason or 'unknown'
+						tqdm.write(f"> Warning: track rejected for {method_storage_name}::{trial_key} [reason: {reason}], falling back to spectral RPM")
+					elif '__' in sanitized_method:
+						if degenerate_reason is None:
+							degenerate_reason = 'missing_track'
+						degenerate_track = True
+						tqdm.write(f"> Warning: track missing for {method_storage_name}::{trial_key}; falling back to spectral RPM")
+					else:
+						tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
+				sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
+				recomputed_spectral = True
+				continue
+			sig_aligned = sig_aligned_tmp
+			gt_aligned = gt_aligned_tmp
+			times_aligned = times_aligned_tmp
+			sig_valid = sig_valid_tmp
+			gt_valid = gt_valid_tmp
+			times_valid = times_valid_tmp
+			alignment_meta = align_meta
+			break
+
+		sig_finite = sig_valid[np.isfinite(sig_valid)] if sig_valid.size else np.asarray([], dtype=np.float64)
+		gt_finite = gt_valid[np.isfinite(gt_valid)] if gt_valid.size else np.asarray([], dtype=np.float64)
+
+		if sig_finite.size:
+			with np.errstate(invalid='ignore'):
+				est_mean_val = float(np.mean(sig_finite, dtype=np.float64))
+				est_std_val = float(np.std(sig_finite, dtype=np.float64))
+		else:
+			est_mean_val = float('nan')
+			est_std_val = float('nan')
+
+		if gt_finite.size:
+			with np.errstate(invalid='ignore'):
+				gt_mean_val = float(np.mean(gt_finite, dtype=np.float64))
+				gt_std_val = float(np.std(gt_finite, dtype=np.float64))
+		else:
+			gt_mean_val = float('nan')
+			gt_std_val = float('nan')
+
+		if sig_valid.size >= 2:
+			with np.errstate(invalid='ignore'):
+				std_pair_est = float(np.std(sig_valid, dtype=np.float64))
+		else:
+			std_pair_est = float('nan')
+		if gt_valid.size >= 2:
+			with np.errstate(invalid='ignore'):
+				std_pair_gt = float(np.std(gt_valid, dtype=np.float64))
+		else:
+			std_pair_gt = float('nan')
+
+		if sig_valid.size >= 2 and gt_valid.size >= 2:
+			if (np.isfinite(std_pair_gt) and std_pair_gt < 1e-12) or (np.isfinite(std_pair_est) and std_pair_est < 1e-12):
 				scatter_slope = scatter_intercept = float('nan')
-
-			if sig_valid.size >= 2 and gt_valid.size >= 2:
-				corr_degenerate = (
-					(np.isfinite(std_pair_gt) and std_pair_gt < corr_guard_eps)
-					or (np.isfinite(std_pair_est) and std_pair_est < corr_guard_eps)
-				)
 			else:
-				corr_degenerate = True
-
-			if sig_valid.size >= 2 and gt_valid.size >= 2:
-				e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics)
-				raw_metrics = e[:-1]
-				pair = e[-1]
-				if corr_degenerate:
-					for idx, metric_name in enumerate(metrics):
-						if metric_name in ('CORR', 'PCC', 'CCC'):
-							raw_metrics[idx] = float('nan')
-			else:
-				raw_metrics = [float('nan')] * len(metrics)
-				pair = [
-					np.atleast_2d(sig_valid.astype(np.float64)),
-					gt_valid.astype(np.float64)
-				]
-
-			metric_values = []
-			for val in raw_metrics:
-				try:
-					metric_values.append(float(val))
-				except Exception:
+				with np.errstate(invalid='ignore'):
 					try:
-						val_arr = np.atleast_1d(val).astype(float)
-						metric_values.append(float(val_arr.flat[0]))
+						scatter_slope, scatter_intercept = np.polyfit(gt_valid, sig_valid, 1)
 					except Exception:
-						metric_values.append(float('nan'))
+						scatter_slope = scatter_intercept = float('nan')
+		else:
+			scatter_slope = scatter_intercept = float('nan')
+
+		if sig_valid.size >= 2 and gt_valid.size >= 2:
+			corr_degenerate = (
+				(np.isfinite(std_pair_gt) and std_pair_gt < corr_guard_eps)
+				or (np.isfinite(std_pair_est) and std_pair_est < corr_guard_eps)
+			)
+		else:
+			corr_degenerate = True
+
+		if sig_valid.size >= 2 and gt_valid.size >= 2:
+			e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics)
+			raw_metrics = e[:-1]
+			pair = e[-1]
+			if corr_degenerate:
+				for idx, metric_name in enumerate(metrics):
+					if metric_name in ('CORR', 'PCC', 'CCC'):
+						raw_metrics[idx] = float('nan')
+		else:
+			raw_metrics = [float('nan')] * len(metrics)
+			pair = [
+				np.atleast_2d(sig_valid.astype(np.float64)),
+				gt_valid.astype(np.float64)
+			]
+
+		metric_values = []
+		for val in raw_metrics:
+			try:
+				metric_values.append(float(val))
+			except Exception:
+				try:
+					val_arr = np.atleast_1d(val).astype(float)
+					metric_values.append(float(val_arr.flat[0]))
+				except Exception:
+					metric_values.append(float('nan'))
 
 			times_valid_for_record = np.asarray(times_valid, dtype=np.float64)
 			record_alignment = {
@@ -1306,30 +1500,79 @@ def evaluate(
 				'len_valid': int(alignment_meta.get('len_valid', 0))
 			}
 
-			record = {
-				'metrics': metric_values,
-				'pair': pair,
-				'source': 'track' if track_used else 'spectral',
-				'stride': stride,
-				'times_est': times_valid_for_record,
-				'times_gt': times_valid_for_record,
-				'degenerate_track': bool(degenerate_track),
-				'degenerate_reason': degenerate_reason,
-				'track_stats': track_stats,
-				'est_mean': est_mean_val,
-				'est_std': est_std_val,
-				'gt_mean': gt_mean_val,
-				'gt_std': gt_std_val,
-				'scatter_slope': float(scatter_slope) if np.isfinite(scatter_slope) else float('nan'),
-				'scatter_intercept': float(scatter_intercept) if np.isfinite(scatter_intercept) else float('nan'),
-				'aligned': record_alignment['aligned'],
-				'len_gt': record_alignment['len_gt'],
-				'len_pred': record_alignment['len_pred'],
-				'len_final': record_alignment['len_final'],
-				'len_valid': record_alignment['len_valid'],
-				'alignment': record_alignment
-			}
-			method_metrics.setdefault(cur_method, []).append(record)
+			try:
+				record = {
+					'metrics': metric_values,
+					'pair': pair,
+					'source': source_label,
+					'stride': stride,
+					'times_est': times_valid_for_record,
+					'times_gt': times_valid_for_record,
+					'degenerate_track': bool(degenerate_track),
+					'degenerate_reason': degenerate_reason,
+					'track_stats': track_stats,
+					'est_mean': est_mean_val,
+					'est_std': est_std_val,
+					'gt_mean': gt_mean_val,
+					'gt_std': gt_std_val,
+					'scatter_slope': float(scatter_slope) if np.isfinite(scatter_slope) else float('nan'),
+					'scatter_intercept': float(scatter_intercept) if np.isfinite(scatter_intercept) else float('nan'),
+					'aligned': record_alignment['aligned'],
+					'len_gt': record_alignment['len_gt'],
+					'len_pred': record_alignment['len_pred'],
+					'len_final': record_alignment['len_final'],
+					'len_valid': record_alignment['len_valid'],
+					'alignment': record_alignment
+				}
+				method_metrics.setdefault(cur_method, []).append(record)
+				if debug_log_path:
+					with open(debug_log_path, 'a') as fp:
+						fp.write(f"{os.path.basename(filepath)}\t{cur_method}\tlen_valid={record.get('len_valid', 0)}\n")
+			except Exception as exc:
+				placeholder = {
+					'metrics': [float('nan')] * len(metrics),
+					'pair': [np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)],
+					'source': 'error',
+					'stride': stride,
+					'times_est': np.asarray([], dtype=np.float64),
+					'times_gt': np.asarray([], dtype=np.float64),
+					'degenerate_track': True,
+					'degenerate_reason': f'exception:{type(exc).__name__}',
+					'track_stats': {},
+					'est_mean': float('nan'),
+					'est_std': float('nan'),
+					'gt_mean': float('nan'),
+					'gt_std': float('nan'),
+					'scatter_slope': float('nan'),
+					'scatter_intercept': float('nan'),
+					'aligned': False,
+					'len_gt': 0,
+					'len_pred': 0,
+					'len_final': 0,
+					'len_valid': 0,
+					'alignment': {'aligned': False, 'len_gt': 0, 'len_pred': 0, 'len_final': 0, 'len_valid': 0}
+				}
+				method_metrics.setdefault(cur_method, []).append(placeholder)
+				if debug_log_path:
+					try:
+						with open(debug_log_path, 'a') as fp:
+							fp.write(f"{os.path.basename(filepath)}\t{cur_method}\tlen_valid=0\tEXC={type(exc).__name__}\n")
+					except Exception:
+						pass
+
+	# Before saving, report which methods produced metrics (helps debug filtering issues)
+	try:
+		seen_methods = sorted(list(method_metrics.keys()))
+		print(f"\n> Methods evaluated: {len(seen_methods)} -> {', '.join(seen_methods) if seen_methods else '(none)'}")
+		# Persist a small debug log to help users verify which methods were seen
+		logs_dir = os.path.join(results_dir, 'logs')
+		os.makedirs(logs_dir, exist_ok=True)
+		with open(os.path.join(logs_dir, 'methods_seen.txt'), 'w') as fp:
+			for m in seen_methods:
+				fp.write(m + "\n")
+	except Exception as _exc:
+		# Non-fatal; continue to saving metrics
+		pass
 
 	# Choose metrics output directory (new structure prefers results_dir/metrics)
 	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
@@ -1348,7 +1591,10 @@ def evaluate(
 				"use_track": use_track,
 				"track_std_min_bpm": track_std_min_bpm,
 				"track_unique_min": track_unique_min,
-				"track_saturation_max": track_saturation_max
+				"track_saturation_max": track_saturation_max,
+				"saturation_margin_hz": saturation_margin_hz,
+				"saturation_persist_sec": saturation_persist_sec,
+				"constant_ptp_max_hz": constant_ptp_max_hz
 			}, fp, indent=2)
 	except Exception as exc:
 		print(f"> Warning: failed to write evaluation settings ({exc})")
@@ -1949,6 +2195,9 @@ def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
 			'saturation_fraction': _json_float(record_track_stats.get('saturation_fraction')),
 			'n_windows': n_windows_track
 		}
+		track_meta_payload = record_track_stats.get('meta') if isinstance(record_track_stats, dict) else None
+		if isinstance(track_meta_payload, dict):
+			track_info['meta'] = track_meta_payload
 		alignment_info_raw = record.get('alignment') or {}
 		alignment_info = {
 			'aligned': bool(alignment_info_raw.get('aligned', record.get('aligned', False))),
@@ -2298,6 +2547,9 @@ def main(argv=None):
 	track_std_min_bpm = eval_cfg.get('track_std_min_bpm', 0.3)
 	track_unique_min = eval_cfg.get('track_unique_min', 0.05)
 	track_saturation_max = eval_cfg.get('track_saturation_max', 0.15)
+	saturation_margin_hz = eval_cfg.get('saturation_margin_hz', 0.0)
+	saturation_persist_sec = eval_cfg.get('saturation_persist_sec', 0.0)
+	constant_ptp_max_hz = eval_cfg.get('constant_ptp_max_hz', 0.0)
 	win_override = args.win or eval_cfg.get('win_size', 'video')
 	if isinstance(win_override, str) and win_override.lower() == 'video':
 		win_size = 'video'
@@ -2372,11 +2624,14 @@ def main(argv=None):
 				visualize=visualize,
 				min_hz=min_hz,
 				max_hz=max_hz,
-					use_track=use_track,
-					track_std_min_bpm=track_std_min_bpm,
-					track_unique_min=track_unique_min,
-					track_saturation_max=track_saturation_max
-				)
+				use_track=use_track,
+				track_std_min_bpm=track_std_min_bpm,
+				track_unique_min=track_unique_min,
+				track_saturation_max=track_saturation_max,
+				saturation_margin_hz=saturation_margin_hz,
+				saturation_persist_sec=saturation_persist_sec,
+				constant_ptp_max_hz=constant_ptp_max_hz
+			)
 		_profiler_stage_end('evaluate')
 
 	if 'metrics' in steps:
@@ -2419,7 +2674,10 @@ def main(argv=None):
 					use_track=use_track,
 					track_std_min_bpm=track_std_min_bpm,
 					track_unique_min=track_unique_min,
-					track_saturation_max=track_saturation_max
+					track_saturation_max=track_saturation_max,
+					saturation_margin_hz=saturation_margin_hz,
+					saturation_persist_sec=saturation_persist_sec,
+					constant_ptp_max_hz=constant_ptp_max_hz
 				)
 			unique_window = os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
 			print(f"\n== Metrics for {run_dir} ==")
