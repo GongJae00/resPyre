@@ -793,6 +793,174 @@ def _discover_methods_from_aux(run_dir):
 	return methods
 
 
+_TRACKER_SUFFIXES = {'pll', 'kfstd', 'ukffreq'}
+_SPECTRAL_SUFFIXES = {'spec_ridge'}
+_DEFAULT_GATING_CFG = {
+	'common': {
+		'use_track': None,
+		'saturation_margin_hz': 0.0,
+		'saturation_persist_sec': 0.0
+	},
+	'tracker': {
+		'std_min_bpm': 0.3,
+		'unique_min': 0.05,
+		'saturation_max': 0.15
+	},
+	'spectral': {
+		'peak_ratio_min': 1.5,
+		'prominence_min_db': 3.0,
+		'fwhm_max_hz': 0.08
+	},
+	'debug': {
+		'disable_gating': False
+	}
+}
+
+
+def _deep_merge_dict(base, new_values):
+	if not isinstance(new_values, dict):
+		return base
+	for key, value in new_values.items():
+		if isinstance(value, dict) and isinstance(base.get(key), dict):
+			base[key] = _deep_merge_dict(base[key], value)
+		else:
+			base[key] = copy.deepcopy(value)
+	return base
+
+
+def _infer_method_capability(name):
+	if not name:
+		return 'spectral'
+	lname = name.lower()
+	if '__' in lname:
+		suffix = lname.split('__', 1)[1]
+		if suffix in _SPECTRAL_SUFFIXES:
+			return 'spectral'
+		for tracker_suffix in _TRACKER_SUFFIXES:
+			if suffix.startswith(tracker_suffix):
+				return 'tracker'
+		return 'tracker'
+	return 'spectral'
+
+
+def _tracker_gating_decision(track_stats, cfg, disable=False):
+	flags = {'low_std': False, 'low_unique': False, 'high_saturation': False}
+	reason = None
+	if disable or not track_stats:
+		return False, flags, reason
+	std_bpm = track_stats.get('std_bpm')
+	unique_frac = track_stats.get('unique_fraction')
+	sat_frac = track_stats.get('saturation_fraction')
+	if std_bpm is not None and np.isfinite(std_bpm):
+		flags['low_std'] = std_bpm < float(cfg.get('std_min_bpm', 0.0))
+	if unique_frac is not None and np.isfinite(unique_frac):
+		flags['low_unique'] = unique_frac < float(cfg.get('unique_min', 0.0))
+	if sat_frac is not None and np.isfinite(sat_frac):
+		flags['high_saturation'] = sat_frac > float(cfg.get('saturation_max', 1.0))
+	trigger = any(flags.values())
+	if trigger:
+		reason = 'tracker_quality'
+	return trigger, flags, reason
+
+
+def _spectral_stats_from_signal(filtered_sig, fps, win_seconds, min_hz, max_hz):
+	stats = {}
+	try:
+		signal_array = np.asarray(filtered_sig, dtype=np.float64)
+		if signal_array.ndim == 1:
+			signal_array = signal_array[np.newaxis, :]
+		win_param = max(1, int(round(max(win_seconds, 1.0) / 1.5)))
+		freqs_bpm, power = utils.Welch_rpm(signal_array, fps, win_param, min_hz, max_hz)
+		if power.size == 0:
+			return stats
+		mean_power = np.mean(power, axis=0)
+		if mean_power.size == 0:
+			return stats
+		peak_idx = int(np.argmax(mean_power))
+		peak_power = float(mean_power[peak_idx])
+		eps = 1e-12
+		if mean_power.size > 1:
+			second = float(np.partition(mean_power, -2)[-2])
+		else:
+			second = peak_power
+		stats['peak_ratio'] = float(peak_power / max(second, eps))
+		stats['prominence_db'] = float(10.0 * np.log10((peak_power + eps) / (np.mean(mean_power) + eps)))
+		stats['peak_bpm'] = float(freqs_bpm[peak_idx]) if freqs_bpm.size else float('nan')
+		freq_hz = (np.asarray(freqs_bpm, dtype=np.float64) / 60.0) if freqs_bpm.size else np.asarray([], dtype=np.float64)
+		half_power = peak_power * 0.5
+		left = peak_idx
+		while left > 0 and mean_power[left] >= half_power:
+			left -= 1
+		right = peak_idx
+		while right < mean_power.size - 1 and mean_power[right] >= half_power:
+			right += 1
+		if freq_hz.size:
+			stats['fwhm_hz'] = float(max(0.0, freq_hz[min(right, freq_hz.size - 1)] - freq_hz[max(left, 0)]))
+		else:
+			stats['fwhm_hz'] = float('nan')
+	except Exception:
+		return {}
+	return stats
+
+
+def _spectral_quality_flags(stats, cfg, disable=False):
+	flags = {'low_ratio': False, 'low_prom': False, 'wide_fwhm': False}
+	if disable or not stats:
+		return True, flags, None
+	peak_ratio = stats.get('peak_ratio')
+	prom_db = stats.get('prominence_db')
+	fwhm_hz = stats.get('fwhm_hz')
+	if peak_ratio is not None and np.isfinite(peak_ratio):
+		flags['low_ratio'] = peak_ratio < float(cfg.get('peak_ratio_min', 0.0))
+	if prom_db is not None and np.isfinite(prom_db):
+		flags['low_prom'] = prom_db < float(cfg.get('prominence_min_db', 0.0))
+	if fwhm_hz is not None and np.isfinite(fwhm_hz):
+		flags['wide_fwhm'] = fwhm_hz > float(cfg.get('fwhm_max_hz', np.inf))
+	trustworthy = not any(flags.values())
+	reason = None if trustworthy else 'spectral_quality'
+	return trustworthy, flags, reason
+
+
+def _coerce_override_value(raw_value):
+	value = raw_value.strip()
+	if value.lower() in ('true', 'false'):
+		return value.lower() == 'true'
+	try:
+		if '.' in value:
+			return float(value)
+		return int(value)
+	except ValueError:
+		return value
+
+
+def _apply_overrides(cfg, overrides):
+	if not overrides:
+		return
+	for item in overrides:
+		if '=' not in item:
+			print(f"> Warning: override '{item}' ignored (missing '=')")
+			continue
+		path, raw_value = item.split('=', 1)
+		keys = [key for key in path.strip().split('.') if key]
+		if not keys:
+			print(f"> Warning: override '{item}' ignored (empty key)")
+			continue
+		target = cfg
+		for key in keys[:-1]:
+			if key not in target or not isinstance(target[key], dict):
+				target[key] = {}
+			target = target[key]
+		target[keys[-1]] = _coerce_override_value(raw_value)
+
+
+def _resolve_gating_config(cfg):
+	user_cfg = cfg.get('gating') if isinstance(cfg, dict) else {}
+	base = copy.deepcopy(_DEFAULT_GATING_CFG)
+	if isinstance(user_cfg, dict):
+		return _deep_merge_dict(base, user_cfg)
+	return base
+
+
 @timed_step('evaluate')
 def evaluate(
 	results_dir,
@@ -808,7 +976,8 @@ def evaluate(
 	track_saturation_max=0.15,
 	saturation_margin_hz=0.0,
 	saturation_persist_sec=0.0,
-	constant_ptp_max_hz=0.0
+	constant_ptp_max_hz=0.0,
+	gating=None
 ):
 	"""
 	Evaluate respiration tracks against ground truth and persist per-method metrics.
@@ -818,6 +987,18 @@ def evaluate(
 	  * saturation_persist_sec: minimum continuous edge duration in seconds before flagging saturation.
 	  * constant_ptp_max_hz: robust frequency range (Hz, P95−P5) below which tracks are treated as constant.
 	"""
+	gating_cfg = gating or {}
+	gating_common = gating_cfg.get('common', {})
+	tracker_gating_cfg = gating_cfg.get('tracker', {})
+	spectral_gating_cfg = gating_cfg.get('spectral', {})
+	disable_gating = bool(gating_cfg.get('debug', {}).get('disable_gating', False))
+	if gating_common.get('use_track') is not None:
+		use_track = bool(gating_common.get('use_track'))
+	if gating_common.get('saturation_margin_hz') is not None:
+		saturation_margin_hz = gating_common.get('saturation_margin_hz')
+	if gating_common.get('saturation_persist_sec') is not None:
+		saturation_persist_sec = gating_common.get('saturation_persist_sec')
+
 	print('\n> Loading extracted data from ' + results_dir + '...')
 
 	try:
@@ -868,6 +1049,33 @@ def evaluate(
 		constant_ptp_max_hz = 0.0
 	if constant_ptp_max_hz < 0.0:
 		constant_ptp_max_hz = 0.0
+	tracker_overrides = gating_cfg.get('tracker', {})
+	if tracker_overrides.get('std_min_bpm') is not None:
+		try:
+			track_std_min_bpm = float(tracker_overrides.get('std_min_bpm'))
+		except (TypeError, ValueError):
+			pass
+	if tracker_overrides.get('unique_min') is not None:
+		try:
+			track_unique_min = float(tracker_overrides.get('unique_min'))
+		except (TypeError, ValueError):
+			pass
+	if tracker_overrides.get('saturation_max') is not None:
+		try:
+			track_saturation_max = float(tracker_overrides.get('saturation_max'))
+		except (TypeError, ValueError):
+			pass
+
+	resolved_tracker_cfg = {
+		'std_min_bpm': track_std_min_bpm,
+		'unique_min': track_unique_min,
+		'saturation_max': track_saturation_max
+	}
+	resolved_spectral_cfg = {
+		'peak_ratio_min': float(spectral_gating_cfg.get('peak_ratio_min', _DEFAULT_GATING_CFG['spectral']['peak_ratio_min'])),
+		'prominence_min_db': float(spectral_gating_cfg.get('prominence_min_db', _DEFAULT_GATING_CFG['spectral']['prominence_min_db'])),
+		'fwhm_max_hz': float(spectral_gating_cfg.get('fwhm_max_hz', _DEFAULT_GATING_CFG['spectral']['fwhm_max_hz']))
+	}
 
 	method_metrics = {}
 
@@ -1075,13 +1283,29 @@ def evaluate(
 		fps = data['fps']
 
 		for i, est in enumerate(data['estimates']):
+			# Freeze the dict key early to avoid any later mutations shadowing the method name
 			cur_method = est['method']
+			method_key = str(cur_method)
+			method_storage_name = est['method']
+			capability = _infer_method_capability(method_storage_name)
+			enable_track_processing = bool(use_track and capability == 'tracker')
+			gating_flags = {
+				'std': False,
+				'uniq': False,
+				'sat': False,
+				'low_ratio': False,
+				'low_prom': False,
+				'wide_fwhm': False
+			}
+			spectral_stats = {}
+			fallback_from = None
+			is_trustworthy = True
 			if cur_method == 'OF_Deep':
 				cur_method += ofdeep_models[i]
 			elif cur_method == 'OF_Model':
 				cur_method = 'OF_Farneback'
 
-			# Begin per-method processing with robust fallback to ensure every method gets a record
+			# >>> BEGIN per-method record scope (must stay inside the for-loop)
 			try:
 				sig = np.squeeze(est['estimate'])
 
@@ -1106,7 +1330,6 @@ def evaluate(
 				if cur_method in ['bss_emd', 'bss_ssa']:
 					filt_sig = utils.select_component(filt_sig, fps, int(ws/1.5), min_hz, max_hz)
 
-				method_storage_name = est['method']
 				sanitized_method = method_storage_name.replace(' ', '_')
 				sig_rpm_values = None
 				t_sig = None
@@ -1123,7 +1346,7 @@ def evaluate(
 				# Early fail-safe to keep evaluation running; downstream blocks proceed
 				pass
 
-			if use_track:
+			if enable_track_processing:
 				aux_dir = os.path.join(results_dir, 'aux', sanitized_method)
 				aux_file = os.path.join(aux_dir, f"{trial_key}.npz")
 				if os.path.exists(aux_file):
@@ -1163,334 +1386,374 @@ def evaluate(
 					except Exception as exc:
 						tqdm.write(f"> Warning: failed to read aux track for {method_storage_name}: {exc}")
 
-		if (not track_used) and (rr_vals is not None):
-			if rr_vals.size:
-				if win_size == 'video':
-					rr_val = float(rr_vals[-1])
-					sig_rpm_values = np.asarray([rr_val], dtype=np.float64)
-					if t_gt_full.size:
-						t_sig = np.asarray(t_gt_full[:1], dtype=np.float64)
-					else:
-						t_sig = np.asarray([], dtype=np.float64)
-					track_used = True
-				else:
-					if rr_vals.size == target_len and target_len == t_gt_full.size and target_len > 0:
-						sig_rpm_values = rr_vals.astype(np.float64)
-						t_sig = np.asarray(t_gt_full[:rr_vals.size], dtype=np.float64)
+			if enable_track_processing and (not track_used) and (rr_vals is not None):
+				if rr_vals.size:
+					if win_size == 'video':
+						rr_val = float(rr_vals[-1])
+						sig_rpm_values = np.asarray([rr_val], dtype=np.float64)
+						if t_gt_full.size:
+							t_sig = np.asarray(t_gt_full[:1], dtype=np.float64)
+						else:
+							t_sig = np.asarray([], dtype=np.float64)
 						track_used = True
 					else:
-						degenerate_track = True
-						if degenerate_reason is None:
-							degenerate_reason = 'length_mismatch'
-			else:
-				degenerate_track = True
-				if degenerate_reason is None:
-					degenerate_reason = 'low_unique'
-
-		# Absolute margin in Hz prevents penalising physiologic extremes near the band edges.
-		band_hz = float(max_hz) - float(min_hz)
-		edge_margin_hz = float(saturation_margin_hz)
-		if not np.isfinite(edge_margin_hz):
-			edge_margin_hz = 0.0
-		if band_hz > 0.0:
-			max_margin = max(0.0, 0.5 * band_hz - 1e-8)
-			if edge_margin_hz > max_margin:
-				edge_margin_hz = max_margin
-		else:
-			edge_margin_hz = 0.0
-		lower_edge = float(min_hz) + edge_margin_hz
-		upper_edge = float(max_hz) - edge_margin_hz
-
-		finite_track = np.asarray([], dtype=np.float64)
-		sat_frac = float('nan')
-		median_track_hz = float('nan')
-		persist_samples = 1
-		if saturation_persist_sec > 0.0 and fps > 0:
-			persist_samples = max(1, int(round(float(saturation_persist_sec) * float(fps))))
-		if track_series is not None:
-			finite_track = track_series[np.isfinite(track_series)]
-			if finite_track.size:
-				median_track_hz = float(np.nanmedian(finite_track))
-				if lower_edge <= upper_edge:
-					sat_mask_raw = (finite_track <= (lower_edge + 1e-12)) | (finite_track >= (upper_edge - 1e-12))
+						if rr_vals.size == target_len and target_len == t_gt_full.size and target_len > 0:
+							sig_rpm_values = rr_vals.astype(np.float64)
+							t_sig = np.asarray(t_gt_full[:rr_vals.size], dtype=np.float64)
+							track_used = True
+						else:
+							degenerate_track = True
+							if degenerate_reason is None:
+								degenerate_reason = 'length_mismatch'
 				else:
-					sat_mask_raw = (finite_track <= float(min_hz)) | (finite_track >= float(max_hz))
-				if sat_mask_raw.size:
-					if persist_samples > 1:
-						kernel = np.ones(persist_samples, dtype=np.int32)
-						convolved = np.convolve(sat_mask_raw.astype(np.int32), kernel, mode='same')
-						sat_mask = convolved >= persist_samples
-					else:
-						sat_mask = sat_mask_raw
-					sat_frac = float(np.mean(sat_mask))
-				else:
-					sat_frac = float('nan')
-			else:
-				sat_frac = 1.0
-
-		mean_rpm = float('nan')
-		est_std = float('nan')
-		nuniq_frac = 0.0
-		n_windows_est = 0
-		finite_rpm = np.asarray([], dtype=np.float64)
-		allow_constant_track = bool(track_meta.get('is_constant_track')) if isinstance(track_meta, dict) else False
-		meta_for_stats = dict(track_meta) if isinstance(track_meta, dict) else {}
-		meta_for_stats['track_frac_saturated_eval'] = float(sat_frac) if np.isfinite(sat_frac) else float('nan')
-		meta_for_stats['saturation_margin_hz_used'] = float(edge_margin_hz)
-		meta_for_stats['saturation_persist_samples'] = int(persist_samples)
-		meta_for_stats['saturation_persist_sec'] = float(saturation_persist_sec)
-		constant_promoted = False
-
-		if track_used and sig_rpm_values is not None:
-			finite_mask_rpm = np.isfinite(sig_rpm_values)
-			finite_rpm = sig_rpm_values[finite_mask_rpm]
-			n_windows_est = int(sig_rpm_values.size)
-			if finite_rpm.size:
-				with np.errstate(invalid='ignore'):
-					est_std = float(np.nanstd(finite_rpm))
-					mean_rpm = float(np.nanmean(finite_rpm))
-				unique_vals = np.unique(finite_rpm)
-				nuniq_frac = float(unique_vals.size / max(1, finite_rpm.size))
-
-		if constant_ptp_max_hz > 0.0 and finite_track.size:
-			# Robust range (P95−P5) guards against transient spikes while detecting quasi-constant tracks.
-			perc5 = float(np.percentile(finite_track, 5))
-			perc95 = float(np.percentile(finite_track, 95))
-			robust_range = float(max(0.0, perc95 - perc5))
-			meta_for_stats['track_range_hz_p5_p95'] = robust_range if np.isfinite(robust_range) else float('nan')
-			meta_for_stats['track_range_hz_ptp'] = float(np.ptp(finite_track))
-			if np.isfinite(robust_range) and robust_range <= float(constant_ptp_max_hz):
-				interior_ok = False
-				if np.isfinite(median_track_hz):
-					if lower_edge <= upper_edge:
-						interior_ok = (median_track_hz >= lower_edge) and (median_track_hz <= upper_edge)
-					else:
-						interior_ok = (median_track_hz >= float(min_hz)) and (median_track_hz <= float(max_hz))
-				if interior_ok:
-					if not allow_constant_track:
-						constant_promoted = True
-					allow_constant_track = True
-					if meta_for_stats is not None:
-						meta_for_stats.setdefault('constant_track_promoted', True)
-
-		track_stats = {
-			'mean_bpm': mean_rpm if np.isfinite(mean_rpm) else float('nan'),
-			'std_bpm': est_std if np.isfinite(est_std) else float('nan'),
-			'unique_fraction': nuniq_frac,
-			'saturation_fraction': sat_frac,
-			'n_windows': int(n_windows_est),
-			'meta': meta_for_stats
-		}
-		trigger_reason = None
-		if track_used and sig_rpm_values is not None:
-			if finite_rpm.size == 0:
-				trigger_reason = 'empty_or_allnan'
-			elif finite_rpm.size < 2 and win_size != 'video':
-				trigger_reason = 'empty_or_allnan'
-			elif win_size != 'video':
-				if ((not np.isfinite(est_std)) or (est_std < float(track_std_min_bpm))) and not allow_constant_track:
-					trigger_reason = 'low_std'
-				elif (nuniq_frac < float(track_unique_min)) and (not allow_constant_track):
-					trigger_reason = 'low_unique'
-				elif np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)):
-					sat_repr = f"{sat_frac:.3f}" if np.isfinite(sat_frac) else "nan"
-					med_repr = f"{median_track_hz:.3f}" if np.isfinite(median_track_hz) else "nan"
-					const_repr = 'promoted' if constant_promoted else ('true' if allow_constant_track else 'false')
-					persist_repr = f"{persist_samples}x@{float(saturation_persist_sec):.2f}s"
-					band_repr = f"{float(min_hz):.3f}-{float(max_hz):.3f}"
-					reason_detail = (
-						f"high_saturation@{edge_margin_hz:.3f}"
-						f"[band={band_repr};sat={sat_repr};med={med_repr};const={const_repr};persist={persist_repr}]"
-					)
-					should_trigger = True
-					if allow_constant_track and finite_track.size:
-						at_edge = False
-						if np.isfinite(median_track_hz):
-							if lower_edge <= upper_edge:
-								at_edge = (median_track_hz <= lower_edge) or (median_track_hz >= upper_edge)
-							else:
-								at_edge = (median_track_hz <= float(min_hz)) or (median_track_hz >= float(max_hz))
-						if (not at_edge) or sat_frac < 0.98:
-							should_trigger = False
-					if should_trigger:
-						trigger_reason = reason_detail
-		if trigger_reason:
-			track_used = False
-			sig_rpm_values = None
-			degenerate_track = True
-			if degenerate_reason is None:
-				degenerate_reason = trigger_reason
-
-			if track_candidate_present and (not track_used) and degenerate_reason is None:
-				degenerate_track = True
-				degenerate_reason = 'empty_or_allnan'
-
-		if not track_used:
-			if use_track:
-				if track_candidate_present:
-					reason = degenerate_reason or 'unknown'
-					tqdm.write(f"> Warning: track rejected for {method_storage_name}::{trial_key} [reason: {reason}], falling back to spectral RPM")
-				elif '__' in sanitized_method:
-					if degenerate_reason is None:
-						degenerate_reason = 'missing_track'
 					degenerate_track = True
-					tqdm.write(f"> Warning: track missing for {method_storage_name}::{trial_key}; falling back to spectral RPM")
+					if degenerate_reason is None:
+						degenerate_reason = 'low_unique'
+	
+			# Absolute margin in Hz prevents penalising physiologic extremes near the band edges.
+			band_hz = float(max_hz) - float(min_hz)
+			edge_margin_hz = float(saturation_margin_hz)
+			if not np.isfinite(edge_margin_hz):
+				edge_margin_hz = 0.0
+			if band_hz > 0.0:
+				max_margin = max(0.0, 0.5 * band_hz - 1e-8)
+				if edge_margin_hz > max_margin:
+					edge_margin_hz = max_margin
+			else:
+				edge_margin_hz = 0.0
+			lower_edge = float(min_hz) + edge_margin_hz
+			upper_edge = float(max_hz) - edge_margin_hz
+	
+			finite_track = np.asarray([], dtype=np.float64)
+			sat_frac = float('nan')
+			median_track_hz = float('nan')
+			persist_samples = 1
+			if saturation_persist_sec > 0.0 and fps > 0:
+				persist_samples = max(1, int(round(float(saturation_persist_sec) * float(fps))))
+			if track_series is not None:
+				finite_track = track_series[np.isfinite(track_series)]
+				if finite_track.size:
+					median_track_hz = float(np.nanmedian(finite_track))
+					if lower_edge <= upper_edge:
+						sat_mask_raw = (finite_track <= (lower_edge + 1e-12)) | (finite_track >= (upper_edge - 1e-12))
+					else:
+						sat_mask_raw = (finite_track <= float(min_hz)) | (finite_track >= float(max_hz))
+					if sat_mask_raw.size:
+						if persist_samples > 1:
+							kernel = np.ones(persist_samples, dtype=np.int32)
+							convolved = np.convolve(sat_mask_raw.astype(np.int32), kernel, mode='same')
+							sat_mask = convolved >= persist_samples
+						else:
+							sat_mask = sat_mask_raw
+						sat_frac = float(np.mean(sat_mask))
+					else:
+						sat_frac = float('nan')
 				else:
-					tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
-			sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
-
-		source_label = 'track' if track_used else 'spectral'
-
-		recomputed_spectral = False
-		while True:
-			if sig_rpm_values is None:
-				sig_array_raw = np.asarray([], dtype=np.float64)
-			else:
-				sig_array_raw = np.asarray(sig_rpm_values, dtype=np.float64).reshape(-1)
-			pred_len_raw = int(sig_array_raw.size)
-			if t_sig is None:
-				t_sig_array = np.asarray([], dtype=np.float64)
-			else:
-				t_sig_array = np.asarray(t_sig, dtype=np.float64).reshape(-1)
-			if pred_len_raw and t_sig_array.size and pred_len_raw != t_sig_array.size:
-				min_len_local = min(pred_len_raw, t_sig_array.size)
-				sig_array = sig_array_raw[:min_len_local]
-				t_sig_local = t_sig_array[:min_len_local]
-			else:
-				sig_array = sig_array_raw
-				t_sig_local = t_sig_array
-			sig_aligned_tmp, gt_aligned_tmp, times_aligned_tmp, align_meta = _align_to_gt_grid(t_sig_local, sig_array)
-			align_meta['len_pred'] = pred_len_raw
-			align_meta['len_gt'] = int(gt_rpm_full.size)
-			sig_aligned_tmp = np.asarray(sig_aligned_tmp, dtype=np.float64).reshape(-1)
-			gt_aligned_tmp = np.asarray(gt_aligned_tmp, dtype=np.float64).reshape(-1)
-			times_aligned_tmp = np.asarray(times_aligned_tmp, dtype=np.float64).reshape(-1)
-			min_len_aligned = min(sig_aligned_tmp.size, gt_aligned_tmp.size, times_aligned_tmp.size)
-			if min_len_aligned:
-				sig_aligned_tmp = sig_aligned_tmp[:min_len_aligned]
-				gt_aligned_tmp = gt_aligned_tmp[:min_len_aligned]
-				times_aligned_tmp = times_aligned_tmp[:min_len_aligned]
-			else:
-				sig_aligned_tmp = np.asarray([], dtype=np.float64)
-				gt_aligned_tmp = np.asarray([], dtype=np.float64)
-				times_aligned_tmp = np.asarray([], dtype=np.float64)
-			align_meta['len_final'] = int(min_len_aligned)
-			finite_mask_pair = np.isfinite(sig_aligned_tmp) & np.isfinite(gt_aligned_tmp)
-			valid_count = int(finite_mask_pair.sum())
-			align_meta['len_valid'] = valid_count
-			if valid_count:
-				sig_valid_tmp = sig_aligned_tmp[finite_mask_pair]
-				gt_valid_tmp = gt_aligned_tmp[finite_mask_pair]
-				times_valid_tmp = times_aligned_tmp[finite_mask_pair]
-			else:
-				sig_valid_tmp = np.asarray([], dtype=np.float64)
-				gt_valid_tmp = np.asarray([], dtype=np.float64)
-				times_valid_tmp = np.asarray([], dtype=np.float64)
-			if source_label == 'track' and (align_meta['len_final'] == 0 or valid_count < 2) and not recomputed_spectral:
+					sat_frac = 1.0
+	
+			mean_rpm = float('nan')
+			est_std = float('nan')
+			nuniq_frac = 0.0
+			n_windows_est = 0
+			finite_rpm = np.asarray([], dtype=np.float64)
+			allow_constant_track = bool(track_meta.get('is_constant_track')) if isinstance(track_meta, dict) else False
+			meta_for_stats = dict(track_meta) if isinstance(track_meta, dict) else {}
+			meta_for_stats['track_frac_saturated_eval'] = float(sat_frac) if np.isfinite(sat_frac) else float('nan')
+			meta_for_stats['saturation_margin_hz_used'] = float(edge_margin_hz)
+			meta_for_stats['saturation_persist_samples'] = int(persist_samples)
+			meta_for_stats['saturation_persist_sec'] = float(saturation_persist_sec)
+			constant_promoted = False
+	
+			if track_used and sig_rpm_values is not None:
+				finite_mask_rpm = np.isfinite(sig_rpm_values)
+				finite_rpm = sig_rpm_values[finite_mask_rpm]
+				n_windows_est = int(sig_rpm_values.size)
+				if finite_rpm.size:
+					with np.errstate(invalid='ignore'):
+						est_std = float(np.nanstd(finite_rpm))
+						mean_rpm = float(np.nanmean(finite_rpm))
+					unique_vals = np.unique(finite_rpm)
+					nuniq_frac = float(unique_vals.size / max(1, finite_rpm.size))
+	
+			if constant_ptp_max_hz > 0.0 and finite_track.size:
+				# Robust range (P95−P5) guards against transient spikes while detecting quasi-constant tracks.
+				perc5 = float(np.percentile(finite_track, 5))
+				perc95 = float(np.percentile(finite_track, 95))
+				robust_range = float(max(0.0, perc95 - perc5))
+				meta_for_stats['track_range_hz_p5_p95'] = robust_range if np.isfinite(robust_range) else float('nan')
+				meta_for_stats['track_range_hz_ptp'] = float(np.ptp(finite_track))
+				if np.isfinite(robust_range) and robust_range <= float(constant_ptp_max_hz):
+					interior_ok = False
+					if np.isfinite(median_track_hz):
+						if lower_edge <= upper_edge:
+							interior_ok = (median_track_hz >= lower_edge) and (median_track_hz <= upper_edge)
+						else:
+							interior_ok = (median_track_hz >= float(min_hz)) and (median_track_hz <= float(max_hz))
+					if interior_ok:
+						if not allow_constant_track:
+							constant_promoted = True
+						allow_constant_track = True
+						if meta_for_stats is not None:
+							meta_for_stats.setdefault('constant_track_promoted', True)
+	
+			track_stats = {
+				'mean_bpm': mean_rpm if np.isfinite(mean_rpm) else float('nan'),
+				'std_bpm': est_std if np.isfinite(est_std) else float('nan'),
+				'unique_fraction': nuniq_frac,
+				'saturation_fraction': sat_frac,
+				'n_windows': int(n_windows_est),
+				'meta': meta_for_stats
+			}
+			trigger_reason = None
+			fallback_due_to_gating = False
+			if enable_track_processing and track_used and sig_rpm_values is not None:
+				if finite_rpm.size == 0:
+					trigger_reason = 'empty_or_allnan'
+				elif finite_rpm.size < 2 and win_size != 'video':
+					trigger_reason = 'empty_or_allnan'
+				elif win_size != 'video':
+					if ((not np.isfinite(est_std)) or (est_std < float(track_std_min_bpm))) and not allow_constant_track:
+						trigger_reason = 'low_std'
+						gating_flags['std'] = True
+						fallback_due_to_gating = True
+					elif (nuniq_frac < float(track_unique_min)) and (not allow_constant_track):
+						trigger_reason = 'low_unique'
+						gating_flags['uniq'] = True
+						fallback_due_to_gating = True
+					elif np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)):
+						sat_repr = f"{sat_frac:.3f}" if np.isfinite(sat_frac) else "nan"
+						med_repr = f"{median_track_hz:.3f}" if np.isfinite(median_track_hz) else "nan"
+						const_repr = 'promoted' if constant_promoted else ('true' if allow_constant_track else 'false')
+						persist_repr = f"{persist_samples}x@{float(saturation_persist_sec):.2f}s"
+						band_repr = f"{float(min_hz):.3f}-{float(max_hz):.3f}"
+						reason_detail = (
+							f"high_saturation@{edge_margin_hz:.3f}"
+							f"[band={band_repr};sat={sat_repr};med={med_repr};const={const_repr};persist={persist_repr}]"
+						)
+						should_trigger = True
+						if allow_constant_track and finite_track.size:
+							at_edge = False
+							if np.isfinite(median_track_hz):
+								if lower_edge <= upper_edge:
+									at_edge = (median_track_hz <= lower_edge) or (median_track_hz >= upper_edge)
+								else:
+									at_edge = (median_track_hz <= float(min_hz)) or (median_track_hz >= float(max_hz))
+							if (not at_edge) or sat_frac < 0.98:
+								should_trigger = False
+						if should_trigger:
+							trigger_reason = reason_detail
+							gating_flags['sat'] = True
+							fallback_due_to_gating = True
+			if fallback_due_to_gating and disable_gating:
+				trigger_reason = None
+				fallback_due_to_gating = False
+			if trigger_reason:
+				track_used = False
+				sig_rpm_values = None
 				degenerate_track = True
 				if degenerate_reason is None:
+					degenerate_reason = trigger_reason
+				if track_candidate_present and degenerate_reason is None:
+					degenerate_track = True
 					degenerate_reason = 'empty_or_allnan'
-				track_used = False
-				source_label = 'spectral'
-				if use_track:
+				if capability == 'tracker':
+					fallback_from = 'track'
+	
+			if not track_used:
+				if enable_track_processing:
+					flag_snapshot = {k: v for k, v in gating_flags.items() if v}
 					if track_candidate_present:
 						reason = degenerate_reason or 'unknown'
-						tqdm.write(f"> Warning: track rejected for {method_storage_name}::{trial_key} [reason: {reason}], falling back to spectral RPM")
+						tqdm.write(f"WARN [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={reason} -> fallback=spectral")
 					elif '__' in sanitized_method:
 						if degenerate_reason is None:
 							degenerate_reason = 'missing_track'
 						degenerate_track = True
-						tqdm.write(f"> Warning: track missing for {method_storage_name}::{trial_key}; falling back to spectral RPM")
+						tqdm.write(f"WARN [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={degenerate_reason} -> fallback=spectral")
 					else:
 						tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
 				sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
-				recomputed_spectral = True
-				continue
-			sig_aligned = sig_aligned_tmp
-			gt_aligned = gt_aligned_tmp
-			times_aligned = times_aligned_tmp
-			sig_valid = sig_valid_tmp
-			gt_valid = gt_valid_tmp
-			times_valid = times_valid_tmp
-			alignment_meta = align_meta
-			break
-
-		sig_finite = sig_valid[np.isfinite(sig_valid)] if sig_valid.size else np.asarray([], dtype=np.float64)
-		gt_finite = gt_valid[np.isfinite(gt_valid)] if gt_valid.size else np.asarray([], dtype=np.float64)
-
-		if sig_finite.size:
-			with np.errstate(invalid='ignore'):
-				est_mean_val = float(np.mean(sig_finite, dtype=np.float64))
-				est_std_val = float(np.std(sig_finite, dtype=np.float64))
-		else:
-			est_mean_val = float('nan')
-			est_std_val = float('nan')
-
-		if gt_finite.size:
-			with np.errstate(invalid='ignore'):
-				gt_mean_val = float(np.mean(gt_finite, dtype=np.float64))
-				gt_std_val = float(np.std(gt_finite, dtype=np.float64))
-		else:
-			gt_mean_val = float('nan')
-			gt_std_val = float('nan')
-
-		if sig_valid.size >= 2:
-			with np.errstate(invalid='ignore'):
-				std_pair_est = float(np.std(sig_valid, dtype=np.float64))
-		else:
-			std_pair_est = float('nan')
-		if gt_valid.size >= 2:
-			with np.errstate(invalid='ignore'):
-				std_pair_gt = float(np.std(gt_valid, dtype=np.float64))
-		else:
-			std_pair_gt = float('nan')
-
-		if sig_valid.size >= 2 and gt_valid.size >= 2:
-			if (np.isfinite(std_pair_gt) and std_pair_gt < 1e-12) or (np.isfinite(std_pair_est) and std_pair_est < 1e-12):
-				scatter_slope = scatter_intercept = float('nan')
+				spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
+				if capability == 'tracker':
+					source_label = 'fallback'
+					if fallback_from is None:
+						fallback_from = 'track'
+				else:
+					source_label = 'spectral'
 			else:
+				source_label = 'track' if capability == 'tracker' else 'spectral'
+	
+			recomputed_spectral = False
+			while True:
+				if sig_rpm_values is None:
+					sig_array_raw = np.asarray([], dtype=np.float64)
+				else:
+					sig_array_raw = np.asarray(sig_rpm_values, dtype=np.float64).reshape(-1)
+				pred_len_raw = int(sig_array_raw.size)
+				if t_sig is None:
+					t_sig_array = np.asarray([], dtype=np.float64)
+				else:
+					t_sig_array = np.asarray(t_sig, dtype=np.float64).reshape(-1)
+				if pred_len_raw and t_sig_array.size and pred_len_raw != t_sig_array.size:
+					min_len_local = min(pred_len_raw, t_sig_array.size)
+					sig_array = sig_array_raw[:min_len_local]
+					t_sig_local = t_sig_array[:min_len_local]
+				else:
+					sig_array = sig_array_raw
+					t_sig_local = t_sig_array
+				sig_aligned_tmp, gt_aligned_tmp, times_aligned_tmp, align_meta = _align_to_gt_grid(t_sig_local, sig_array)
+				align_meta['len_pred'] = pred_len_raw
+				align_meta['len_gt'] = int(gt_rpm_full.size)
+				sig_aligned_tmp = np.asarray(sig_aligned_tmp, dtype=np.float64).reshape(-1)
+				gt_aligned_tmp = np.asarray(gt_aligned_tmp, dtype=np.float64).reshape(-1)
+				times_aligned_tmp = np.asarray(times_aligned_tmp, dtype=np.float64).reshape(-1)
+				min_len_aligned = min(sig_aligned_tmp.size, gt_aligned_tmp.size, times_aligned_tmp.size)
+				if min_len_aligned:
+					sig_aligned_tmp = sig_aligned_tmp[:min_len_aligned]
+					gt_aligned_tmp = gt_aligned_tmp[:min_len_aligned]
+					times_aligned_tmp = times_aligned_tmp[:min_len_aligned]
+				else:
+					sig_aligned_tmp = np.asarray([], dtype=np.float64)
+					gt_aligned_tmp = np.asarray([], dtype=np.float64)
+					times_aligned_tmp = np.asarray([], dtype=np.float64)
+				align_meta['len_final'] = int(min_len_aligned)
+				finite_mask_pair = np.isfinite(sig_aligned_tmp) & np.isfinite(gt_aligned_tmp)
+				valid_count = int(finite_mask_pair.sum())
+				align_meta['len_valid'] = valid_count
+				if valid_count:
+					sig_valid_tmp = sig_aligned_tmp[finite_mask_pair]
+					gt_valid_tmp = gt_aligned_tmp[finite_mask_pair]
+					times_valid_tmp = times_aligned_tmp[finite_mask_pair]
+				else:
+					sig_valid_tmp = np.asarray([], dtype=np.float64)
+					gt_valid_tmp = np.asarray([], dtype=np.float64)
+					times_valid_tmp = np.asarray([], dtype=np.float64)
+				if source_label == 'track' and (align_meta['len_final'] == 0 or valid_count < 2) and not recomputed_spectral:
+					degenerate_track = True
+					if degenerate_reason is None:
+						degenerate_reason = 'empty_or_allnan'
+					track_used = False
+					source_label = 'fallback' if capability == 'tracker' else 'spectral'
+					if enable_track_processing:
+						if track_candidate_present:
+							reason = degenerate_reason or 'unknown'
+							tqdm.write(f"> Warning: track rejected for {method_storage_name}::{trial_key} [reason: {reason}], falling back to spectral RPM")
+						elif '__' in sanitized_method:
+							if degenerate_reason is None:
+								degenerate_reason = 'missing_track'
+							degenerate_track = True
+							tqdm.write(f"> Warning: track missing for {method_storage_name}::{trial_key}; falling back to spectral RPM")
+						else:
+							tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
+					sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
+					spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
+					if capability == 'tracker' and fallback_from is None:
+						fallback_from = 'track'
+					recomputed_spectral = True
+					continue
+				sig_aligned = sig_aligned_tmp
+				gt_aligned = gt_aligned_tmp
+				times_aligned = times_aligned_tmp
+				sig_valid = sig_valid_tmp
+				gt_valid = gt_valid_tmp
+				times_valid = times_valid_tmp
+				alignment_meta = align_meta
+				break
+	
+			sig_finite = sig_valid[np.isfinite(sig_valid)] if sig_valid.size else np.asarray([], dtype=np.float64)
+			gt_finite = gt_valid[np.isfinite(gt_valid)] if gt_valid.size else np.asarray([], dtype=np.float64)
+	
+			if sig_finite.size:
 				with np.errstate(invalid='ignore'):
-					try:
-						scatter_slope, scatter_intercept = np.polyfit(gt_valid, sig_valid, 1)
-					except Exception:
-						scatter_slope = scatter_intercept = float('nan')
-		else:
-			scatter_slope = scatter_intercept = float('nan')
-
-		if sig_valid.size >= 2 and gt_valid.size >= 2:
-			corr_degenerate = (
-				(np.isfinite(std_pair_gt) and std_pair_gt < corr_guard_eps)
-				or (np.isfinite(std_pair_est) and std_pair_est < corr_guard_eps)
-			)
-		else:
-			corr_degenerate = True
-
-		if sig_valid.size >= 2 and gt_valid.size >= 2:
-			e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics)
-			raw_metrics = e[:-1]
-			pair = e[-1]
-			if corr_degenerate:
-				for idx, metric_name in enumerate(metrics):
-					if metric_name in ('CORR', 'PCC', 'CCC'):
-						raw_metrics[idx] = float('nan')
-		else:
-			raw_metrics = [float('nan')] * len(metrics)
-			pair = [
-				np.atleast_2d(sig_valid.astype(np.float64)),
-				gt_valid.astype(np.float64)
-			]
-
-		metric_values = []
-		for val in raw_metrics:
-			try:
-				metric_values.append(float(val))
-			except Exception:
+					est_mean_val = float(np.mean(sig_finite, dtype=np.float64))
+					est_std_val = float(np.std(sig_finite, dtype=np.float64))
+			else:
+				est_mean_val = float('nan')
+				est_std_val = float('nan')
+	
+			if gt_finite.size:
+				with np.errstate(invalid='ignore'):
+					gt_mean_val = float(np.mean(gt_finite, dtype=np.float64))
+					gt_std_val = float(np.std(gt_finite, dtype=np.float64))
+			else:
+				gt_mean_val = float('nan')
+				gt_std_val = float('nan')
+	
+			if capability == 'spectral':
+				if not spectral_stats:
+					spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
+				trustworthy, spectral_flag_values, spectral_reason = _spectral_quality_flags(spectral_stats, resolved_spectral_cfg, disable_gating)
+				for key, value in spectral_flag_values.items():
+					if key in gating_flags:
+						gating_flags[key] = value
+					else:
+						gating_flags[key] = value
+				is_trustworthy = trustworthy
+				if (not trustworthy) and spectral_reason and degenerate_reason is None:
+					degenerate_reason = spectral_reason
+				if not trustworthy:
+					flag_snapshot = {k: v for k, v in gating_flags.items() if v}
+					tqdm.write(f"WARN [evaluate] method={method_storage_name} cap=spectral flags={flag_snapshot or gating_flags} trust=False")
+			else:
+				is_trustworthy = True
+	
+			if sig_valid.size >= 2:
+				with np.errstate(invalid='ignore'):
+					std_pair_est = float(np.std(sig_valid, dtype=np.float64))
+			else:
+				std_pair_est = float('nan')
+			if gt_valid.size >= 2:
+				with np.errstate(invalid='ignore'):
+					std_pair_gt = float(np.std(gt_valid, dtype=np.float64))
+			else:
+				std_pair_gt = float('nan')
+	
+			if sig_valid.size >= 2 and gt_valid.size >= 2:
+				if (np.isfinite(std_pair_gt) and std_pair_gt < 1e-12) or (np.isfinite(std_pair_est) and std_pair_est < 1e-12):
+					scatter_slope = scatter_intercept = float('nan')
+				else:
+					with np.errstate(invalid='ignore'):
+						try:
+							scatter_slope, scatter_intercept = np.polyfit(gt_valid, sig_valid, 1)
+						except Exception:
+							scatter_slope = scatter_intercept = float('nan')
+			else:
+				scatter_slope = scatter_intercept = float('nan')
+	
+			if sig_valid.size >= 2 and gt_valid.size >= 2:
+				corr_degenerate = (
+					(np.isfinite(std_pair_gt) and std_pair_gt < corr_guard_eps)
+					or (np.isfinite(std_pair_est) and std_pair_est < corr_guard_eps)
+				)
+			else:
+				corr_degenerate = True
+	
+			if sig_valid.size >= 2 and gt_valid.size >= 2:
+				e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics)
+				raw_metrics = e[:-1]
+				pair = e[-1]
+				if corr_degenerate:
+					for idx, metric_name in enumerate(metrics):
+						if metric_name in ('CORR', 'PCC', 'CCC'):
+							raw_metrics[idx] = float('nan')
+			else:
+				raw_metrics = [float('nan')] * len(metrics)
+				pair = [
+					np.atleast_2d(sig_valid.astype(np.float64)),
+					gt_valid.astype(np.float64)
+				]
+	
+			metric_values = []
+			for val in raw_metrics:
 				try:
-					val_arr = np.atleast_1d(val).astype(float)
-					metric_values.append(float(val_arr.flat[0]))
+					metric_values.append(float(val))
 				except Exception:
-					metric_values.append(float('nan'))
-
+					try:
+						val_arr = np.atleast_1d(val).astype(float)
+						metric_values.append(float(val_arr.flat[0]))
+					except Exception:
+						metric_values.append(float('nan'))
+	
 			times_valid_for_record = np.asarray(times_valid, dtype=np.float64)
 			record_alignment = {
 				'aligned': bool(alignment_meta.get('aligned', False)),
@@ -1499,18 +1762,23 @@ def evaluate(
 				'len_final': int(alignment_meta.get('len_final', 0)),
 				'len_valid': int(alignment_meta.get('len_valid', 0))
 			}
-
+	
 			try:
 				record = {
 					'metrics': metric_values,
 					'pair': pair,
 					'source': source_label,
+					'capability': capability,
 					'stride': stride,
 					'times_est': times_valid_for_record,
 					'times_gt': times_valid_for_record,
 					'degenerate_track': bool(degenerate_track),
 					'degenerate_reason': degenerate_reason,
 					'track_stats': track_stats,
+					'spectral_stats': spectral_stats,
+					'gating_flags': dict(gating_flags),
+					'fallback_from': fallback_from,
+					'is_trustworthy': bool(is_trustworthy),
 					'est_mean': est_mean_val,
 					'est_std': est_std_val,
 					'gt_mean': gt_mean_val,
@@ -1524,21 +1792,26 @@ def evaluate(
 					'len_valid': record_alignment['len_valid'],
 					'alignment': record_alignment
 				}
-				method_metrics.setdefault(cur_method, []).append(record)
+				method_metrics.setdefault(method_key, []).append(record)
 				if debug_log_path:
 					with open(debug_log_path, 'a') as fp:
-						fp.write(f"{os.path.basename(filepath)}\t{cur_method}\tlen_valid={record.get('len_valid', 0)}\n")
+						fp.write(f"{os.path.basename(filepath)}\t{method_key}\tsource={source_label}\tlen_valid={record.get('len_valid', 0)}\n")
 			except Exception as exc:
 				placeholder = {
 					'metrics': [float('nan')] * len(metrics),
 					'pair': [np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)],
 					'source': 'error',
+					'capability': capability,
 					'stride': stride,
 					'times_est': np.asarray([], dtype=np.float64),
 					'times_gt': np.asarray([], dtype=np.float64),
 					'degenerate_track': True,
 					'degenerate_reason': f'exception:{type(exc).__name__}',
 					'track_stats': {},
+					'spectral_stats': {},
+					'gating_flags': dict(gating_flags),
+					'fallback_from': fallback_from,
+					'is_trustworthy': False,
 					'est_mean': float('nan'),
 					'est_std': float('nan'),
 					'gt_mean': float('nan'),
@@ -1552,14 +1825,14 @@ def evaluate(
 					'len_valid': 0,
 					'alignment': {'aligned': False, 'len_gt': 0, 'len_pred': 0, 'len_final': 0, 'len_valid': 0}
 				}
-				method_metrics.setdefault(cur_method, []).append(placeholder)
+				method_metrics.setdefault(method_key, []).append(placeholder)
 				if debug_log_path:
 					try:
 						with open(debug_log_path, 'a') as fp:
-							fp.write(f"{os.path.basename(filepath)}\t{cur_method}\tlen_valid=0\tEXC={type(exc).__name__}\n")
+							fp.write(f"{os.path.basename(filepath)}\t{method_key}\tlen_valid=0\tEXC={type(exc).__name__}\n")
 					except Exception:
 						pass
-
+	
 	# Before saving, report which methods produced metrics (helps debug filtering issues)
 	try:
 		seen_methods = sorted(list(method_metrics.keys()))
@@ -1594,7 +1867,8 @@ def evaluate(
 				"track_saturation_max": track_saturation_max,
 				"saturation_margin_hz": saturation_margin_hz,
 				"saturation_persist_sec": saturation_persist_sec,
-				"constant_ptp_max_hz": constant_ptp_max_hz
+				"constant_ptp_max_hz": constant_ptp_max_hz,
+				"gating": gating_cfg
 			}, fp, indent=2)
 	except Exception as exc:
 		print(f"> Warning: failed to write evaluation settings ({exc})")
@@ -2490,6 +2764,7 @@ def main(argv=None):
 	parser.add_argument('--num_shards', type=int, default=1, help='Number of shards for parallel estimate execution')
 	parser.add_argument('--shard_index', type=int, default=0, help='Shard index (0-based) selecting which methods to estimate')
 	parser.add_argument('--auto_discover_methods', action='store_true', help='Discover available methods from results directory during evaluate/metrics steps')
+	parser.add_argument('--override', action='append', help='Override config values using dotted paths (e.g., gating.debug.disable_gating=true)')
 	parser.add_argument('--allow-missing-methods', dest='allow_missing_methods', action='store_true', help='Allow evaluation/metrics to proceed when some configured methods are missing')
 	parser.add_argument('--no-allow-missing-methods', dest='allow_missing_methods', action='store_false', help='Fail if configured methods are missing in results')
 	parser.add_argument('--profile-steps', dest='profile_steps', action='store_true', help='Collect and display timing summaries for timed pipeline steps')
@@ -2509,6 +2784,10 @@ def main(argv=None):
 	allow_missing_methods = bool(args.allow_missing_methods)
 
 	cfg = load_config(args.config)
+	if args.override:
+		_apply_overrides(cfg, args.override)
+	gating_cfg = _resolve_gating_config(cfg)
+	cfg['gating'] = gating_cfg
 	run_label = cfg.get('name') if cfg else None
 
 	# Determine steps
@@ -2539,16 +2818,19 @@ def main(argv=None):
 
 	eval_cfg = cfg.get('eval', {})
 	report_cfg = cfg.get('report', {})
+	gating_common = gating_cfg.get('common', {})
 
 	metrics = ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
 	min_hz = eval_cfg.get('min_hz', 0.08)
 	max_hz = eval_cfg.get('max_hz', 0.5)
 	use_track = eval_cfg.get('use_track', False)
+	if gating_common.get('use_track') is not None:
+		use_track = bool(gating_common.get('use_track'))
 	track_std_min_bpm = eval_cfg.get('track_std_min_bpm', 0.3)
 	track_unique_min = eval_cfg.get('track_unique_min', 0.05)
 	track_saturation_max = eval_cfg.get('track_saturation_max', 0.15)
-	saturation_margin_hz = eval_cfg.get('saturation_margin_hz', 0.0)
-	saturation_persist_sec = eval_cfg.get('saturation_persist_sec', 0.0)
+	saturation_margin_hz = eval_cfg.get('saturation_margin_hz', gating_common.get('saturation_margin_hz', 0.0))
+	saturation_persist_sec = eval_cfg.get('saturation_persist_sec', gating_common.get('saturation_persist_sec', 0.0))
 	constant_ptp_max_hz = eval_cfg.get('constant_ptp_max_hz', 0.0)
 	win_override = args.win or eval_cfg.get('win_size', 'video')
 	if isinstance(win_override, str) and win_override.lower() == 'video':
@@ -2630,7 +2912,8 @@ def main(argv=None):
 				track_saturation_max=track_saturation_max,
 				saturation_margin_hz=saturation_margin_hz,
 				saturation_persist_sec=saturation_persist_sec,
-				constant_ptp_max_hz=constant_ptp_max_hz
+				constant_ptp_max_hz=constant_ptp_max_hz,
+				gating=gating_cfg
 			)
 		_profiler_stage_end('evaluate')
 
@@ -2677,7 +2960,8 @@ def main(argv=None):
 					track_saturation_max=track_saturation_max,
 					saturation_margin_hz=saturation_margin_hz,
 					saturation_persist_sec=saturation_persist_sec,
-					constant_ptp_max_hz=constant_ptp_max_hz
+					constant_ptp_max_hz=constant_ptp_max_hz,
+					gating=gating_cfg
 				)
 			unique_window = os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
 			print(f"\n== Metrics for {run_dir} ==")
