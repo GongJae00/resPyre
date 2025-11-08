@@ -98,4 +98,4 @@ python3 run_all.py --config configs/cohface_motion.json --step report
 - ROI 추출/플롯/평가에 SciPy, Matplotlib 등 Python 패키지가 필요합니다. `setup/` 절차로 제작한 conda 환경(`resPyre`)을 활성화한 뒤 실행하세요.
 - 리포트 합본 시 각 run 디렉터리의 `metrics.pkl` 또는 `metrics_1w.pkl`이 존재해야 합니다.
 - config 없이 실행하면 기존 기본값( COHFACE + OF/DoF/profile1D )으로 동작합니다.
-- `profile1D`를 문자열로 넣으면 linear/quadratic/cubic 세 가지 보간법이 모두 포함되고, 결과 플롯에는 Bland-Altman, 시간 오버레이, PSD, scatter가 자동으로 생성됩니다. `metrics_summary.txt`에는 `CORR`(평균 Pearson 상관계수)도 추가됩니다.
+- `profile1D`를 문자열로 넣으면 linear/quadratic/cubic 세 가지 보간법이 모두 포함되고, 결과 플롯에는 Bland-Altman, 시간 오버레이, PSD, scatter가 자동으로 생성됩니다. `metrics_summary.txt`에는 `PCC`(Pearson 상관계수)도 포함됩니다.

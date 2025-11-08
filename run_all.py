@@ -24,6 +24,8 @@ from config_loader import load_config
 _STEP_PROF = defaultdict(lambda: {"calls": 0, "total": 0.0})
 _PROFILE_STEPS = True
 
+PRIMARY_METRICS = ['RMSE', 'MAE', 'MAPE', 'PCC', 'CCC']
+
 # Datasets class definitions
 
 class DatasetBase:
@@ -798,8 +800,10 @@ _SPECTRAL_SUFFIXES = {'spec_ridge'}
 _DEFAULT_GATING_CFG = {
 	'common': {
 		'use_track': None,
+		# Hz guard at band edges; recommend margin 0.005 Hz + 1 s persist when trackers are primary.
 		'saturation_margin_hz': 0.0,
-		'saturation_persist_sec': 0.0
+		'saturation_persist_sec': 0.0,
+		'constant_ptp_max_hz': 0.0
 	},
 	'tracker': {
 		'std_min_bpm': 0.3,
@@ -813,6 +817,22 @@ _DEFAULT_GATING_CFG = {
 	},
 	'debug': {
 		'disable_gating': False
+	}
+}
+
+_BUILTIN_GATING_PROFILES = {
+	'diagnostic-relaxed': {
+		'common': {
+			'use_track': True,
+			'saturation_margin_hz': 0.005,
+			'saturation_persist_sec': 1.0,
+			'constant_ptp_max_hz': 0.008
+		},
+		'tracker': {
+			'std_min_bpm': 0.05,
+			'unique_min': 0.01,
+			'saturation_max': 0.4
+		}
 	}
 }
 
@@ -956,9 +976,27 @@ def _apply_overrides(cfg, overrides):
 def _resolve_gating_config(cfg):
 	user_cfg = cfg.get('gating') if isinstance(cfg, dict) else {}
 	base = copy.deepcopy(_DEFAULT_GATING_CFG)
-	if isinstance(user_cfg, dict):
-		return _deep_merge_dict(base, user_cfg)
-	return base
+	if not isinstance(user_cfg, dict):
+		return base
+	profile_name = user_cfg.get('profile')
+	profile_sources = {}
+	if isinstance(user_cfg.get('profiles'), dict):
+		profile_sources.update(user_cfg['profiles'])
+	if profile_name:
+		if profile_name in profile_sources:
+			profile_cfg = copy.deepcopy(profile_sources[profile_name])
+		else:
+			profile_cfg = copy.deepcopy(_BUILTIN_GATING_PROFILES.get(profile_name, {}))
+		if profile_cfg:
+			base = _deep_merge_dict(base, profile_cfg)
+	# Merge explicit overrides (excluding profile metadata)
+	user_cfg_copy = copy.deepcopy(user_cfg)
+	user_cfg_copy.pop('profile', None)
+	user_cfg_copy.pop('profiles', None)
+	resolved = _deep_merge_dict(base, user_cfg_copy)
+	if profile_name:
+		resolved.setdefault('meta', {})['profile'] = profile_name
+	return resolved
 
 
 @timed_step('evaluate')
@@ -998,6 +1036,8 @@ def evaluate(
 		saturation_margin_hz = gating_common.get('saturation_margin_hz')
 	if gating_common.get('saturation_persist_sec') is not None:
 		saturation_persist_sec = gating_common.get('saturation_persist_sec')
+	if gating_common.get('constant_ptp_max_hz') is not None:
+		constant_ptp_max_hz = gating_common.get('constant_ptp_max_hz')
 
 	print('\n> Loading extracted data from ' + results_dir + '...')
 
@@ -1564,12 +1604,12 @@ def evaluate(
 					flag_snapshot = {k: v for k, v in gating_flags.items() if v}
 					if track_candidate_present:
 						reason = degenerate_reason or 'unknown'
-						tqdm.write(f"WARN [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={reason} -> fallback=spectral")
+						tqdm.write(f"WARNING [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={reason} -> fallback=spectral")
 					elif '__' in sanitized_method:
 						if degenerate_reason is None:
 							degenerate_reason = 'missing_track'
 						degenerate_track = True
-						tqdm.write(f"WARN [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={degenerate_reason} -> fallback=spectral")
+						tqdm.write(f"WARNING [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={degenerate_reason} -> fallback=spectral")
 					else:
 						tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
 				sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
@@ -1693,7 +1733,7 @@ def evaluate(
 					degenerate_reason = spectral_reason
 				if not trustworthy:
 					flag_snapshot = {k: v for k, v in gating_flags.items() if v}
-					tqdm.write(f"WARN [evaluate] method={method_storage_name} cap=spectral flags={flag_snapshot or gating_flags} trust=False")
+					tqdm.write(f"WARNING [evaluate] method={method_storage_name} cap=spectral flags={flag_snapshot or gating_flags} trust=False")
 			else:
 				is_trustworthy = True
 	
@@ -1727,14 +1767,14 @@ def evaluate(
 				)
 			else:
 				corr_degenerate = True
-	
+
 			if sig_valid.size >= 2 and gt_valid.size >= 2:
 				e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics)
 				raw_metrics = e[:-1]
 				pair = e[-1]
 				if corr_degenerate:
 					for idx, metric_name in enumerate(metrics):
-						if metric_name in ('CORR', 'PCC', 'CCC'):
+						if metric_name in ('PCC', 'CCC'):
 							raw_metrics[idx] = float('nan')
 			else:
 				raw_metrics = [float('nan')] * len(metrics)
@@ -1901,6 +1941,7 @@ def print_metrics(results_dir, unique_window=False):
 	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
 	with open(os.path.join(metrics_dir, fn), 'rb') as f: 
 		metrics, method_metrics = pickle.load(f)
+		metrics, method_metrics = _normalize_metrics_payload(metrics, method_metrics)
 	settings_path = os.path.join(metrics_dir, 'eval_settings.json')
 	if os.path.exists(settings_path):
 		try:
@@ -1917,7 +1958,7 @@ def print_metrics(results_dir, unique_window=False):
 	summaries = _summaries_with_samples(method_metrics, metrics, unique_window)
 
 	if unique_window:
-		headers = ['Method', 'RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+		headers = ['Method'] + PRIMARY_METRICS
 	else:
 		headers = ['Method'] + metrics
 	table_rows = []
@@ -1926,7 +1967,7 @@ def print_metrics(results_dir, unique_window=False):
 		values = summary['values']
 		if unique_window:
 			row_vals = [method]
-			for key in ['RMSE','MAE','MAPE','CORR','PCC','CCC']:
+			for key in PRIMARY_METRICS:
 				row_vals.append(_format_scalar(values.get(key, float('nan'))))
 		else:
 			row_vals = [method]
@@ -1945,6 +1986,36 @@ def print_metrics(results_dir, unique_window=False):
 			fp.write(table_str + "\n")
 	except Exception:
 		pass
+
+
+def _normalize_metrics_payload(metric_names, method_metrics):
+	"""Drop deprecated CORR metric from stored payloads while keeping entries aligned."""
+	if not metric_names:
+		return metric_names, method_metrics
+	names = list(metric_names)
+	if 'CORR' not in names:
+		return names, method_metrics
+
+	drop_indices = [idx for idx, name in enumerate(metric_names) if name == 'CORR']
+	removed = 0
+	for idx in drop_indices:
+		target = idx - removed
+		if 0 <= target < len(names):
+			names.pop(target)
+		if method_metrics:
+			for records in method_metrics.values():
+				for record in records or []:
+					vals = record.get('metrics')
+					if vals is None:
+						continue
+					if isinstance(vals, tuple):
+						vals = list(vals)
+						record['metrics'] = vals
+					if isinstance(vals, list) and len(vals) > target:
+						del vals[target]
+		removed += 1
+
+	return names, method_metrics
 
 
 @timed_step('extract_respiration')
@@ -2101,12 +2172,10 @@ def _summaries_with_samples(method_metrics, metrics, unique_window):
 				values['RMSE'] = RMSEerror(est_concat, gt_concat)
 				values['MAE'] = MAEerror(est_concat, gt_concat)
 				values['MAPE'] = MAPEerror(est_concat, gt_concat)
-				corr = PearsonCorr(est_concat, gt_concat)
-				values['CORR'] = corr
-				values['PCC'] = corr
+				values['PCC'] = PearsonCorr(est_concat, gt_concat)
 				values['CCC'] = LinCorr(est_concat, gt_concat)
 			else:
-				for key in ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']:
+				for key in PRIMARY_METRICS:
 					values[key] = float('nan')
 		else:
 			for idx, metric_name in enumerate(metrics):
@@ -2177,7 +2246,7 @@ def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window, ann
 	"""Save a pretty metrics summary table to text for reporting."""
 	summaries = _summaries_with_samples(method_metrics, metrics, unique_window)
 	if unique_window:
-		table_headers = ['Method', 'RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+		table_headers = ['Method'] + PRIMARY_METRICS
 	else:
 		# 원본 구현과 동일: 중앙값±표준편차
 		table_headers = ['Method'] + [f"{m} (median±std)" for m in metrics]
@@ -2186,7 +2255,7 @@ def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window, ann
 		values = summary['values']
 		if unique_window:
 			row = [method]
-			for metric in ['RMSE','MAE','MAPE','CORR','PCC','CCC']:
+			for metric in PRIMARY_METRICS:
 				val = values.get(metric, float('nan'))
 				row.append(_format_scalar(val))
 		else:
@@ -2232,7 +2301,7 @@ def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
 	methods = list(summaries.keys())
 	if methods:
 		if unique_window:
-			ordered = ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+			ordered = list(PRIMARY_METRICS)
 		else:
 			ordered = metrics
 		for met in ordered:
@@ -2579,6 +2648,7 @@ def aggregate_runs(run_dirs, output_dir, prefer_unique=False):
 			continue
 		with open(metrics_path, 'rb') as fp:
 			metric_names, method_metrics = pickle.load(fp)
+			metric_names, method_metrics = _normalize_metrics_payload(metric_names, method_metrics)
 		summaries = _summaries_with_samples(method_metrics, metric_names, unique_window)
 		for method, summary in summaries.items():
 			row = {
@@ -2820,7 +2890,7 @@ def main(argv=None):
 	report_cfg = cfg.get('report', {})
 	gating_common = gating_cfg.get('common', {})
 
-	metrics = ['RMSE', 'MAE', 'MAPE', 'CORR', 'PCC', 'CCC']
+	metrics = list(PRIMARY_METRICS)
 	min_hz = eval_cfg.get('min_hz', 0.08)
 	max_hz = eval_cfg.get('max_hz', 0.5)
 	use_track = eval_cfg.get('use_track', False)
@@ -2831,7 +2901,7 @@ def main(argv=None):
 	track_saturation_max = eval_cfg.get('track_saturation_max', 0.15)
 	saturation_margin_hz = eval_cfg.get('saturation_margin_hz', gating_common.get('saturation_margin_hz', 0.0))
 	saturation_persist_sec = eval_cfg.get('saturation_persist_sec', gating_common.get('saturation_persist_sec', 0.0))
-	constant_ptp_max_hz = eval_cfg.get('constant_ptp_max_hz', 0.0)
+	constant_ptp_max_hz = eval_cfg.get('constant_ptp_max_hz', gating_common.get('constant_ptp_max_hz', 0.0))
 	win_override = args.win or eval_cfg.get('win_size', 'video')
 	if isinstance(win_override, str) and win_override.lower() == 'video':
 		win_size = 'video'

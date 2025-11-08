@@ -24,6 +24,9 @@
     "track_unique_min": 0.05,
     "track_saturation_max": 0.15
   },
+  "gating": {
+    "profile": "diagnostic-relaxed"
+  },
   "report": {
     "output": "reports/cohface_motion",
     "unique_window": false
