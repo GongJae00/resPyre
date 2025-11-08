@@ -23,8 +23,6 @@ def getErrors(bpmES, bpmGT, timesES, timesGT, metrics):
             e = MAPEerror(bpmES, bpmGT, timesES, timesGT)
         elif m == 'MAX':
             e = MAXError(bpmES, bpmGT, timesES, timesGT)
-        elif m == 'CORR':
-            e = PearsonCorr(bpmES, bpmGT, timesES, timesGT)
         elif m == 'PCC':
             e = PearsonCorr(bpmES, bpmGT, timesES, timesGT)
         elif m == 'CCC':

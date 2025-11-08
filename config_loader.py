@@ -18,7 +18,10 @@ _DEFAULT_CFG = {
         "use_track": False,
         "track_std_min_bpm": 0.3,
         "track_unique_min": 0.05,
-        "track_saturation_max": 0.15
+        "track_saturation_max": 0.15,
+        "saturation_margin_hz": 0.0,
+        "saturation_persist_sec": 0.0,
+        "constant_ptp_max_hz": 0.0
     },
     "oscillator": {},
     "report": {
@@ -27,7 +30,8 @@ _DEFAULT_CFG = {
         "unique_window": False
     },
     "runtime": {},
-    "steps": []
+    "steps": [],
+    "gating": {}
 }
 
 
@@ -100,6 +104,9 @@ def load_config(path):
     eval_cfg.setdefault('track_std_min_bpm', 0.3)
     eval_cfg.setdefault('track_unique_min', 0.05)
     eval_cfg.setdefault('track_saturation_max', 0.15)
+    eval_cfg.setdefault('saturation_margin_hz', 0.0)
+    eval_cfg.setdefault('saturation_persist_sec', 0.0)
+    eval_cfg.setdefault('constant_ptp_max_hz', 0.0)
 
     osc_cfg = cfg.get('oscillator', {})
     if not isinstance(osc_cfg, dict):

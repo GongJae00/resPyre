@@ -53,6 +53,9 @@
     "f_min": 0.08,
     "f_max": 0.5
   },
+  "gating": {
+    "profile": "diagnostic-relaxed"
+  },
   "report": {
     "output": "reports/cohface_motion_oscillator",
     "unique_window": false
