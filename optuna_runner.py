@@ -67,6 +67,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--skip-leaderboard', action='store_true', help='Skip leaderboard/bundle generation')
     parser.add_argument('--bundle', action='store_true', help='Force bundle creation even if leaderboard skipped')
     parser.add_argument('--list', action='store_true', help='List tuned methods and exit')
+    weight_help = {
+        'mae': 'Weight for MAE term (default: 1.0)',
+        'pcc': 'Weight for PCC (1 - PCC) term (default: 0.5)',
+        'ccc': 'Weight for CCC (1 - CCC) term (default: 0.5)',
+        'edge': 'Weight for edge saturation penalty (default: 0.5)',
+        'nan': 'Weight for NaN rate penalty (default: 1.0)',
+        'jerk': 'Weight for jerk penalty (default: 0.2)',
+    }
+    for key, message in weight_help.items():
+        parser.add_argument(f'--weight-{key}', dest=f'weight_{key}', type=float, help=message)
     return parser.parse_args()
 
 
@@ -273,43 +283,107 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
     idx_pcc = name_to_idx.get('PCC')
     idx_ccc = name_to_idx.get('CCC')
 
-    for record in records:
-        metrics = record.get('metrics') or []
+    def _median_abs_error(record, metrics):
+        arr = record.get('ae_bpm')
+        if arr is not None:
+            arr = np.asarray(arr, dtype=np.float64).reshape(-1)
+            arr = arr[np.isfinite(arr)]
+            if arr.size:
+                return float(np.nanmedian(arr))
+        arr = record.get('ae_hz')
+        if arr is not None:
+            arr = np.asarray(arr, dtype=np.float64).reshape(-1)
+            arr = arr[np.isfinite(arr)]
+            if arr.size:
+                return float(np.nanmedian(arr * 60.0))
         if idx_mae is not None and len(metrics) > idx_mae:
-            mae_vals.append(metrics[idx_mae])
-        if idx_pcc is not None and len(metrics) > idx_pcc:
-            pcc_vals.append(metrics[idx_pcc])
-        if idx_ccc is not None and len(metrics) > idx_ccc:
-            ccc_vals.append(metrics[idx_ccc])
+            return float(metrics[idx_mae])
+        return None
+
+    def _corr_value(record, metrics, idx, keys):
+        for key in keys:
+            if key in record and record[key] is not None:
+                return float(record[key])
+        if idx is not None and len(metrics) > idx:
+            return float(metrics[idx])
+        return None
+
+    def _edge_fraction(record):
         track_stats = record.get('track_stats') or {}
         edge_val = track_stats.get('edge_saturation_fraction')
         if edge_val is None:
             edge_val = track_stats.get('saturation_fraction')
-        if edge_val is not None:
-            edge_vals.append(edge_val)
-        pred = None
+        return float(edge_val) if edge_val is not None else None
+
+    def _nan_rate(record, pred_arr):
+        track_stats = record.get('track_stats') or {}
+        for key in ('nan_rate', 'nan_fraction', 'nan_frac'):
+            if key in track_stats and track_stats[key] is not None:
+                return float(track_stats[key])
+        if record.get('nan_rate') is not None:
+            return float(record['nan_rate'])
+        if pred_arr is not None and pred_arr.size:
+            mask = np.isnan(pred_arr)
+            if mask.size:
+                return float(np.mean(mask))
+        return None
+
+    def _sample_dt(record):
+        times = record.get('times_est')
+        if times is None:
+            return None
+        arr = np.asarray(times, dtype=np.float64).reshape(-1)
+        if arr.size < 2:
+            return None
+        diffs = np.diff(arr)
+        finite = diffs[np.isfinite(diffs)]
+        if finite.size == 0:
+            return None
+        dt = float(np.nanmedian(finite))
+        if not np.isfinite(dt) or dt <= 0:
+            return None
+        return dt
+
+    def _jerk_hzps(pred_arr, dt):
+        if pred_arr is None or pred_arr.size == 0 or dt is None:
+            return None
+        freq = np.asarray(pred_arr, dtype=np.float64).reshape(-1) / 60.0
+        freq = freq[np.isfinite(freq)]
+        if freq.size < 2:
+            return None
+        jerks = np.abs(np.diff(freq)) / dt
+        jerks = jerks[np.isfinite(jerks)]
+        if jerks.size == 0:
+            return None
+        return float(np.nanmedian(jerks))
+
+    for record in records:
+        metrics = record.get('metrics') or []
+        mae_stat = _median_abs_error(record, metrics)
+        if mae_stat is not None:
+            mae_vals.append(mae_stat)
+        pcc_stat = _corr_value(record, metrics, idx_pcc, ('pcc', 'pearson'))
+        if pcc_stat is not None:
+            pcc_vals.append(pcc_stat)
+        ccc_stat = _corr_value(record, metrics, idx_ccc, ('ccc', 'lincc', 'linccc'))
+        if ccc_stat is not None:
+            ccc_vals.append(ccc_stat)
+        edge_stat = _edge_fraction(record)
+        if edge_stat is not None:
+            edge_vals.append(edge_stat)
+        pred_arr = None
         pair = record.get('pair') or []
-        if isinstance(pair, (list, tuple)) and pair:
-            pred = pair[0]
-        if pred is not None:
-            pred_arr = np.asarray(pred, dtype=np.float64).reshape(-1)
-            if pred_arr.size:
-                nan_vals.append(float(np.mean(~np.isfinite(pred_arr))))
-                freq_hz = pred_arr / 60.0
-                times = np.asarray(record.get('times_est'), dtype=np.float64) if record.get('times_est') is not None else None
-                dt = None
-                if times is not None and times.size >= 2:
-                    diffs = np.diff(times)
-                    finite = diffs[np.isfinite(diffs)]
-                    if finite.size:
-                        dt = float(np.nanmedian(finite))
-                if dt is None or dt <= 0:
-                    dt = 1.0
-                if freq_hz.size >= 2:
-                    jerk = np.abs(np.diff(freq_hz)) / max(dt, 1e-6)
-                    jerk = jerk[np.isfinite(jerk)]
-                    if jerk.size:
-                        jerk_vals.append(float(np.nanmedian(jerk)))
+        if isinstance(pair, (list, tuple)) and pair and pair[0] is not None:
+            pred_arr = np.asarray(pair[0], dtype=np.float64).reshape(-1)
+            if pred_arr.size == 0:
+                pred_arr = None
+        nan_stat = _nan_rate(record, pred_arr)
+        if nan_stat is not None:
+            nan_vals.append(nan_stat)
+        dt = _sample_dt(record)
+        jerk_stat = _jerk_hzps(pred_arr, dt)
+        if jerk_stat is not None:
+            jerk_vals.append(jerk_stat)
     return {
         'MAE_bpm_med': _extract_metric(mae_vals, np.nanmedian),
         'PCC_mean': _extract_metric(pcc_vals, np.nanmean),
@@ -614,7 +688,9 @@ def main():
         print("\n".join(allowlist))
         return
     weights_cfg = ((base_cfg.get('optuna') or {}).get('objective') or {}).get('weights', {})
-    weights = {**DEFAULT_WEIGHTS, **weights_cfg}
+    cli_weight_overrides = {key: getattr(args, f'weight_{key}', None) for key in DEFAULT_WEIGHTS}
+    cli_weights = {key: value for key, value in cli_weight_overrides.items() if value is not None}
+    weights = {**DEFAULT_WEIGHTS, **weights_cfg, **cli_weights}
     output_root = Path(args.output).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     study_args = StudyArgs(
