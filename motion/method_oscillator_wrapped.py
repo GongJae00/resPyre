@@ -1,3 +1,4 @@
+import copy
 import os
 from typing import Dict, Optional
 
@@ -68,6 +69,7 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
         head_key: str,
         osc_params: Optional[OscillatorParams] = None,
         save_payload: Optional[Dict[str, bool]] = None,
+        preproc_cfg: Optional[Dict] = None,
     ):
         super().__init__()
         self.base_key = base_key
@@ -78,6 +80,8 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
         self.osc_head = build_head(head_key, params=osc_params)
         self.save_payload = save_payload or {"npz": True}
         self._base_meta = {"base_method": base_key}
+        self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
+        setattr(self.osc_head, "preproc_cfg", copy.deepcopy(self.preproc_cfg))
 
     def _store_npz(self, data: Dict, result: Dict[str, np.ndarray]):
         aux_dir = data.get("aux_save_dir")
@@ -107,7 +111,7 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
         return np.asarray(result["signal_hat"], dtype=np.float64)
 
 
-def create_wrapped_method(method_name: str, params: Optional[Dict] = None) -> OscillatorWrappedMethod:
+def create_wrapped_method(method_name: str, params: Optional[Dict] = None, preproc_defaults: Optional[Dict] = None) -> OscillatorWrappedMethod:
     if "__" not in method_name:
         raise ValueError("Wrapped method names must use `<base>__<head>` convention")
     base_part, head_part = method_name.split("__", 1)
@@ -115,12 +119,18 @@ def create_wrapped_method(method_name: str, params: Optional[Dict] = None) -> Os
     head_key = _normalize_head(head_part)
 
     params = params or {}
+    preproc_cfg = copy.deepcopy(preproc_defaults) if isinstance(preproc_defaults, dict) else {}
+    if isinstance(params.get("preproc"), dict):
+        if preproc_cfg:
+            preproc_cfg = run_all._deep_merge_dict(preproc_cfg, params["preproc"])
+        else:
+            preproc_cfg = copy.deepcopy(params["preproc"])
     # Flatten nested parameter dictionaries.
     merged_params: Dict[str, float] = {}
     for key in ("params", "head_params", "oscillator", "oscillator_params"):
         if isinstance(params.get(key), dict):
             merged_params.update(params[key])
-    merged_params.update({k: v for k, v in params.items() if k not in ("name", "params", "head_params", "oscillator", "oscillator_params")})
+    merged_params.update({k: v for k, v in params.items() if k not in ("name", "params", "head_params", "oscillator", "oscillator_params", "preproc")})
 
     osc_kwargs = {}
     for field in OscillatorParams().__dict__.keys():
@@ -128,4 +138,4 @@ def create_wrapped_method(method_name: str, params: Optional[Dict] = None) -> Os
             osc_kwargs[field] = merged_params[field]
     osc_params = OscillatorParams(**osc_kwargs) if osc_kwargs else None
     save_payload = params.get("save_payload")
-    return OscillatorWrappedMethod(base_key, head_key, osc_params=osc_params, save_payload=save_payload)
+    return OscillatorWrappedMethod(base_key, head_key, osc_params=osc_params, save_payload=save_payload, preproc_cfg=preproc_cfg)

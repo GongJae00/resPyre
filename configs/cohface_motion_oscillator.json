@@ -20,23 +20,58 @@
     "profile1d_cubic",
     "of_farneback__kfstd",
     "of_farneback__ukffreq",
-    "of_farneback__spec_ridge",
+    {
+      "name": "of_farneback__spec_ridge",
+      "preproc": {
+        "robust_zscore": {
+          "clip": null
+        }
+      }
+    },
     "of_farneback__pll",
     "dof__kfstd",
     "dof__ukffreq",
-    "dof__spec_ridge",
+    {
+      "name": "dof__spec_ridge",
+      "preproc": {
+        "robust_zscore": {
+          "clip": null
+        }
+      }
+    },
     "dof__pll",
     "profile1d_linear__kfstd",
     "profile1d_linear__ukffreq",
-    "profile1d_linear__spec_ridge",
+    {
+      "name": "profile1d_linear__spec_ridge",
+      "preproc": {
+        "robust_zscore": {
+          "clip": null
+        }
+      }
+    },
     "profile1d_linear__pll",
     "profile1d_quadratic__kfstd",
     "profile1d_quadratic__ukffreq",
-    "profile1d_quadratic__spec_ridge",
+    {
+      "name": "profile1d_quadratic__spec_ridge",
+      "preproc": {
+        "robust_zscore": {
+          "clip": null
+        }
+      }
+    },
     "profile1d_quadratic__pll",
     "profile1d_cubic__kfstd",
     "profile1d_cubic__ukffreq",
-    "profile1d_cubic__spec_ridge",
+    {
+      "name": "profile1d_cubic__spec_ridge",
+      "preproc": {
+        "robust_zscore": {
+          "clip": null
+        }
+      }
+    },
     "profile1d_cubic__pll"
   ],
   "eval": {
@@ -52,6 +87,13 @@
   "oscillator": {
     "f_min": 0.08,
     "f_max": 0.5
+  },
+  "preproc": {
+    "robust_zscore": {
+      "enabled": true,
+      "eps": 1e-6,
+      "clip": 3.5
+    }
   },
   "gating": {
     "profile": "diagnostic-relaxed"

@@ -17,21 +17,35 @@ class OscillatorParams:
     init_margin_hz: float = 0.01  # interior guard in Hz to prevent boundary-locked initialisation
     rho: float = 0.0  # legacy manual override
     tau_env: float = 30.0
-    qx: float = 0.0  # legacy manual override
+    qx: float = 1e-4  # baseline state noise (can be overridden if needed)
     qx_scale: float = 0.3
     rv: float = 0.1  # legacy manual override
     rv_auto: bool = True
     rv_mad_scale: float = 1.2
-    rv_floor: float = 0.08
-    qf: float = 1e-7
+    rv_floor: float = 0.03  # observation noise floor, typically 0.02-0.05
+    qf: float = 5e-5  # frequency random-walk noise; physiologic default (~1-3 bpm drift/30s). Recommended sweep [5e-6, 5e-4], up to 1e-3 only for very low SNR
+    qf_override: Optional[float] = None
+    qx_override: Optional[float] = None
+    rv_floor_override: Optional[float] = None
+    tau_env_override: Optional[float] = None
+    ukf_alpha: float = 1e-3
+    ukf_beta: float = 2.0
+    ukf_kappa: float = 0.0
+    spec_overlap: float = 0.5
+    spec_nfft_factor: int = 1
+    spec_peak_smooth_len: int = 1
+    spec_subbin_interp: str = "parabolic"
+    post_smooth_alpha: float = 0.0
     stft_win: float = 12.0
     stft_hop: float = 1.0
     ridge_penalty: float = 250.0
     pll_autogain: bool = True
     pll_kp: float = 0.0  # legacy manual override
     pll_ki: float = 0.0  # legacy manual override
+    pll_kp_min: float = 0.0
+    pll_ki_min: float = 0.0
     pll_zeta: float = 0.9
-    pll_ttrack: float = 5.0
+    pll_ttrack: float = 7.0
     detrend: bool = True
     bandpass: bool = True
     zscore: bool = True
@@ -49,6 +63,8 @@ class _BaseOscillatorHead:
         self.params = params or OscillatorParams()
         self._last_sigma_y = None
         self._last_init_freq = None
+        self.preproc_cfg: Dict = {}
+        self._last_preproc_meta: Dict = {}
 
     def _preprocess(self, signal: np.ndarray, fs: float) -> np.ndarray:
         p = self.params
@@ -66,19 +82,84 @@ class _BaseOscillatorHead:
             if high > low:
                 b, a = sps.butter(2, [low / nyq, high / nyq], btype="bandpass")
                 x = sps.filtfilt(b, a, x, method="gust")
-        median = np.median(x)
-        mad = np.median(np.abs(x - median)) / 0.6745
-        if not np.isfinite(mad) or mad <= 1e-6:
-            std = np.std(x)
-            mad = std if std > 1e-6 else 1.0
-        self._last_sigma_y = float(mad)
-        if p.zscore:
-            std = np.std(x)
-            if std > 1e-8:
-                x = (x - np.mean(x)) / (std + 1e-8)
+        preproc_cfg = getattr(self, "preproc_cfg", {}) or {}
+        self._last_preproc_meta = {}
+        sign_cfg = preproc_cfg.get("sign_align", {})
+        sign_seconds = float(sign_cfg.get("seconds", 12.0)) if isinstance(sign_cfg, dict) else 12.0
+        if sign_cfg.get("enabled") and fs > 0 and x.size:
+            seg_len = int(min(x.size, max(1, round(sign_seconds * fs))))
+            if seg_len > 1:
+                coarse = self._coarse_freq(x[:seg_len], fs)
+                if np.isfinite(coarse) and coarse > 0.0:
+                    t = np.arange(seg_len, dtype=np.float64) / fs
+                    ref = np.cos(2.0 * np.pi * coarse * t)
+                    dot = float(np.dot(x[:seg_len], ref))
+                    if dot < 0:
+                        x = -x
+        median = float(np.median(x)) if x.size else 0.0
+        if not np.isfinite(median):
+            median = 0.0
+        abs_dev = np.abs(x - median)
+        mad = float(np.median(abs_dev)) if abs_dev.size else 0.0
+        if not np.isfinite(mad) or mad < 0.0:
+            mad = 0.0
+        sigma_hat = 1.4826 * mad
+        if not np.isfinite(sigma_hat) or sigma_hat < 0.0:
+            sigma_hat = 0.0
+        self._last_sigma_y = float(sigma_hat if sigma_hat > 0.0 else 0.0)
+        robust_cfg = preproc_cfg.get("robust_zscore", {}) or {}
+        robust_flag = robust_cfg.get("enabled")
+        use_robust = bool(p.zscore) and (bool(robust_flag) if robust_flag is not None else True)
+        eps = float(robust_cfg.get("eps", 1e-6))
+        if not np.isfinite(eps) or eps <= 0.0:
+            eps = 1e-6
+        clip_raw = robust_cfg.get("clip", 3.5)
+        clip_val = None
+        if clip_raw is not None:
+            try:
+                clip_val = float(clip_raw)
+            except (TypeError, ValueError):
+                clip_val = None
+        denom = max(sigma_hat, eps)
+        clipped_frac = 0.0
+        if use_robust:
+            z = (x - median) / denom
+            if clip_val is not None and clip_val > 0.0:
+                clipped_frac = float(np.mean(np.abs(z) >= clip_val)) if z.size else 0.0
+                x = np.clip(z, -clip_val, clip_val)
             else:
-                x = x - np.mean(x)
+                clip_val = None
+                x = z
+        elif p.zscore:
+            std = np.std(x)
+            mean = np.mean(x)
+            if std > 1e-8:
+                x = (x - mean) / (std + 1e-8)
+            else:
+                x = x - mean
+        self._last_preproc_meta = {
+            "robust_z": {
+                "enabled": bool(use_robust),
+                "med": float(median),
+                "mad": float(mad),
+                "sigma_hat": float(sigma_hat),
+                "clip": None if clip_val is None else float(clip_val),
+                "clipped_frac": float(clipped_frac if use_robust and clip_val is not None else 0.0)
+            }
+        }
         return x
+
+    def _apply_post_smoothing(self, track: np.ndarray) -> np.ndarray:
+        alpha = getattr(self.params, "post_smooth_alpha", None)
+        if alpha is None or (not np.isfinite(alpha)):
+            return track
+        if alpha <= 0.0 or alpha >= 1.0 or track.size < 2:
+            return track
+        smoothed = np.asarray(track, dtype=np.float64).copy()
+        coeff = float(alpha)
+        for idx in range(1, smoothed.size):
+            smoothed[idx] = coeff * smoothed[idx - 1] + (1.0 - coeff) * smoothed[idx]
+        return smoothed
 
     def _timebase(self, n: int, fs: float) -> np.ndarray:
         if fs <= 0:
@@ -128,7 +209,8 @@ class _BaseOscillatorHead:
     def _effective_params(self, fs: float) -> Dict[str, float]:
         p = self.params
         fs = fs or p.fs
-        tau = max(p.tau_env, 1e-3)
+        tau_override = p.tau_env_override if (p.tau_env_override is not None and p.tau_env_override > 0) else None
+        tau = max(tau_override if tau_override is not None else p.tau_env, 1e-3)
         rho = np.exp(-1.0 / max(fs * tau, 1e-6))
         if p.rho and p.rho > 0:
             rho = np.clip(p.rho, 0.0, 0.999999)
@@ -136,12 +218,17 @@ class _BaseOscillatorHead:
             qx = p.qx
         else:
             qx = max((p.qx_scale or 0.0) * (1.0 - rho ** 2), 1e-8)
+        if p.qx_override is not None and p.qx_override > 0:
+            qx = float(p.qx_override)
+        rv_floor = p.rv_floor_override if (p.rv_floor_override is not None and p.rv_floor_override > 0) else p.rv_floor
         if p.rv_auto:
             sigma = self._last_sigma_y if (self._last_sigma_y is not None and np.isfinite(self._last_sigma_y)) else 1.0
-            rv = max((p.rv_mad_scale * sigma) ** 2, p.rv_floor)
+            rv = max((p.rv_mad_scale * sigma) ** 2, rv_floor)
         else:
-            rv = max(p.rv, p.rv_floor)
-        qf = p.qf if (p.qf and p.qf > 0) else 1e-7
+            rv = max(p.rv, rv_floor)
+        qf = p.qf if (p.qf and p.qf > 0) else 5e-5
+        if p.qf_override is not None and p.qf_override > 0:
+            qf = float(p.qf_override)
         return {
             'rho': float(rho),
             'qx': float(qx),
@@ -185,6 +272,9 @@ class _BaseOscillatorHead:
             final_val = init_freq.get("final_hz")
             if final_val is not None and np.isfinite(final_val):
                 meta["init_freq_final_hz"] = float(final_val)
+        preproc_meta = getattr(self, "_last_preproc_meta", None)
+        if isinstance(preproc_meta, dict):
+            meta.update(preproc_meta)
         if meta_extra:
             meta.update(meta_extra)
         return {
@@ -264,6 +354,7 @@ class oscillator_KFstd(_BaseOscillatorHead):
             P_smooth[t] += G @ (P_smooth[t + 1] - P_pred[t + 1]) @ G.T
 
         track_hz = np.full(n, freq0, dtype=np.float64)
+        track_hz = self._apply_post_smoothing(track_hz)
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
         meta_payload.setdefault("is_constant_track", True)
@@ -275,9 +366,10 @@ class oscillator_UKF_freq(_BaseOscillatorHead):
 
     def __init__(self, params: Optional[OscillatorParams] = None):
         super().__init__(params=params)
-        self.alpha = 1e-3
-        self.beta = 2.0
-        self.kappa = 0.0
+        p = self.params
+        self.alpha = float(p.ukf_alpha if (p.ukf_alpha and p.ukf_alpha > 0) else 1e-3)
+        self.beta = float(p.ukf_beta if p.ukf_beta else 2.0)
+        self.kappa = float(p.ukf_kappa if p.ukf_kappa is not None else 0.0)
 
     def _sigma_points(self, x: np.ndarray, P: np.ndarray):
         n = x.size
@@ -383,8 +475,20 @@ class oscillator_UKF_freq(_BaseOscillatorHead):
             states[t] = x
 
         track_hz = np.clip(np.exp(states[:, 2]), p.f_min, p.f_max)
+        track_hz = self._apply_post_smoothing(track_hz)
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
+        qf_eff = float(qf)
+        meta_payload["qf_eff"] = qf_eff
+        try:
+            finite_track = track_hz[np.isfinite(track_hz)]
+            freq_med = float(np.nanmedian(finite_track)) if finite_track.size else float(freq0)
+            sigma_bpm_30s = 60.0 * freq_med * float(np.sqrt(max(qf_eff, 0.0) * fs * 30.0))
+            if np.isfinite(sigma_bpm_30s):
+                meta_payload["qf_sigma_bpm_30s"] = sigma_bpm_30s
+                meta_payload.setdefault("qf_note", "sigma_bpm_30s approximates 30s breathing drift")
+        except Exception:
+            pass
         meta_payload.setdefault("is_constant_track", False)
         return self._package(states[:, 0], track_hz, meta_payload)
 
@@ -392,10 +496,10 @@ class oscillator_UKF_freq(_BaseOscillatorHead):
 class oscillator_Spec_ridge(_BaseOscillatorHead):
     head_key = "spec_ridge"
 
-    def _track_ridge(self, freqs: np.ndarray, magnitudes: np.ndarray, penalty: float) -> np.ndarray:
+    def _track_ridge(self, freqs: np.ndarray, magnitudes: np.ndarray, penalty: float):
         n_freqs, n_times = magnitudes.shape
         if n_times == 0:
-            return np.zeros(0, dtype=np.float64)
+            return np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.int32)
         cost = magnitudes[:, 0].astype(np.float64)
         backptr = np.zeros((n_freqs, n_times), dtype=np.int32)
         freq_diff = (freqs[:, None] - freqs[None, :]) ** 2
@@ -409,7 +513,7 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
         ridge[-1] = int(np.argmax(cost))
         for t in range(n_times - 1, 0, -1):
             ridge[t - 1] = backptr[ridge[t], t]
-        return freqs[ridge]
+        return freqs[ridge], ridge
 
     def _median_smooth(self, arr: np.ndarray, width: int) -> np.ndarray:
         width = max(1, int(width))
@@ -424,6 +528,27 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
             out[idx] = np.median(padded[idx:idx + width])
         return out
 
+    def _subbin_refine(self, freqs: np.ndarray, magnitudes: np.ndarray, ridge_idx: np.ndarray, mode: str) -> np.ndarray:
+        if mode not in ('parabolic',):
+            return freqs[ridge_idx]
+        if freqs.size < 3 or magnitudes.shape[0] < 3:
+            return freqs[ridge_idx]
+        refined = freqs[ridge_idx].astype(np.float64).copy()
+        df = np.diff(freqs)
+        df = np.append(df, df[-1])
+        for t, idx in enumerate(ridge_idx):
+            if idx <= 0 or idx >= freqs.size - 1:
+                continue
+            y1 = magnitudes[idx - 1, t]
+            y2 = magnitudes[idx, t]
+            y3 = magnitudes[idx + 1, t]
+            denom = (y1 - 2.0 * y2 + y3)
+            if not np.isfinite(denom) or abs(denom) < 1e-12:
+                continue
+            shift = 0.5 * (y1 - y3) / denom
+            refined[t] = freqs[idx] + shift * df[idx]
+        return refined
+
     def run(self, signal: np.ndarray, fs: float, meta: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
         p = self.params
         fs = fs or p.fs
@@ -433,9 +558,24 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
             return self._package(y, np.array([], dtype=np.float64), meta)
 
         win = max(16, int(p.stft_win * fs))
-        hop = max(1, int(p.stft_hop * fs))
+        overlap_frac = float(getattr(p, "spec_overlap", 0.5))
+        overlap_frac = float(np.clip(overlap_frac, 0.0, 0.95))
+        if overlap_frac > 0:
+            hop = max(1, int(round(win * (1.0 - overlap_frac))))
+        else:
+            hop = max(1, int(p.stft_hop * fs))
         hop = min(hop, win - 1)
-        freqs, times, Zxx = sps.stft(y, fs=fs, nperseg=win, noverlap=win - hop, detrend=False, padded=False)
+        nfft_factor = max(1, int(getattr(p, "spec_nfft_factor", 1)))
+        nfft = max(win, int(win * nfft_factor))
+        freqs, times, Zxx = sps.stft(
+            y,
+            fs=fs,
+            nperseg=win,
+            noverlap=win - hop,
+            detrend=False,
+            padded=False,
+            nfft=nfft
+        )
         mask = (freqs >= p.f_min) & (freqs <= p.f_max)
         if not np.any(mask):
             track = np.full(n, 0.5 * (p.f_min + p.f_max), dtype=np.float64)
@@ -446,7 +586,11 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
 
         sub_freqs = freqs[mask]
         magnitudes = np.abs(Zxx[mask, :]).astype(np.float64)
-        ridge_freqs = self._track_ridge(sub_freqs, magnitudes, p.ridge_penalty)
+        ridge_freqs, ridge_idx = self._track_ridge(sub_freqs, magnitudes, p.ridge_penalty)
+
+        subbin_mode = (getattr(p, "spec_subbin_interp", "parabolic") or "").strip().lower()
+        if ridge_idx.size and subbin_mode in ('parabolic',):
+            ridge_freqs = self._subbin_refine(sub_freqs, magnitudes, ridge_idx, subbin_mode)
 
         if ridge_freqs.size >= 3:
             time_step = times[1] - times[0] if times.size > 1 else p.stft_hop
@@ -461,6 +605,10 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
             track = np.clip(track, p.f_min, p.f_max)
         if track.size >= 3:
             track = self._median_smooth(track, 5)
+        peak_smooth = max(1, int(getattr(p, "spec_peak_smooth_len", 1)))
+        if peak_smooth > 1:
+            track = self._median_smooth(track, peak_smooth)
+        track = self._apply_post_smoothing(track)
         meta_payload = dict(meta or {})
         meta_payload["stft_bins"] = int(np.sum(mask))
         meta_payload.setdefault("is_constant_track", False)
@@ -493,6 +641,10 @@ class oscillator_PLL(_BaseOscillatorHead):
         else:
             kp = p.pll_kp
             ki = p.pll_ki
+        kp_min = p.pll_kp_min if getattr(p, "pll_kp_min", None) is not None else 0.0
+        ki_min = p.pll_ki_min if getattr(p, "pll_ki_min", None) is not None else 0.0
+        kp = max(kp, float(kp_min))
+        ki = max(ki, float(ki_min))
 
         track = np.zeros(n, dtype=np.float64)
         osc = np.zeros(n, dtype=np.float64)
@@ -514,6 +666,7 @@ class oscillator_PLL(_BaseOscillatorHead):
             osc[t] = np.cos(phase_nco)
 
         track = np.clip(track, p.f_min, p.f_max)
+        track = self._apply_post_smoothing(track)
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
         meta_payload.setdefault("is_constant_track", False)
