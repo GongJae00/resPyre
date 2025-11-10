@@ -973,6 +973,19 @@ def _apply_overrides(cfg, overrides):
 		target[keys[-1]] = _coerce_override_value(raw_value)
 
 
+def _parse_bool_flag(value):
+	if isinstance(value, bool):
+		return value
+	if value is None:
+		return None
+	val = str(value).strip().lower()
+	if val in ('1', 'true', 'yes', 'on'):
+		return True
+	if val in ('0', 'false', 'no', 'off'):
+		return False
+	raise argparse.ArgumentTypeError(f"Expected boolean value for flag, got '{value}'")
+
+
 def _resolve_gating_config(cfg):
 	user_cfg = cfg.get('gating') if isinstance(cfg, dict) else {}
 	base = copy.deepcopy(_DEFAULT_GATING_CFG)
@@ -2830,10 +2843,11 @@ def main(argv=None):
 	parser.add_argument('--win', help='Override evaluation window (seconds or "video")')
 	parser.add_argument('--stride', type=float, help='Override evaluation stride (seconds)')
 	parser.add_argument('--runs', nargs='+', help='Explicit run directories for evaluate/metrics/report steps')
+	parser.add_argument('--methods', nargs='+', help='Override the configured methods with an explicit list')
 	parser.add_argument('--prefer-unique', action='store_true', help='Prefer metrics_1w.pkl during aggregation')
 	parser.add_argument('--num_shards', type=int, default=1, help='Number of shards for parallel estimate execution')
 	parser.add_argument('--shard_index', type=int, default=0, help='Shard index (0-based) selecting which methods to estimate')
-	parser.add_argument('--auto_discover_methods', action='store_true', help='Discover available methods from results directory during evaluate/metrics steps')
+	parser.add_argument('--auto_discover_methods', nargs='?', const=True, type=_parse_bool_flag, default=False, help='Discover available methods from results directory during evaluate/metrics steps (accepts true/false)')
 	parser.add_argument('--override', action='append', help='Override config values using dotted paths (e.g., gating.debug.disable_gating=true)')
 	parser.add_argument('--allow-missing-methods', dest='allow_missing_methods', action='store_true', help='Allow evaluation/metrics to proceed when some configured methods are missing')
 	parser.add_argument('--no-allow-missing-methods', dest='allow_missing_methods', action='store_false', help='Fail if configured methods are missing in results')
@@ -2856,6 +2870,9 @@ def main(argv=None):
 	cfg = load_config(args.config)
 	if args.override:
 		_apply_overrides(cfg, args.override)
+	if 'profile' in cfg and not isinstance(cfg.get('profile'), dict):
+		profile_override = cfg.pop('profile')
+		cfg.setdefault('gating', {})['profile'] = profile_override
 	gating_cfg = _resolve_gating_config(cfg)
 	cfg['gating'] = gating_cfg
 	run_label = cfg.get('name') if cfg else None
@@ -2878,6 +2895,8 @@ def main(argv=None):
 	results_root = os.path.abspath(args.results or cfg['results_dir'])
 	os.makedirs(results_root, exist_ok=True)
 
+	if args.methods:
+		cfg['methods'] = list(args.methods)
 	methods_all = _build_methods(cfg.get('methods', []), cfg)
 	method_order = [m.name for m in methods_all]
 	datasets = _build_datasets(cfg.get('datasets', []))
