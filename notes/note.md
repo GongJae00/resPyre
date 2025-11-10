@@ -51,13 +51,19 @@ python run_all.py --config configs/cohface_motion_oscillator.json --step metrics
 # 병렬
 AUTO_PROFILE_PARALLEL=5 eval "$(python setup/auto_profile.py)"
 python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 0
-python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 1
-python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 2
-python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 3
 python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 4
 
 python run_all.py -c configs/cohface_motion_oscillator.json -s evaluate metrics --auto_discover_methods
 python run_all.py -c configs/cohface_motion_oscillator.json -s evaluate metrics --auto_discover_methods --override gating.debug.disable_gating=true
+
+python optuna_runner.py \
+  --config configs/cohface_motion_oscillator.json \
+  --output runs/optuna_shard0 \
+  --num-shards 5 --shard-index 0 \
+  --n-trials 20
+
+cd runs/optuna/_bundles/best20_<ts>
+./apply_all.sh
 ```
 
 실행 결과
@@ -65,6 +71,25 @@ python run_all.py -c configs/cohface_motion_oscillator.json -s evaluate metrics 
 * results/<run_label>/methods/<method>/<trial>.pkl : 추정 파형·점수
 * results/<run_label>/aux/<method>/<trial>.npz : 오실레이터 추적(예: track_hz)
 * results/<run_label>/metrics/metrics.pkl, metrics_summary.txt, eval_settings.json
+
+### 전처리 정책(robust 기본)
+
+* 의도: 상체 모션 y(t)는 스파이크·드리프트가 공존하는 heavy-tailed 분포이므로 평균/표준편차 기반 정규화는 곧바로 혁신 분산을 왜곡한다. median + MAD 기반의 **robust z-score**는 진폭 스케일을 제거하면서도 주파수 추정 정보(f(t))를 그대로 보존하고, `rv_auto`가 사용하는 “bandpass 출력의 MAD”와도 동일 척도를 공유해 일관성이 생긴다.
+* 순서: `sign_align → detrend → bandpass(0.08–0.50 Hz, 2차, zero-phase) → robust z-score`. MAD는 반드시 **bandpass 직후** 신호에서 구하고, `rv_auto`는 해당 MAD(σ̂=1.4826·MAD)로부터 R을 산정한다.
+* 계산식(폴백 없이 eps 바닥만 적용):
+
+```
+med = median(x_bp)
+mad = median(|x_bp − med|)
+sigma_hat = 1.4826 * mad
+z = (x_bp − med) / max(sigma_hat, eps)
+if clip is not None:
+    z = clip(z, -clip, +clip)
+```
+
+  * 기본 파라미터: `enabled=true`, `eps=1e-6`, `clip=3.5`. 트래커 계열(KFSTD/UKF/PLL)은 clip=3.5로 혁신 분포를 정상화하고, `spec_ridge` 헤드는 `clip=null`(또는 5.0)로 피크 모양을 보존한다.
+  * CLI/JSON `--override preproc.robust_zscore.*` 경로는 동일하게 동작하며, per-head `params.preproc`와 전역 `preproc`는 항상 딥-머지한다.
+* 메타 기록: 모든 헤드는 `meta.robust_z` 블록에 `enabled`, `med`, `mad`, `sigma_hat`, `clip`, `clipped_frac`(=|z|이 clip에 닿은 비율)을 저장한다. 동일 입력이라면 이 값들은 재현성 체크 포인트로 사용된다.
 
 ---
 
@@ -302,7 +327,7 @@ python run_all.py -c configs/cohface_motion_oscillator.json -s evaluate metrics 
 
 * 하이퍼파라미터 가이드
 
-  * qf: **기본 1e-7 (샘플 단위)**, 필요 시 5e-8–5e-6 범위 탐색  
+  * qf: **기본 5e-5 (샘플 단위)**
     (작으면 추종 지연↑, 크면 잡음 추종/포화↑)
   * qx: qx = qx_scale·(1 − ρ²) 권장(기본 qx_scale=0.3, z-score 입력 기준)
   * P0 = diag([1.0, 1.0, 0.25^2])
@@ -576,11 +601,12 @@ Code and Data Availability
 
 1. **튜닝 실행 (20개 파생 메소드, 폴백 비활성)**  
    ```bash
-   python optuna_runner.py --config configs/cohface_motion_oscillator.json --output runs/optuna --n-trials 60
+   python optuna_runner.py --config configs/cohface_motion_oscillator.json --output runs/optuna --n-trials 20
    ```  
    - 베이스 5개는 자동 제외, `__ukffreq/__pll/__kfstd/__spec_ridge`만 대상  
    - trial당 `gating.debug.disable_gating=true`, `use_track=true`로 폴백 없이 평가  
-   - 목적함수 = MAE↓ + (1−PCC)↓ + (1−CCC)↓ + edge/nan/jerk 페널티
+  - 목적함수 = **MAE + RMSE** (기본 0.85/0.15). PCC/CCC/edge/nan/jerk는 **분석용 로그**만  
+   - 생리 기반으로 축소된 탐색 차원 덕분에 shard당 20 trials(TPE+MedianPruner)면 수렴
 
 2. **리더보드/번들 확인**  
    - 완료 시 `runs/optuna/dashboards/leaderboard.csv`에 objective/지표와 best.json 경로 기록  
@@ -599,6 +625,71 @@ Code and Data Availability
 
 ## Optuna 사용 요약
 
-1. `python optuna_runner.py -c configs/cohface_motion_oscillator.json --output runs/optuna` → allowlist 20개 파생 메소드만 튜닝하며 trial마다 게이팅 폴백을 완전히 끈다.
+1. `python optuna_runner.py -c configs/cohface_motion_oscillator.json --output runs/optuna --n-trials 20` → allowlist 20개 파생 메소드만 튜닝하며 trial마다 게이팅 폴백을 완전히 끈다.
 2. 종료 시 `runs/optuna/dashboards/leaderboard.csv` 정렬과 `_bundles/best20_<ts>` 생성 여부만 확인하면 objective/MAE/PCC/CCC 집계와 best.json 경로를 한 번에 검증할 수 있다.
 3. 번들 안의 `apply_all.sh`는 `python run_all.py -c <config> -s estimate evaluate metrics --auto_discover_methods=false --methods <method> --override-from <best.json> --override profile=paper -d results/paper_best/<method>` 명령을 20회 반복해 scoreboard 상위 파라미터를 재평가한다.
+4. **병렬 샤딩 튜닝**  
+   ```bash
+   # 터미널 5개를 열고 shard index 0-4를 각각 실행 (trials=20)
+   python optuna_runner.py -c configs/cohface_motion_oscillator.json \
+     --output runs/optuna_shard0 \
+     --num-shards 5 --shard-index 0 \
+     --n-trials 20
+   python optuna_runner.py -c configs/cohface_motion_oscillator.json \
+     --output runs/optuna_shard1 \
+     --num-shards 5 --shard-index 1 \
+     --n-trials 20
+   python optuna_runner.py -c configs/cohface_motion_oscillator.json \
+     --output runs/optuna_shard2 \
+     --num-shards 5 --shard-index 2 \
+     --n-trials 20
+   python optuna_runner.py -c configs/cohface_motion_oscillator.json \
+     --output runs/optuna_shard3 \
+     --num-shards 5 --shard-index 3 \
+     --n-trials 20
+   python optuna_runner.py -c configs/cohface_motion_oscillator.json \
+     --output runs/optuna_shard4 \
+     --num-shards 5 --shard-index 4 \
+     --n-trials 20
+   ```  
+   - `--num-shards 5 --shard-index k` 조합을 터미널 5개에서 동시에 실행하면, 각 shard가 서로 다른 베이스 모션(of_farneback/dof/…)을 맡아 4개 메소드를 탐색한다.  
+   - shard마다 runs/optuna_shard* 디렉터리를 둔 뒤, 필요 시 마지막에 한 번 더 `--n-trials 0` 실행으로 리더보드/번들을 합칠 수 있다.
+
+---
+
+## 13. 논문용 평가 절차 (게이팅 완전 제거 + 표준 메트릭 보고)
+
+### 13.1 실행 프리셋
+
+```bash
+python run_all.py --config configs/cohface_motion_oscillator.json --step evaluate metrics \
+  --override gating.debug.disable_gating=true \
+  --override gating.common.constant_ptp_max_hz=0.0 \
+  --override heads.ukffreq.qf=3e-4 \
+  --override heads.ukffreq.qx=1e-4 \
+  --override heads.ukffreq.rv_floor=0.03
+```
+
+* `disable_gating=true`로 모든 하드 게이팅·상수 승격이 비활성화돼 메트릭 왜곡을 차단한다.
+* `constant_ptp_max_hz=0.0`은 paper 프로파일이라도 상수 승격이 재개되지 않음을 보장한다(추후 config 로드 시에도 안전).
+
+### 13.2 UKF 파라미터 권장 범위
+
+* `qf`: 1e-4-5e-4 (SNR이 극단적으로 낮으면 1e-3까지 허용) → 10-30 s 윈도에서 1-3 bpm 변동을 따라감.
+* `qx`: 1e-4 기준값 → 진폭 상태가 굳지 않고 완만하게 응답.
+* `rv_floor`: 0.02-0.05 → 관측잡음 하한이 과도하게 커서 필터가 둔해지는 것을 방지.
+* `rv_auto=True`, `rv_mad_scale≈1.0-1.2` 유지.
+* 위 범위에서 Optuna/수동 튜닝 시 `method_quality.csv`의 `track_dyn_range_hz`가 0.01 Hz 이상으로 회복되는지 확인한다.
+
+### 13.3 NaN 처리와 kfstd 해석
+
+* 분산이 0(또는 ε 이하)인 상수 예측은 PCC/CCC가 정의되지 않으므로 **NaN 그대로 기록**한다. 이를 0으로 대체하면 통계적 의미가 왜곡된다.
+* 집계 테이블에는 항상 `nan_rate`/`len_valid`를 함께 표기해 “유효 샘플 기반 평균”임을 명시한다. 예: `PCC=0.82 (nan_rate=7%)`.
+* `kfstd`는 설계상 상수 추정기라 PCC/CCC가 NaN이거나 미정의가 정상이다. 따라서 논문에서는 `__kfstd`의 MAE/RMSE만 주 지표로 보고, 상관·일치도는 NaN 그대로 둔다.
+
+### 13.4 체크리스트
+
+1. `method_quality.csv`에서 `constant_track_promoted`가 전부 0인지 확인.
+2. `summary.json`의 `series_stats.est_std`가 0 또는 수치오차 0+에서 벗어나며, `__ukffreq`는 0.3-0.7+ 수준 PCC/CCC로 회복됐는지 확인.
+3. `metrics_summary.txt` 상단에 평가 대역 `[0.08, 0.50] Hz`와 `use_track=true`가 정확히 표기돼 있는지 확인.
+4. 표/도표에 `nan_rate` 열을 넣어 상수 케이스의 비율을 명시한다.

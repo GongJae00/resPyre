@@ -40,15 +40,11 @@ SUFFIX_FAMILY = {
 }
 ALLOWABLE_SUFFIXES = tuple(SUFFIX_FAMILY.keys())
 DEFAULT_WEIGHTS = {
-    'mae': 1.0,
-    'pcc': 0.5,
-    'ccc': 0.5,
-    'edge': 0.5,
-    'nan': 1.0,
-    'jerk': 0.2
+    'mae': 0.85,
+    'rmse': 0.15
 }
 TRIAL_CSV_FIELDS = [
-    'trial', 'objective', 'MAE_bpm_med', 'PCC_mean', 'CCC_mean',
+    'trial', 'objective', 'MAE_bpm_med', 'RMSE_bpm_med', 'PCC_mean', 'CCC_mean',
     'edge_sat', 'nan_rate', 'jerk_hzps', 'params'
 ]
 
@@ -67,16 +63,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--skip-leaderboard', action='store_true', help='Skip leaderboard/bundle generation')
     parser.add_argument('--bundle', action='store_true', help='Force bundle creation even if leaderboard skipped')
     parser.add_argument('--list', action='store_true', help='List tuned methods and exit')
-    weight_help = {
-        'mae': 'Weight for MAE term (default: 1.0)',
-        'pcc': 'Weight for PCC (1 - PCC) term (default: 0.5)',
-        'ccc': 'Weight for CCC (1 - CCC) term (default: 0.5)',
-        'edge': 'Weight for edge saturation penalty (default: 0.5)',
-        'nan': 'Weight for NaN rate penalty (default: 1.0)',
-        'jerk': 'Weight for jerk penalty (default: 0.2)',
-    }
-    for key, message in weight_help.items():
-        parser.add_argument(f'--weight-{key}', dest=f'weight_{key}', type=float, help=message)
+    parser.add_argument('--num-shards', type=int, default=1, help='Split allowlist into this many shards (default: 1)')
+    parser.add_argument('--shard-index', type=int, default=0, help='Shard index to run (0-based)')
+    weight_help_msg = (
+        "Objective = 0.85*MAE + 0.15*RMSE (기본). MAE가 1차 판단지표, RMSE는 대형오류 억제를 위한 보조 항. 모든 값은 bpm 단위."
+    )
+    parser.add_argument(
+        '--weight-mae',
+        dest='weight_mae',
+        type=float,
+        help=f"{weight_help_msg} MAE 가중치 덮어쓰기는 이 옵션을 사용하세요 (기본: 0.85)."
+    )
+    parser.add_argument(
+        '--weight-rmse',
+        dest='weight_rmse',
+        type=float,
+        help=f"{weight_help_msg} RMSE 가중치 덮어쓰기는 이 옵션을 사용하세요 (기본: 0.15)."
+    )
     return parser.parse_args()
 
 
@@ -102,8 +105,10 @@ def _allowlist_methods(method_names: Sequence[str], explicit: Optional[Sequence[
     filtered = []
     selection = set(n.lower() for n in explicit) if explicit else None
     for name in method_names:
-        base = name.split('__', 1)[0].lower()
-        if base in BASE_METHODS:
+        parts = name.split('__', 1)
+        base = parts[0].lower()
+        has_suffix = len(parts) > 1
+        if base in BASE_METHODS and not has_suffix:
             continue
         family = _method_family(name)
         if not family:
@@ -123,6 +128,34 @@ def _allowlist_methods(method_names: Sequence[str], explicit: Optional[Sequence[
     return dedup
 
 
+def _group_methods_by_base(methods: Sequence[str]) -> List[List[str]]:
+    groups: List[List[str]] = []
+    order: List[str] = []
+    by_base: Dict[str, List[str]] = {}
+    for name in methods:
+        base = name.split('__', 1)[0].lower()
+        if base not in by_base:
+            by_base[base] = []
+            order.append(base)
+        by_base[base].append(name)
+    for base in order:
+        groups.append(by_base.get(base, []))
+    return groups
+
+
+def _select_shard_methods(methods: Sequence[str], num_shards: int, shard_index: int) -> List[str]:
+    if num_shards <= 1:
+        return list(methods)
+    num_shards = max(1, num_shards)
+    shard_index = max(0, min(shard_index, num_shards - 1))
+    groups = _group_methods_by_base(methods)
+    shards: List[List[str]] = [[] for _ in range(num_shards)]
+    for idx, group in enumerate(groups):
+        target = idx % num_shards
+        shards[target].extend(group)
+    return shards[shard_index]
+
+
 @dataclass
 class ParamSpec:
     path: str
@@ -133,69 +166,52 @@ class ParamSpec:
     log: bool = False
 
 
-# WHY: Adult respiration (0.1-0.4 Hz) at 64 Hz sampling favours low process noise and gentle hops to avoid jerk/edge penalties.
+# WHY: Adult respiration (0.1–0.4 Hz) at 64 Hz → gentle drift, narrow noise floors; trim non-identifiable/unused params.
 FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
     'ukffreq': [
-        ParamSpec('oscillator.qf', 'float', 1e-7, 3e-5, log=True),
-        ParamSpec('oscillator.qx', 'float', 3e-6, 3e-3, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.15),
-        ParamSpec('oscillator.rho', 'float', 0.99, 0.9995),
-        ParamSpec('oscillator.tau_env', 'float', 20.0, 50.0),
-        ParamSpec('oscillator.stft_win', 'int', 16, 28),
-        ParamSpec('oscillator.stft_hop', 'float', 0.5, 1.0),
-        ParamSpec('oscillator.ukf_alpha', 'float', 0.01, 0.2),
+        ParamSpec('oscillator.qf', 'float', 5e-6, 5e-5, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.03, 0.08),
+        ParamSpec('oscillator.tau_env', 'float', 25.0, 40.0),
+        ParamSpec('oscillator.ukf_alpha', 'float', 0.03, 0.12),
         ParamSpec('oscillator.ukf_beta', 'choice', choices=[2.0]),
-        ParamSpec('oscillator.ukf_kappa', 'float', -1.0, 1.0),
     ],
     'pll': [
-        ParamSpec('oscillator.pll_zeta', 'float', 0.7, 1.1),
-        ParamSpec('oscillator.pll_ttrack', 'float', 3.0, 8.0),
-        ParamSpec('oscillator.pll_kp_min', 'float', 1e-5, 3e-3, log=True),
-        ParamSpec('oscillator.pll_ki_min', 'float', 1e-5, 3e-3, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.15),
-        ParamSpec('oscillator.qx', 'float', 3e-6, 3e-3, log=True),
-        ParamSpec('oscillator.qf', 'float', 1e-7, 3e-5, log=True),
+        ParamSpec('oscillator.pll_zeta', 'float', 0.8, 1.0),
+        ParamSpec('oscillator.pll_ttrack', 'float', 6.0, 9.0),
+        ParamSpec('oscillator.pll_kp_min', 'float', 1e-5, 1e-3, log=True),
+        ParamSpec('oscillator.pll_ki_min', 'float', 1e-5, 1e-3, log=True),
     ],
     'kfstd': [
-        ParamSpec('oscillator.qx', 'float', 1e-7, 1e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 1e-3, 5e-2, log=True),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.85, 0.97),
+        ParamSpec('oscillator.qx', 'float', 3e-6, 3e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 1e-2, 5e-2, log=True),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.90, 0.96),
     ],
     'spec_ridge': [
-        ParamSpec('oscillator.stft_win', 'int', 20, 28),
-        ParamSpec('oscillator.spec_overlap', 'float', 0.4, 0.6),
-        ParamSpec('oscillator.spec_nfft_factor', 'choice', choices=[2, 4]),
-        ParamSpec('oscillator.spec_peak_smooth_len', 'int', 2, 4),
+        ParamSpec('oscillator.stft_win', 'int', 10, 14),
+        ParamSpec('oscillator.spec_overlap', 'float', 0.88, 0.93),
+        ParamSpec('oscillator.spec_nfft_factor', 'choice', choices=[1, 2]),
+        ParamSpec('oscillator.spec_peak_smooth_len', 'int', 1, 3),
         ParamSpec('oscillator.spec_subbin_interp', 'choice', choices=['parabolic', 'none']),
-        ParamSpec('oscillator.ridge_penalty', 'float', 50.0, 400.0),
-        ParamSpec('gating.spectral.peak_ratio_min', 'float', 1.0, 2.0),
-        ParamSpec('gating.spectral.prominence_min_db', 'float', 0.5, 3.0),
-        ParamSpec('gating.spectral.fwhm_max_hz', 'float', 0.06, 0.15),
+        ParamSpec('oscillator.ridge_penalty', 'float', 150.0, 350.0),
     ],
 }
 
 # WHY: Seed each head near physiologic mid-points so Optuna explores narrow, safe bands.
 FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     'ukffreq': {
-        'oscillator.qf': 1e-6,
+        'oscillator.qf': 5e-5,
         'oscillator.qx': 1e-4,
-        'oscillator.rv_floor': 0.08,
-        'oscillator.rho': 0.996,
+        'oscillator.rv_floor': 0.05,
         'oscillator.tau_env': 30.0,
-        'oscillator.stft_win': 22,
-        'oscillator.stft_hop': 0.75,
-        'oscillator.ukf_alpha': 0.05,
+        'oscillator.ukf_alpha': 0.06,
         'oscillator.ukf_beta': 2.0,
         'oscillator.ukf_kappa': 0.0,
     },
     'pll': {
         'oscillator.pll_zeta': 0.9,
-        'oscillator.pll_ttrack': 5.0,
+        'oscillator.pll_ttrack': 7.0,
         'oscillator.pll_kp_min': 1e-4,
         'oscillator.pll_ki_min': 1e-3,
-        'oscillator.qx': 1e-4,
-        'oscillator.qf': 1e-6,
-        'oscillator.rv_floor': 0.08,
     },
     'kfstd': {
         'oscillator.qx': 1e-6,
@@ -203,11 +219,12 @@ FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
         'oscillator.post_smooth_alpha': 0.92,
     },
     'spec_ridge': {
-        'oscillator.stft_win': 24,
-        'oscillator.spec_overlap': 0.5,
+        'oscillator.stft_win': 12,
+        'oscillator.spec_overlap': 0.92,
         'oscillator.spec_nfft_factor': 2,
         'oscillator.spec_peak_smooth_len': 3,
         'oscillator.spec_subbin_interp': 'parabolic',
+        'oscillator.ridge_penalty': 250.0,
     },
 }
 
@@ -274,6 +291,7 @@ def _extract_metric(values: List[float], agg=np.nanmedian) -> float:
 def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> Dict[str, float]:
     name_to_idx = {name: idx for idx, name in enumerate(metric_names)}
     mae_vals: List[float] = []
+    rmse_vals: List[float] = []
     pcc_vals: List[float] = []
     ccc_vals: List[float] = []
     edge_vals: List[float] = []
@@ -283,22 +301,35 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
     idx_pcc = name_to_idx.get('PCC')
     idx_ccc = name_to_idx.get('CCC')
 
-    def _median_abs_error(record, metrics):
+    def _ae_samples_bpm(record):
         arr = record.get('ae_bpm')
         if arr is not None:
             arr = np.asarray(arr, dtype=np.float64).reshape(-1)
-            arr = arr[np.isfinite(arr)]
-            if arr.size:
-                return float(np.nanmedian(arr))
-        arr = record.get('ae_hz')
-        if arr is not None:
-            arr = np.asarray(arr, dtype=np.float64).reshape(-1)
-            arr = arr[np.isfinite(arr)]
-            if arr.size:
-                return float(np.nanmedian(arr * 60.0))
+        else:
+            arr = record.get('ae_hz')
+            if arr is not None:
+                arr = np.asarray(arr, dtype=np.float64).reshape(-1) * 60.0
+        if arr is None:
+            return None
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return None
+        return arr
+
+    def _median_abs_error(samples, metrics):
+        if samples is not None:
+            return float(np.nanmedian(samples))
         if idx_mae is not None and len(metrics) > idx_mae:
             return float(metrics[idx_mae])
         return None
+
+    def _rmse_error(samples):
+        if samples is None:
+            return None
+        rmse = float(np.sqrt(np.mean(np.square(samples))))
+        if not np.isfinite(rmse):
+            return None
+        return rmse
 
     def _corr_value(record, metrics, idx, keys):
         for key in keys:
@@ -359,9 +390,13 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
 
     for record in records:
         metrics = record.get('metrics') or []
-        mae_stat = _median_abs_error(record, metrics)
+        ae_samples = _ae_samples_bpm(record)
+        mae_stat = _median_abs_error(ae_samples, metrics)
         if mae_stat is not None:
             mae_vals.append(mae_stat)
+        rmse_stat = _rmse_error(ae_samples)
+        if rmse_stat is not None:
+            rmse_vals.append(rmse_stat)
         pcc_stat = _corr_value(record, metrics, idx_pcc, ('pcc', 'pearson'))
         if pcc_stat is not None:
             pcc_vals.append(pcc_stat)
@@ -386,6 +421,7 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
             jerk_vals.append(jerk_stat)
     return {
         'MAE_bpm_med': _extract_metric(mae_vals, np.nanmedian),
+        'RMSE_bpm_med': _extract_metric(rmse_vals, np.nanmedian),
         'PCC_mean': _extract_metric(pcc_vals, np.nanmean),
         'CCC_mean': _extract_metric(ccc_vals, np.nanmean),
         'edge_sat': _extract_metric(edge_vals, np.nanmean),
@@ -408,11 +444,7 @@ def combine_objective(summary: Dict[str, float], weights: Dict[str, float]) -> T
         terms[key] = term_val
 
     _add_term('mae', summary.get('MAE_bpm_med', float('nan')))
-    _add_term('pcc', summary.get('PCC_mean', float('nan')), lambda v: 1.0 - float(np.clip(v, -1.0, 1.0)))
-    _add_term('ccc', summary.get('CCC_mean', float('nan')), lambda v: 1.0 - float(np.clip(v, -1.0, 1.0)))
-    _add_term('edge', summary.get('edge_sat', float('nan')))
-    _add_term('nan', summary.get('nan_rate', float('nan')))
-    _add_term('jerk', summary.get('jerk_hzps', float('nan')))
+    _add_term('rmse', summary.get('RMSE_bpm_med', float('nan')))
 
     if not np.isfinite(objective):
         objective = 1e6
@@ -471,6 +503,7 @@ class MethodStudy:
             'trial': trial_num,
             'objective': objective,
             'MAE_bpm_med': summary.get('MAE_bpm_med'),
+            'RMSE_bpm_med': summary.get('RMSE_bpm_med'),
             'PCC_mean': summary.get('PCC_mean'),
             'CCC_mean': summary.get('CCC_mean'),
             'edge_sat': summary.get('edge_sat'),
@@ -682,11 +715,23 @@ def create_bundle(output_root: Path, config_path: Path, allowed_methods: Optiona
 
 def main():
     args = parse_args()
+    if args.num_shards is None or args.num_shards < 1:
+        raise SystemExit("--num-shards must be >= 1")
+    if args.shard_index < 0 or args.shard_index >= args.num_shards:
+        raise SystemExit("--shard-index must satisfy 0 <= index < num_shards")
     base_cfg = load_config(args.config)
     method_names = _extract_method_names(base_cfg.get('methods', []))
     allowlist = _allowlist_methods(method_names, args.methods)
+    shard_methods = _select_shard_methods(allowlist, args.num_shards, args.shard_index)
     if args.list:
-        print("\n".join(allowlist))
+        print("\n".join(shard_methods))
+        return
+    if args.num_shards > 1:
+        print(f"> Shard {args.shard_index}/{args.num_shards}: {len(shard_methods)} methods")
+        if shard_methods:
+            print("  -> " + ", ".join(shard_methods))
+    if not shard_methods:
+        print("> No methods assigned to this shard. Exiting.")
         return
     weights_cfg = ((base_cfg.get('optuna') or {}).get('objective') or {}).get('weights', {})
     cli_weight_overrides = {key: getattr(args, f'weight_{key}', None) for key in DEFAULT_WEIGHTS}
@@ -705,7 +750,7 @@ def main():
         pruner_enabled=not args.no_prune,
         keep_artifacts=args.keep_artifacts,
     )
-    for method in allowlist:
+    for method in shard_methods:
         family = _method_family(method)
         if not family:
             continue
@@ -714,10 +759,10 @@ def main():
         print(f"\n>>> Tuning {method} ({family})")
         MethodStudy(method, family, study_args).optimize()
     if not args.skip_leaderboard:
-        leaderboard = update_leaderboard(output_root, allowlist)
+        leaderboard = update_leaderboard(output_root, shard_methods)
         print(f"> Leaderboard written to {leaderboard}")
     if (args.bundle or not args.skip_leaderboard) and (output_root / 'dashboards' / 'leaderboard.csv').exists():
-        bundle = create_bundle(output_root, study_args.config_path, allowlist)
+        bundle = create_bundle(output_root, study_args.config_path, shard_methods)
         print(f"> Bundle created at {bundle}")
 
 

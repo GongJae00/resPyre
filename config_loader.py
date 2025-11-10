@@ -121,13 +121,13 @@ def load_config(path):
     osc_cfg.setdefault('rv_auto', True)
     osc_cfg.setdefault('rv_mad_scale', 1.2)
     osc_cfg.setdefault('rv_floor', 0.08)
-    osc_cfg.setdefault('qf', 1e-7)
+    osc_cfg.setdefault('qf', 5e-5)
     osc_cfg.setdefault('stft_win', 12.0)
     osc_cfg.setdefault('stft_hop', 1.0)
     osc_cfg.setdefault('ridge_penalty', 250.0)
     osc_cfg.setdefault('pll_autogain', True)
     osc_cfg.setdefault('pll_zeta', 0.9)
-    osc_cfg.setdefault('pll_ttrack', 5.0)
+    osc_cfg.setdefault('pll_ttrack', 7.0)
     cfg['oscillator'] = osc_cfg
 
     report_cfg = cfg.get('report', {})

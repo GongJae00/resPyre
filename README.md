@@ -86,6 +86,21 @@ python run_all.py -a 1 -d results/
 python run_all.py -a 2 -d results/
 ```
 
+## Paper Evaluation Settings
+
+For publication-ready reporting, disable gating-based promotions and keep the UKF head in a gently time-varying regime:
+
+```bash
+python run_all.py --config configs/cohface_motion_oscillator.json --step evaluate metrics \
+  --override gating.debug.disable_gating=true \
+  --override gating.common.constant_ptp_max_hz=0.0 \
+  --override heads.ukffreq.qf=3e-4 \
+  --override heads.ukffreq.qx=1e-4 \
+  --override heads.ukffreq.rv_floor=0.03
+```
+
+This combination guarantees that constant-track promotion stays off (so PCC/CCC remain `NaN` whenever the prediction is truly constant) and that the UKF frequency tracker admits slow respiratory drifts instead of collapsing to 0 variance. When aggregating metrics, always report the accompanying `nan_rate` to show how many windows produced valid correlation scores; `kfstd` is intentionally constant, so treat its MAE/RMSE as the primary indicators.
+
 ## Extending the Code
 
 ### Adding New Datasets
