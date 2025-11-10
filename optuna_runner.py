@@ -1,0 +1,648 @@
+#!/usr/bin/env python3
+"""Optuna-based tuner for resPyre oscillator heads."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+import optuna
+import pickle
+
+from config_loader import load_config
+
+REPO_ROOT = Path(__file__).resolve().parent
+DEFAULT_CONFIG = REPO_ROOT / "configs" / "cohface_motion_oscillator.json"
+
+BASE_METHODS = {
+    'of_farneback',
+    'dof',
+    'profile1d_linear',
+    'profile1d_quadratic',
+    'profile1d_cubic'
+}
+SUFFIX_FAMILY = {
+    '__ukffreq': 'ukffreq',
+    '__pll': 'pll',
+    '__kfstd': 'kfstd',
+    '__spec_ridge': 'spec_ridge'
+}
+ALLOWABLE_SUFFIXES = tuple(SUFFIX_FAMILY.keys())
+DEFAULT_WEIGHTS = {
+    'mae': 1.0,
+    'pcc': 0.5,
+    'ccc': 0.5,
+    'edge': 0.5,
+    'nan': 1.0,
+    'jerk': 0.2
+}
+TRIAL_CSV_FIELDS = [
+    'trial', 'objective', 'MAE_bpm_med', 'PCC_mean', 'CCC_mean',
+    'edge_sat', 'nan_rate', 'jerk_hzps', 'params'
+]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Optuna tuner for resPyre oscillators")
+    parser.add_argument('--config', default=str(DEFAULT_CONFIG), help='Base config JSON (default: %(default)s)')
+    parser.add_argument('--output', default='runs/optuna', help='Output root for studies')
+    parser.add_argument('--methods', nargs='*', help='Subset of methods to tune (default: allowlist 20)')
+    parser.add_argument('--families', nargs='*', choices=sorted(set(SUFFIX_FAMILY.values())), help='Restrict to specific families')
+    parser.add_argument('--n-trials', type=int, default=50, help='Trials per method')
+    parser.add_argument('--timeout', type=int, help='Optional timeout (seconds) per method')
+    parser.add_argument('--sampler-seed', type=int, default=42, help='Seed for Optuna sampler')
+    parser.add_argument('--no-prune', action='store_true', help='Disable Optuna pruner')
+    parser.add_argument('--keep-artifacts', action='store_true', help='Keep per-trial results directories')
+    parser.add_argument('--skip-leaderboard', action='store_true', help='Skip leaderboard/bundle generation')
+    parser.add_argument('--bundle', action='store_true', help='Force bundle creation even if leaderboard skipped')
+    parser.add_argument('--list', action='store_true', help='List tuned methods and exit')
+    return parser.parse_args()
+
+
+def _extract_method_names(method_entries: Sequence) -> List[str]:
+    names = []
+    for entry in method_entries:
+        if isinstance(entry, str):
+            names.append(entry)
+        elif isinstance(entry, dict) and entry.get('name'):
+            names.append(entry['name'])
+    return names
+
+
+def _method_family(method: str) -> Optional[str]:
+    lname = method.lower()
+    for suffix, family in SUFFIX_FAMILY.items():
+        if lname.endswith(suffix):
+            return family
+    return None
+
+
+def _allowlist_methods(method_names: Sequence[str], explicit: Optional[Sequence[str]] = None) -> List[str]:
+    filtered = []
+    selection = set(n.lower() for n in explicit) if explicit else None
+    for name in method_names:
+        base = name.split('__', 1)[0].lower()
+        if base in BASE_METHODS:
+            continue
+        family = _method_family(name)
+        if not family:
+            continue
+        if selection and name.lower() not in selection:
+            continue
+        filtered.append(name)
+    dedup = []
+    seen = set()
+    for name in filtered:
+        if name.lower() in seen:
+            continue
+        dedup.append(name)
+        seen.add(name.lower())
+    if len(dedup) != 20:
+        print(f"> Warning: allowlist resolved to {len(dedup)} methods (expected 20)")
+    return dedup
+
+
+@dataclass
+class ParamSpec:
+    path: str
+    kind: str
+    low: Optional[float] = None
+    high: Optional[float] = None
+    choices: Optional[Sequence] = None
+    log: bool = False
+
+
+# WHY: Adult respiration (0.1-0.4 Hz) at 64 Hz sampling favours low process noise and gentle hops to avoid jerk/edge penalties.
+FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
+    'ukffreq': [
+        ParamSpec('oscillator.qf', 'float', 1e-7, 3e-5, log=True),
+        ParamSpec('oscillator.qx', 'float', 3e-6, 3e-3, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.15),
+        ParamSpec('oscillator.rho', 'float', 0.99, 0.9995),
+        ParamSpec('oscillator.tau_env', 'float', 20.0, 50.0),
+        ParamSpec('oscillator.stft_win', 'int', 16, 28),
+        ParamSpec('oscillator.stft_hop', 'float', 0.5, 1.0),
+        ParamSpec('oscillator.ukf_alpha', 'float', 0.01, 0.2),
+        ParamSpec('oscillator.ukf_beta', 'choice', choices=[2.0]),
+        ParamSpec('oscillator.ukf_kappa', 'float', -1.0, 1.0),
+    ],
+    'pll': [
+        ParamSpec('oscillator.pll_zeta', 'float', 0.7, 1.1),
+        ParamSpec('oscillator.pll_ttrack', 'float', 3.0, 8.0),
+        ParamSpec('oscillator.pll_kp_min', 'float', 1e-5, 3e-3, log=True),
+        ParamSpec('oscillator.pll_ki_min', 'float', 1e-5, 3e-3, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.15),
+        ParamSpec('oscillator.qx', 'float', 3e-6, 3e-3, log=True),
+        ParamSpec('oscillator.qf', 'float', 1e-7, 3e-5, log=True),
+    ],
+    'kfstd': [
+        ParamSpec('oscillator.qx', 'float', 1e-7, 1e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 1e-3, 5e-2, log=True),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.85, 0.97),
+    ],
+    'spec_ridge': [
+        ParamSpec('oscillator.stft_win', 'int', 20, 28),
+        ParamSpec('oscillator.spec_overlap', 'float', 0.4, 0.6),
+        ParamSpec('oscillator.spec_nfft_factor', 'choice', choices=[2, 4]),
+        ParamSpec('oscillator.spec_peak_smooth_len', 'int', 2, 4),
+        ParamSpec('oscillator.spec_subbin_interp', 'choice', choices=['parabolic', 'none']),
+        ParamSpec('oscillator.ridge_penalty', 'float', 50.0, 400.0),
+        ParamSpec('gating.spectral.peak_ratio_min', 'float', 1.0, 2.0),
+        ParamSpec('gating.spectral.prominence_min_db', 'float', 0.5, 3.0),
+        ParamSpec('gating.spectral.fwhm_max_hz', 'float', 0.06, 0.15),
+    ],
+}
+
+# WHY: Seed each head near physiologic mid-points so Optuna explores narrow, safe bands.
+FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    'ukffreq': {
+        'oscillator.qf': 1e-6,
+        'oscillator.qx': 1e-4,
+        'oscillator.rv_floor': 0.08,
+        'oscillator.rho': 0.996,
+        'oscillator.tau_env': 30.0,
+        'oscillator.stft_win': 22,
+        'oscillator.stft_hop': 0.75,
+        'oscillator.ukf_alpha': 0.05,
+        'oscillator.ukf_beta': 2.0,
+        'oscillator.ukf_kappa': 0.0,
+    },
+    'pll': {
+        'oscillator.pll_zeta': 0.9,
+        'oscillator.pll_ttrack': 5.0,
+        'oscillator.pll_kp_min': 1e-4,
+        'oscillator.pll_ki_min': 1e-3,
+        'oscillator.qx': 1e-4,
+        'oscillator.qf': 1e-6,
+        'oscillator.rv_floor': 0.08,
+    },
+    'kfstd': {
+        'oscillator.qx': 1e-6,
+        'oscillator.rv_floor': 1e-2,
+        'oscillator.post_smooth_alpha': 0.92,
+    },
+    'spec_ridge': {
+        'oscillator.stft_win': 24,
+        'oscillator.spec_overlap': 0.5,
+        'oscillator.spec_nfft_factor': 2,
+        'oscillator.spec_peak_smooth_len': 3,
+        'oscillator.spec_subbin_interp': 'parabolic',
+    },
+}
+
+
+def suggest_params(trial: optuna.trial.Trial, family: str) -> Dict[str, float]:
+    specs = FAMILY_PARAM_SPACE.get(family, [])
+    params: Dict[str, float] = {}
+    for spec in specs:
+        name = f"param:{spec.path}"
+        if spec.kind == 'choice' and spec.choices is not None:
+            params[spec.path] = trial.suggest_categorical(name, list(spec.choices))
+        elif spec.kind == 'int':
+            params[spec.path] = int(trial.suggest_int(name, int(spec.low), int(spec.high)))
+        elif spec.kind == 'float':
+            params[spec.path] = float(trial.suggest_float(name, float(spec.low), float(spec.high), log=spec.log))
+        else:
+            raise ValueError(f"Unsupported ParamSpec kind: {spec.kind}")
+    return params
+
+
+def _set_nested(target: Dict, path: str, value) -> None:
+    keys = path.split('.')
+    node = target
+    for key in keys[:-1]:
+        if key not in node or not isinstance(node[key], dict):
+            node[key] = {}
+        node = node[key]
+    node[keys[-1]] = value
+
+
+def _stringify_percentile(arr: List[float], fn=np.nanmedian) -> float:
+    if not arr:
+        return float('nan')
+    vals = np.asarray(arr, dtype=np.float64)
+    if vals.size == 0:
+        return float('nan')
+    return float(fn(vals))
+
+
+def locate_metrics_file(results_root: Path) -> Optional[Path]:
+    if not results_root.exists():
+        return None
+    for path in results_root.rglob('metrics.pkl'):
+        return path
+    for path in results_root.rglob('metrics_1w.pkl'):
+        return path
+    return None
+
+
+def load_method_records(metrics_path: Path, method: str):
+    with open(metrics_path, 'rb') as fp:
+        metric_names, method_metrics = pickle.load(fp)
+    records = method_metrics.get(method, []) if isinstance(method_metrics, dict) else []
+    return metric_names, records
+
+
+def _extract_metric(values: List[float], agg=np.nanmedian) -> float:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0:
+        return float('nan')
+    return float(agg(arr))
+
+
+def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> Dict[str, float]:
+    name_to_idx = {name: idx for idx, name in enumerate(metric_names)}
+    mae_vals: List[float] = []
+    pcc_vals: List[float] = []
+    ccc_vals: List[float] = []
+    edge_vals: List[float] = []
+    nan_vals: List[float] = []
+    jerk_vals: List[float] = []
+    idx_mae = name_to_idx.get('MAE')
+    idx_pcc = name_to_idx.get('PCC')
+    idx_ccc = name_to_idx.get('CCC')
+
+    for record in records:
+        metrics = record.get('metrics') or []
+        if idx_mae is not None and len(metrics) > idx_mae:
+            mae_vals.append(metrics[idx_mae])
+        if idx_pcc is not None and len(metrics) > idx_pcc:
+            pcc_vals.append(metrics[idx_pcc])
+        if idx_ccc is not None and len(metrics) > idx_ccc:
+            ccc_vals.append(metrics[idx_ccc])
+        track_stats = record.get('track_stats') or {}
+        edge_val = track_stats.get('edge_saturation_fraction')
+        if edge_val is None:
+            edge_val = track_stats.get('saturation_fraction')
+        if edge_val is not None:
+            edge_vals.append(edge_val)
+        pred = None
+        pair = record.get('pair') or []
+        if isinstance(pair, (list, tuple)) and pair:
+            pred = pair[0]
+        if pred is not None:
+            pred_arr = np.asarray(pred, dtype=np.float64).reshape(-1)
+            if pred_arr.size:
+                nan_vals.append(float(np.mean(~np.isfinite(pred_arr))))
+                freq_hz = pred_arr / 60.0
+                times = np.asarray(record.get('times_est'), dtype=np.float64) if record.get('times_est') is not None else None
+                dt = None
+                if times is not None and times.size >= 2:
+                    diffs = np.diff(times)
+                    finite = diffs[np.isfinite(diffs)]
+                    if finite.size:
+                        dt = float(np.nanmedian(finite))
+                if dt is None or dt <= 0:
+                    dt = 1.0
+                if freq_hz.size >= 2:
+                    jerk = np.abs(np.diff(freq_hz)) / max(dt, 1e-6)
+                    jerk = jerk[np.isfinite(jerk)]
+                    if jerk.size:
+                        jerk_vals.append(float(np.nanmedian(jerk)))
+    return {
+        'MAE_bpm_med': _extract_metric(mae_vals, np.nanmedian),
+        'PCC_mean': _extract_metric(pcc_vals, np.nanmean),
+        'CCC_mean': _extract_metric(ccc_vals, np.nanmean),
+        'edge_sat': _extract_metric(edge_vals, np.nanmean),
+        'nan_rate': _extract_metric(nan_vals, np.nanmean),
+        'jerk_hzps': _extract_metric(jerk_vals, np.nanmedian),
+    }
+
+
+def combine_objective(summary: Dict[str, float], weights: Dict[str, float]) -> Tuple[float, Dict[str, float]]:
+    terms = {}
+    objective = 0.0
+    def _add_term(key: str, value: float, transform=None):
+        nonlocal objective
+        weight = float(weights.get(key, 0.0))
+        if weight == 0.0 or not np.isfinite(value):
+            terms[key] = float('nan')
+            return
+        term_val = transform(value) if transform else value
+        objective += weight * term_val
+        terms[key] = term_val
+
+    _add_term('mae', summary.get('MAE_bpm_med', float('nan')))
+    _add_term('pcc', summary.get('PCC_mean', float('nan')), lambda v: 1.0 - float(np.clip(v, -1.0, 1.0)))
+    _add_term('ccc', summary.get('CCC_mean', float('nan')), lambda v: 1.0 - float(np.clip(v, -1.0, 1.0)))
+    _add_term('edge', summary.get('edge_sat', float('nan')))
+    _add_term('nan', summary.get('nan_rate', float('nan')))
+    _add_term('jerk', summary.get('jerk_hzps', float('nan')))
+
+    if not np.isfinite(objective):
+        objective = 1e6
+    return objective, terms
+
+
+@dataclass
+class StudyArgs:
+    base_cfg: Dict
+    config_path: Path
+    output_root: Path
+    weights: Dict[str, float]
+    n_trials: int
+    timeout: Optional[int]
+    sampler_seed: int
+    pruner_enabled: bool
+    keep_artifacts: bool
+
+
+class MethodStudy:
+    def __init__(self, method: str, family: str, args: StudyArgs):
+        self.method = method
+        self.family = family
+        self.args = args
+        self.study_dir = args.output_root / family / method
+        self.study_dir.mkdir(parents=True, exist_ok=True)
+        self.artifacts_dir = self.study_dir / 'artifacts'
+        self.artifacts_dir.mkdir(exist_ok=True)
+        self.trials_csv = self.study_dir / 'trials.csv'
+        self.best_path = self.study_dir / 'best.json'
+
+    def optimize(self):
+        sampler = optuna.samplers.TPESampler(seed=self.args.sampler_seed)
+        pruner = None if not self.args.pruner_enabled else optuna.pruners.MedianPruner(n_startup_trials=max(1, int(self.args.n_trials * 0.1)))
+        storage = f"sqlite:///{(self.study_dir / 'study.db').as_posix()}"
+        study = optuna.create_study(
+            study_name=self.method,
+            direction='minimize',
+            sampler=sampler,
+            pruner=pruner,
+            storage=storage,
+            load_if_exists=True
+        )
+        study.optimize(self._objective, n_trials=self.args.n_trials, timeout=self.args.timeout, gc_after_trial=True)
+
+    def _objective(self, trial: optuna.trial.Trial) -> float:
+        params = suggest_params(trial, self.family)
+        metrics, summary = self._run_trial(trial.number, params)
+        objective, _ = combine_objective(summary, self.args.weights)
+        self._record_trial(trial.number, objective, summary, params)
+        self._update_best(objective, summary, params)
+        return objective
+
+    def _record_trial(self, trial_num: int, objective: float, summary: Dict[str, float], params: Dict[str, float]):
+        row = {
+            'trial': trial_num,
+            'objective': objective,
+            'MAE_bpm_med': summary.get('MAE_bpm_med'),
+            'PCC_mean': summary.get('PCC_mean'),
+            'CCC_mean': summary.get('CCC_mean'),
+            'edge_sat': summary.get('edge_sat'),
+            'nan_rate': summary.get('nan_rate'),
+            'jerk_hzps': summary.get('jerk_hzps'),
+            'params': json.dumps(params, sort_keys=True)
+        }
+        write_header = not self.trials_csv.exists()
+        with open(self.trials_csv, 'a', newline='', encoding='utf-8') as fp:
+            writer = csv.DictWriter(fp, fieldnames=TRIAL_CSV_FIELDS)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+
+    def _update_best(self, objective: float, summary: Dict[str, float], params: Dict[str, float]):
+        best = None
+        if self.best_path.exists():
+            try:
+                with open(self.best_path, 'r', encoding='utf-8') as fp:
+                    best = json.load(fp)
+            except Exception:
+                best = None
+        if best and best.get('objective') <= objective:
+            return
+        payload = {
+            'method': self.method,
+            'family': self.family,
+            'objective': objective,
+            'metrics': summary,
+            'params': params,
+            'created': datetime.utcnow().isoformat() + 'Z'
+        }
+        with open(self.best_path, 'w', encoding='utf-8') as fp:
+            json.dump(payload, fp, ensure_ascii=False, indent=2)
+
+    def _run_trial(self, trial_number: int, params: Dict[str, float]):
+        cfg = json.loads(json.dumps(self.args.base_cfg))
+        cfg['methods'] = [self.method]
+        results_dir = self.artifacts_dir / f"trial_{trial_number:04d}" / 'results'
+        results_dir.mkdir(parents=True, exist_ok=True)
+        cfg['results_dir'] = str(results_dir)
+        cfg.setdefault('name', f"optuna_{self.method}")
+        self._apply_family_defaults(cfg)
+        self._apply_no_fallback(cfg)
+        for path, value in params.items():
+            _set_nested(cfg, path, value)
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"optuna_{self.method}_"))
+        cfg_path = tmp_dir / 'config.json'
+        with open(cfg_path, 'w', encoding='utf-8') as fp:
+            json.dump(cfg, fp, ensure_ascii=False, indent=2)
+        cmd = [sys.executable, str(REPO_ROOT / 'run_all.py'), '-c', str(cfg_path), '-s', 'estimate', 'evaluate', 'metrics', '--no-profile-steps']
+        try:
+            subprocess.run(cmd, check=True, cwd=str(REPO_ROOT))
+        except subprocess.CalledProcessError as exc:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise optuna.TrialPruned(f"Pipeline failed: {exc}")
+        metrics_path = locate_metrics_file(Path(cfg['results_dir']))
+        if not metrics_path:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise optuna.TrialPruned('metrics file missing')
+        metric_names, records = load_method_records(metrics_path, self.method)
+        summary = summarize_records(metric_names, records)
+        if not self.args.keep_artifacts:
+            shutil.rmtree(Path(cfg['results_dir']).parent, ignore_errors=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return metrics_path, summary
+
+    def _apply_no_fallback(self, cfg: Dict) -> None:
+        gating = cfg.setdefault('gating', {})
+        gating.setdefault('debug', {})['disable_gating'] = True
+        common = gating.setdefault('common', {})
+        common['use_track'] = True
+        tracker = gating.setdefault('tracker', {})
+        tracker['std_is_soft'] = True
+        tracker['std_min_bpm'] = 0.0
+        tracker['unique_min'] = 0.0
+        tracker['saturation_max'] = 1.0
+        cfg.setdefault('eval', {}).setdefault('use_track', True)
+
+    def _apply_family_defaults(self, cfg: Dict) -> None:
+        defaults = FAMILY_DEFAULTS.get(self.family)
+        if not defaults:
+            return
+        for path, value in defaults.items():
+            keys = path.split('.')
+            node = cfg
+            for key in keys[:-1]:
+                if key not in node or not isinstance(node[key], dict):
+                    node[key] = {}
+                node = node[key]
+            node.setdefault(keys[-1], value)
+
+
+def aggregate_best_entries(output_root: Path, allowed_methods: Optional[Sequence[str]] = None) -> List[Dict[str, str]]:
+    rows = []
+    allowed = {name.lower(): name for name in allowed_methods} if allowed_methods else None
+    for family_dir in output_root.iterdir() if output_root.exists() else []:
+        if not family_dir.is_dir() or family_dir.name.startswith('_'):
+            continue
+        for method_dir in family_dir.iterdir():
+            best_path = method_dir / 'best.json'
+            if not best_path.exists():
+                continue
+            with open(best_path, 'r', encoding='utf-8') as fp:
+                data = json.load(fp)
+            rel_path = str(best_path.relative_to(REPO_ROOT))
+            method_name = data.get('method', method_dir.name)
+            if allowed and method_name.lower() not in allowed:
+                continue
+            rows.append({
+                'method': method_name,
+                'family': data.get('family', family_dir.name),
+                'objective': data.get('objective'),
+                'MAE_bpm_med': data.get('metrics', {}).get('MAE_bpm_med'),
+                'PCC_mean': data.get('metrics', {}).get('PCC_mean'),
+                'CCC_mean': data.get('metrics', {}).get('CCC_mean'),
+                'edge_sat': data.get('metrics', {}).get('edge_sat'),
+                'nan_rate': data.get('metrics', {}).get('nan_rate'),
+                'jerk_hzps': data.get('metrics', {}).get('jerk_hzps'),
+                'best_json_path': rel_path
+            })
+    if allowed and len(rows) != len(allowed):
+        present = {row['method'].lower() for row in rows}
+        missing = sorted(name for key, name in allowed.items() if key not in present)
+        if missing:
+            print(f"> Warning: leaderboard missing best.json for {len(missing)} methods: {', '.join(missing)}")
+    rows.sort(key=lambda r: (
+        r['objective'] if isinstance(r.get('objective'), (int, float)) else float('inf'),
+        r.get('MAE_bpm_med', float('inf')),
+        -(r.get('CCC_mean') or -float('inf')),
+        -(r.get('PCC_mean') or -float('inf'))
+    ))
+    return rows
+
+
+def update_leaderboard(output_root: Path, allowed_methods: Optional[Sequence[str]] = None) -> Path:
+    rows = aggregate_best_entries(output_root, allowed_methods)
+    if not rows:
+        raise RuntimeError("No best.json files found; run tuning first")
+    dashboards = output_root / 'dashboards'
+    dashboards.mkdir(parents=True, exist_ok=True)
+    leaderboard = dashboards / 'leaderboard.csv'
+    with open(leaderboard, 'w', newline='', encoding='utf-8') as fp:
+        fieldnames = ['method', 'family', 'objective', 'MAE_bpm_med', 'PCC_mean', 'CCC_mean', 'edge_sat', 'nan_rate', 'jerk_hzps', 'best_json_path']
+        writer = csv.DictWriter(fp, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return leaderboard
+
+
+def create_bundle(output_root: Path, config_path: Path, allowed_methods: Optional[Sequence[str]] = None) -> Path:
+    leaderboard = output_root / 'dashboards' / 'leaderboard.csv'
+    if not leaderboard.exists():
+        raise RuntimeError("leaderboard.csv missing; cannot bundle")
+    with open(leaderboard, 'r', encoding='utf-8') as fp:
+        reader = csv.DictReader(fp)
+        entries = list(reader)
+    if allowed_methods:
+        allowed = {name.lower() for name in allowed_methods}
+        entries = [row for row in entries if row['method'].lower() in allowed]
+    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M')
+    bundle_dir = output_root / '_bundles' / f"best20_{timestamp}"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = bundle_dir / 'manifest.json'
+    manifest = {
+        'created': datetime.utcnow().isoformat() + 'Z',
+        'config': str(config_path),
+        'methods': {row['method']: row['best_json_path'] for row in entries}
+    }
+    with open(manifest_path, 'w', encoding='utf-8') as fp:
+        json.dump(manifest, fp, ensure_ascii=False, indent=2)
+    apply_script = bundle_dir / 'apply_all.sh'
+    script_lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        f'CONFIG="{config_path}"',
+        'MANIFEST="$(dirname "$0")/manifest.json"',
+        'RESULTS_ROOT="results/paper_best"',
+        'ROOT_DIR="$(cd "$(dirname "$0")/../../../.." && pwd)"',
+        "python - \"$CONFIG\" \"$MANIFEST\" \"$RESULTS_ROOT\" \"$ROOT_DIR\" <<'PY'",
+        "import json, pathlib, subprocess, sys",
+        "config, manifest_path, results_root, repo_root = sys.argv[1:5]",
+        "repo = pathlib.Path(repo_root).resolve()",
+        "manifest = json.load(open(manifest_path))",
+        "methods = manifest.get('methods', {})",
+        "results_path = pathlib.Path(results_root)",
+        "if not results_path.is_absolute():",
+        "    results_path = repo / results_path",
+        "results_path.mkdir(parents=True, exist_ok=True)",
+        "for method, best_rel in methods.items():",
+        "    best_json = repo / best_rel",
+        "    out_dir = results_path / method.replace('__', '_')",
+        "    out_dir.mkdir(parents=True, exist_ok=True)",
+        "    cmd = [sys.executable, str(repo / 'run_all.py'), '-c', config, '-s', 'estimate', 'evaluate', 'metrics',",
+        "           '--override-from', str(best_json), '--override', 'gating.profile=paper', '--results', str(out_dir)]",
+        "    subprocess.run(cmd, check=True, cwd=repo)",
+        "PY",
+        "",
+    ]
+    script = "\n".join(script_lines)
+    apply_script.write_text(script, encoding='utf-8')
+    os.chmod(apply_script, 0o755)
+    readme = bundle_dir / 'README.txt'
+    readme.write_text("Run ./apply_all.sh to re-generate best methods under results/paper_best", encoding='utf-8')
+    return bundle_dir
+
+
+def main():
+    args = parse_args()
+    base_cfg = load_config(args.config)
+    method_names = _extract_method_names(base_cfg.get('methods', []))
+    allowlist = _allowlist_methods(method_names, args.methods)
+    if args.list:
+        print("\n".join(allowlist))
+        return
+    weights_cfg = ((base_cfg.get('optuna') or {}).get('objective') or {}).get('weights', {})
+    weights = {**DEFAULT_WEIGHTS, **weights_cfg}
+    output_root = Path(args.output).resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    study_args = StudyArgs(
+        base_cfg=base_cfg,
+        config_path=Path(args.config).resolve(),
+        output_root=output_root,
+        weights=weights,
+        n_trials=args.n_trials,
+        timeout=args.timeout,
+        sampler_seed=args.sampler_seed,
+        pruner_enabled=not args.no_prune,
+        keep_artifacts=args.keep_artifacts,
+    )
+    for method in allowlist:
+        family = _method_family(method)
+        if not family:
+            continue
+        if args.families and family not in args.families:
+            continue
+        print(f"\n>>> Tuning {method} ({family})")
+        MethodStudy(method, family, study_args).optimize()
+    if not args.skip_leaderboard:
+        leaderboard = update_leaderboard(output_root, allowlist)
+        print(f"> Leaderboard written to {leaderboard}")
+    if (args.bundle or not args.skip_leaderboard) and (output_root / 'dashboards' / 'leaderboard.csv').exists():
+        bundle = create_bundle(output_root, study_args.config_path, allowlist)
+        print(f"> Bundle created at {bundle}")
+
+
+if __name__ == '__main__':
+    main()
