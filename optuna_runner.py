@@ -51,7 +51,7 @@ TRIAL_CSV_FIELDS = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Optuna tuner for resPyre oscillators")
-    parser.add_argument('--config', default=str(DEFAULT_CONFIG), help='Base config JSON (default: %(default)s)')
+    parser.add_argument('-c', '--config', default=str(DEFAULT_CONFIG), help='Base config JSON (default: %(default)s)')
     parser.add_argument('--output', default='runs/optuna', help='Output root for studies')
     parser.add_argument('--methods', nargs='*', help='Subset of methods to tune (default: allowlist 20)')
     parser.add_argument('--families', nargs='*', choices=sorted(set(SUFFIX_FAMILY.values())), help='Restrict to specific families')

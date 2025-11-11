@@ -635,18 +635,22 @@ Code and Data Availability
      --output runs/optuna_shard0 \
      --num-shards 5 --shard-index 0 \
      --n-trials 20
+
    python optuna_runner.py -c configs/cohface_motion_oscillator.json \
      --output runs/optuna_shard1 \
      --num-shards 5 --shard-index 1 \
      --n-trials 20
+
    python optuna_runner.py -c configs/cohface_motion_oscillator.json \
      --output runs/optuna_shard2 \
      --num-shards 5 --shard-index 2 \
      --n-trials 20
+
    python optuna_runner.py -c configs/cohface_motion_oscillator.json \
      --output runs/optuna_shard3 \
      --num-shards 5 --shard-index 3 \
      --n-trials 20
+     
    python optuna_runner.py -c configs/cohface_motion_oscillator.json \
      --output runs/optuna_shard4 \
      --num-shards 5 --shard-index 4 \
