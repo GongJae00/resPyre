@@ -3137,11 +3137,21 @@ def _derive_run_dirs(results_root, datasets, methods, run_label=None):
 
 def _resolve_paths(base, paths):
 	resolved = []
-	for p in paths:
-		if os.path.isabs(p):
-			resolved.append(p)
+	base_path = Path(base).resolve()
+	base_name = base_path.name
+	for p in paths or []:
+		if p is None:
+			continue
+		entry = Path(p)
+		if entry.is_absolute():
+			resolved.append(str(entry.resolve()))
+			continue
+		parts = entry.parts
+		if parts and parts[0] == base_name:
+			entry = base_path.joinpath(*parts[1:])
 		else:
-			resolved.append(os.path.abspath(os.path.join(base, p)))
+			entry = base_path / entry
+		resolved.append(str(entry.resolve()))
 	return resolved
 
 

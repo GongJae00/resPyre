@@ -1,10 +1,33 @@
 import json
+import os
 from dataclasses import asdict, dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List
 
 import numpy as np
 from scipy import signal as sps
 from scipy.signal import hilbert
+
+from .params_autotune import AutoTuneRepository
+from riv.optim.em_kalman import load_em_params
+
+_AUTOTUNE_REPO = AutoTuneRepository()
+
+
+class PLLAdaptiveController:
+    """Simple adaptive gain controller driven by SNR."""
+
+    def __init__(self, zeta: float, ttrack: float, fs: float):
+        self.zeta = float(max(zeta, 1e-3))
+        self.ttrack = float(max(ttrack, 1e-3))
+        self.fs = float(max(fs, 1.0))
+
+    def gains(self, snr: float, kp_min: float, ki_min: float) -> Tuple[float, float]:
+        snr = max(float(snr), 0.0)
+        snr_scale = np.clip(np.log1p(snr) / np.log(10.0), 0.2, 2.0)
+        omega_n = 2.0 * np.pi * snr_scale / self.ttrack
+        kp = max(2.0 * self.zeta * omega_n / self.fs, kp_min)
+        ki = max((omega_n ** 2) / (self.fs ** 2), ki_min)
+        return kp, ki
 
 
 @dataclass
@@ -63,8 +86,12 @@ class _BaseOscillatorHead:
         self.params = params or OscillatorParams()
         self._last_sigma_y = None
         self._last_init_freq = None
+        self._last_signal_std = None
+        self._last_snr = None
         self.preproc_cfg: Dict = {}
         self._last_preproc_meta: Dict = {}
+        self._autotune_repo = _AUTOTUNE_REPO
+        self._autotune_cache: Dict[Tuple[str, str], bool] = {}
 
     def _preprocess(self, signal: np.ndarray, fs: float) -> np.ndarray:
         p = self.params
@@ -107,6 +134,9 @@ class _BaseOscillatorHead:
         if not np.isfinite(sigma_hat) or sigma_hat < 0.0:
             sigma_hat = 0.0
         self._last_sigma_y = float(sigma_hat if sigma_hat > 0.0 else 0.0)
+        signal_std = float(np.std(x)) if x.size else 0.0
+        self._last_signal_std = signal_std
+        self._last_snr = float(signal_std / max(self._last_sigma_y, 1e-6)) if self._last_sigma_y else 0.0
         robust_cfg = preproc_cfg.get("robust_zscore", {}) or {}
         robust_flag = robust_cfg.get("enabled")
         use_robust = bool(p.zscore) and (bool(robust_flag) if robust_flag is not None else True)
@@ -166,21 +196,143 @@ class _BaseOscillatorHead:
             return np.arange(n)
         return np.arange(n) / fs
 
-    def _coarse_freq(self, signal: np.ndarray, fs: float) -> float:
+    def _dataset_from_meta(self, meta: Optional[Dict]) -> str:
+        if isinstance(meta, dict):
+            dataset = meta.get("dataset") or meta.get("dataset_name") or meta.get("dataset_slug")
+            if dataset:
+                return str(dataset).lower()
+            data_file = meta.get("data_file")
+            if isinstance(data_file, str) and data_file:
+                token = os.path.basename(data_file).split('_')[0]
+                if token:
+                    return token.lower()
+        return "unknown"
+
+    def _method_identifier(self, meta: Optional[Dict]) -> str:
+        base = "unknown"
+        if isinstance(meta, dict):
+            base = meta.get("method_name") or meta.get("base_method") or "unknown"
+        return f"{base}__{self.head_key}"
+
+    def _maybe_apply_autotune(self, meta: Optional[Dict]):
+        dataset = self._dataset_from_meta(meta)
+        method_id = self._method_identifier(meta)
+        cache_key = (dataset, method_id)
+        if cache_key in self._autotune_cache:
+            return
+        overrides = self._autotune_repo.load_params(dataset, method_id)
+        if not overrides:
+            # fallback to head-only overrides
+            overrides = self._autotune_repo.load_params(dataset, self.head_key)
+        em_overrides = load_em_params(dataset, method_id)
+        if em_overrides:
+            if 'q' in em_overrides:
+                setattr(self.params, 'qx_override', float(em_overrides['q']))
+            if 'r' in em_overrides:
+                setattr(self.params, 'rv_floor_override', float(em_overrides['r']))
+        if overrides:
+            for field, value in overrides.items():
+                if hasattr(self.params, field) and value is not None:
+                    try:
+                        setattr(self.params, field, float(value))
+                    except Exception:
+                        setattr(self.params, field, value)
+        self._autotune_cache[cache_key] = True
+
+    def _log_autotune_stats(self, meta: Optional[Dict], freq: float):
+        if self._autotune_repo is None:
+            return
+        dataset = self._dataset_from_meta(meta)
+        method_id = self._method_identifier(meta)
+        mad = self._last_sigma_y if self._last_sigma_y is not None else 0.0
+        snr = self._last_snr if self._last_snr is not None else 0.0
+        freq_val = float(freq) if np.isfinite(freq) else 0.0
+        extra = {
+            "snr": snr,
+            "mad": mad,
+            "signal_std": self._last_signal_std if self._last_signal_std is not None else 0.0,
+            "init_margin": float(getattr(self.params, "init_margin_hz", 0.0))
+        }
+        try:
+            self._autotune_repo.record_stats(dataset, method_id, mad, snr, freq_val, extra)
+        except Exception:
+            pass
+
+    def _welch_candidate(self, signal: np.ndarray, fs: float) -> Tuple[float, float, Dict]:
         p = self.params
-        if signal.size < 8:
-            return 0.5 * (p.f_min + p.f_max)
+        if signal.size < 8 or fs <= 0:
+            return float("nan"), 0.0, {}
         win = int(min(max(fs * 20, fs), signal.size))
         if win < 8:
             win = min(256, signal.size)
         freqs, power = sps.welch(signal, fs=fs, nperseg=win)
         mask = (freqs >= p.f_min) & (freqs <= p.f_max)
         if not np.any(mask):
-            return 0.5 * (p.f_min + p.f_max)
-        freq = float(freqs[mask][np.argmax(power[mask])])
-        if not np.isfinite(freq):
-            freq = 0.5 * (p.f_min + p.f_max)
-        freq_raw = float(freq)
+            return float("nan"), 0.0, {}
+        sub_freqs = freqs[mask]
+        sub_power = power[mask]
+        idx = int(np.argmax(sub_power))
+        peak_power = float(sub_power[idx])
+        median_power = float(np.median(sub_power) + 1e-9)
+        peak_ratio = peak_power / median_power
+        confidence = np.clip(peak_ratio / 4.0, 0.0, 5.0)
+        return float(sub_freqs[idx]), float(confidence), {"label": "welch", "peak_ratio": peak_ratio}
+
+    def _autocorr_candidate(self, signal: np.ndarray, fs: float) -> Tuple[float, float, Dict]:
+        p = self.params
+        if signal.size < 16 or fs <= 0:
+            return float("nan"), 0.0, {}
+        autocorr = sps.correlate(signal, signal, mode='full')
+        autocorr = autocorr[autocorr.size // 2:]
+        lag_min = int(max(1, round(fs / max(p.f_max, 1e-3))))
+        lag_max = int(min(signal.size - 1, round(fs / max(p.f_min, 1e-3))))
+        if lag_max <= lag_min:
+            return float("nan"), 0.0, {}
+        window = autocorr[lag_min:lag_max]
+        if window.size == 0:
+            return float("nan"), 0.0, {}
+        idx = int(np.argmax(window))
+        lag = lag_min + idx
+        freq = fs / lag if lag > 0 else float("nan")
+        confidence = float(window[idx] / max(autocorr[0], 1e-9))
+        return float(freq), float(confidence), {"label": "autocorr", "lag": lag}
+
+    def _hilbert_candidate(self, signal: np.ndarray, fs: float) -> Tuple[float, float, Dict]:
+        p = self.params
+        if signal.size < 16 or fs <= 0:
+            return float("nan"), 0.0, {}
+        try:
+            analytic = hilbert(signal)
+            phase = np.unwrap(np.angle(analytic))
+            inst_freq = np.diff(phase)
+            inst_freq = (fs / (2.0 * np.pi)) * inst_freq
+            valid = inst_freq[(inst_freq >= p.f_min) & (inst_freq <= p.f_max)]
+            if valid.size == 0:
+                return float("nan"), 0.0, {}
+            freq = float(np.median(valid))
+            spread = float(np.std(valid))
+            confidence = float(1.0 / (1.0 + spread))
+            return freq, confidence, {"label": "hilbert", "spread": spread}
+        except Exception:
+            return float("nan"), 0.0, {}
+
+    def _coarse_freq(self, signal: np.ndarray, fs: float) -> float:
+        p = self.params
+        candidates: List[Tuple[float, float, Dict]] = []
+        candidates.append(self._welch_candidate(signal, fs))
+        candidates.append(self._autocorr_candidate(signal, fs))
+        candidates.append(self._hilbert_candidate(signal, fs))
+        valid = [(freq, conf, meta) for freq, conf, meta in candidates if np.isfinite(freq) and freq > 0 and np.isfinite(conf) and conf > 0]
+        if not valid:
+            freq_final = 0.5 * (p.f_min + p.f_max)
+            self._last_init_freq = {"raw_hz": freq_final}
+            return freq_final
+        weights = np.asarray([max(v[1], 1e-6) for v in valid], dtype=np.float64)
+        freqs = np.asarray([v[0] for v in valid], dtype=np.float64)
+        weights = weights / np.sum(weights)
+        blended = float(np.sum(freqs * weights))
+        best_idx = int(np.argmax([v[1] for v in valid]))
+        freq_raw = float(valid[best_idx][0])
         margin = getattr(p, "init_margin_hz", 0.0) or 0.0
         try:
             margin = float(margin)
@@ -191,6 +343,7 @@ class _BaseOscillatorHead:
         band = float(p.f_max) - float(p.f_min)
         if band > 0.0 and (margin * 2.0) >= band:
             margin = max(0.0, 0.5 * band - 1e-8)
+        freq = blended
         if margin > 0.0 and p.f_max > p.f_min:
             # Start oscillators inside the band to avoid edge-locking in low SNR regimes.
             interior_low = float(p.f_min) + margin
@@ -199,10 +352,17 @@ class _BaseOscillatorHead:
                 freq = float(np.clip(freq, interior_low, interior_high))
         freq_interior = float(freq)
         freq_final = float(np.clip(freq, p.f_min, p.f_max))
+        candidate_meta = []
+        for freq_val, conf_val, meta in valid:
+            entry = {"hz": float(freq_val), "confidence": float(conf_val)}
+            if isinstance(meta, dict):
+                entry.update(meta)
+            candidate_meta.append(entry)
         self._last_init_freq = {
             "raw_hz": float(freq_raw),
             "interior_hz": float(freq_interior),
-            "final_hz": float(freq_final)
+            "final_hz": float(freq_final),
+            "candidates": candidate_meta
         }
         return freq_final
 
@@ -272,11 +432,14 @@ class _BaseOscillatorHead:
             final_val = init_freq.get("final_hz")
             if final_val is not None and np.isfinite(final_val):
                 meta["init_freq_final_hz"] = float(final_val)
+            meta["coarse_candidates"] = init_freq.get("candidates")
         preproc_meta = getattr(self, "_last_preproc_meta", None)
         if isinstance(preproc_meta, dict):
             meta.update(preproc_meta)
         if meta_extra:
             meta.update(meta_extra)
+        f0 = meta.get("f0", rr_hz)
+        self._log_autotune_stats(meta, f0 if isinstance(f0, (int, float)) else rr_hz)
         return {
             "signal_hat": signal_arr,
             "track_hz": track,
@@ -295,6 +458,7 @@ class oscillator_KFstd(_BaseOscillatorHead):
     def run(self, signal: np.ndarray, fs: float, meta: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
         p = self.params
         fs = fs or p.fs
+        self._maybe_apply_autotune(meta)
         y = self._preprocess(signal, fs)
         n = y.size
         if n == 0:
@@ -402,6 +566,7 @@ class oscillator_UKF_freq(_BaseOscillatorHead):
     def run(self, signal: np.ndarray, fs: float, meta: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
         p = self.params
         fs = fs or p.fs
+        self._maybe_apply_autotune(meta)
         y = self._preprocess(signal, fs)
         n = y.size
         if n == 0:
@@ -549,68 +714,88 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
             refined[t] = freqs[idx] + shift * df[idx]
         return refined
 
+    def _multi_resolution_tracks(self, signal: np.ndarray, fs: float) -> List[Tuple[np.ndarray, np.ndarray, float]]:
+        p = self.params
+        base_win = max(16, int(p.stft_win * fs))
+        scales = [0.75, 1.0, 1.5]
+        results = []
+        for scale in scales:
+            win = max(16, int(base_win * scale))
+            overlap_frac = float(getattr(p, "spec_overlap", 0.5))
+            overlap_frac = float(np.clip(overlap_frac, 0.0, 0.95))
+            hop = max(1, int(round(win * (1.0 - overlap_frac))))
+            hop = min(hop, win - 1)
+            nfft_factor = max(1, int(getattr(p, "spec_nfft_factor", 1)))
+            nfft = max(win, int(win * nfft_factor))
+            freqs, times, Zxx = sps.stft(
+                signal,
+                fs=fs,
+                nperseg=win,
+                noverlap=win - hop,
+                detrend=False,
+                padded=False,
+                nfft=nfft
+            )
+            results.append((freqs, times, Zxx))
+        return results
+
     def run(self, signal: np.ndarray, fs: float, meta: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
         p = self.params
         fs = fs or p.fs
+        self._maybe_apply_autotune(meta)
         y = self._preprocess(signal, fs)
         n = y.size
         if n == 0:
             return self._package(y, np.array([], dtype=np.float64), meta)
 
-        win = max(16, int(p.stft_win * fs))
-        overlap_frac = float(getattr(p, "spec_overlap", 0.5))
-        overlap_frac = float(np.clip(overlap_frac, 0.0, 0.95))
-        if overlap_frac > 0:
-            hop = max(1, int(round(win * (1.0 - overlap_frac))))
-        else:
-            hop = max(1, int(p.stft_hop * fs))
-        hop = min(hop, win - 1)
-        nfft_factor = max(1, int(getattr(p, "spec_nfft_factor", 1)))
-        nfft = max(win, int(win * nfft_factor))
-        freqs, times, Zxx = sps.stft(
-            y,
-            fs=fs,
-            nperseg=win,
-            noverlap=win - hop,
-            detrend=False,
-            padded=False,
-            nfft=nfft
-        )
-        mask = (freqs >= p.f_min) & (freqs <= p.f_max)
-        if not np.any(mask):
+        multi_tracks = []
+        reliabilities = []
+        sample_times = self._timebase(n, fs)
+        for freqs, times, Zxx in self._multi_resolution_tracks(y, fs):
+            mask = (freqs >= p.f_min) & (freqs <= p.f_max)
+            if not np.any(mask):
+                continue
+            sub_freqs = freqs[mask]
+            magnitudes = np.abs(Zxx[mask, :]).astype(np.float64)
+            ridge_freqs, ridge_idx = self._track_ridge(sub_freqs, magnitudes, p.ridge_penalty)
+            subbin_mode = (getattr(p, "spec_subbin_interp", "parabolic") or "").strip().lower()
+            if ridge_idx.size and subbin_mode in ('parabolic',):
+                ridge_freqs = self._subbin_refine(sub_freqs, magnitudes, ridge_idx, subbin_mode)
+            if ridge_freqs.size >= 3:
+                time_step = times[1] - times[0] if times.size > 1 else p.stft_hop
+                kernel = max(3, int(round(1.0 / max(time_step, 1e-6))))
+                ridge_freqs = self._median_smooth(ridge_freqs, kernel)
+            if times.size < 2:
+                track = np.full(n, np.clip(ridge_freqs[0], p.f_min, p.f_max), dtype=np.float64)
+            else:
+                track = np.interp(sample_times, times, ridge_freqs, left=ridge_freqs[0], right=ridge_freqs[-1])
+                track = np.clip(track, p.f_min, p.f_max)
+            if track.size >= 3:
+                track = self._median_smooth(track, 5)
+            peak_smooth = max(1, int(getattr(p, "spec_peak_smooth_len", 1)))
+            if peak_smooth > 1:
+                track = self._median_smooth(track, peak_smooth)
+            track = self._apply_post_smoothing(track)
+            consistency = float(np.std(np.diff(track))) if track.size > 2 else 0.0
+            power_ratio = float(np.max(magnitudes) / max(np.median(magnitudes), 1e-9))
+            reliability = float(np.exp(-consistency * 5.0) * np.tanh(power_ratio / 5.0))
+            multi_tracks.append(track)
+            reliabilities.append(reliability)
+
+        if not multi_tracks:
             track = np.full(n, 0.5 * (p.f_min + p.f_max), dtype=np.float64)
             meta_payload = dict(meta or {})
-            meta_payload["stft_bins"] = int(np.sum(mask))
             meta_payload.setdefault("is_constant_track", False)
             return self._package(y, track, meta_payload)
 
-        sub_freqs = freqs[mask]
-        magnitudes = np.abs(Zxx[mask, :]).astype(np.float64)
-        ridge_freqs, ridge_idx = self._track_ridge(sub_freqs, magnitudes, p.ridge_penalty)
-
-        subbin_mode = (getattr(p, "spec_subbin_interp", "parabolic") or "").strip().lower()
-        if ridge_idx.size and subbin_mode in ('parabolic',):
-            ridge_freqs = self._subbin_refine(sub_freqs, magnitudes, ridge_idx, subbin_mode)
-
-        if ridge_freqs.size >= 3:
-            time_step = times[1] - times[0] if times.size > 1 else p.stft_hop
-            kernel = max(3, int(round(1.0 / max(time_step, 1e-6))))
-            ridge_freqs = self._median_smooth(ridge_freqs, kernel)
-
-        sample_times = self._timebase(n, fs)
-        if times.size < 2:
-            track = np.full(n, np.clip(ridge_freqs[0], p.f_min, p.f_max), dtype=np.float64)
-        else:
-            track = np.interp(sample_times, times, ridge_freqs, left=ridge_freqs[0], right=ridge_freqs[-1])
-            track = np.clip(track, p.f_min, p.f_max)
-        if track.size >= 3:
-            track = self._median_smooth(track, 5)
-        peak_smooth = max(1, int(getattr(p, "spec_peak_smooth_len", 1)))
-        if peak_smooth > 1:
-            track = self._median_smooth(track, peak_smooth)
-        track = self._apply_post_smoothing(track)
+        weights = np.asarray(reliabilities, dtype=np.float64)
+        weights = weights / max(np.sum(weights), 1e-6)
+        stacked = np.vstack(multi_tracks)
+        track = np.average(stacked, axis=0, weights=weights)
+        track = np.clip(track, p.f_min, p.f_max)
         meta_payload = dict(meta or {})
-        meta_payload["stft_bins"] = int(np.sum(mask))
+        meta_payload["multi_resolution_used"] = True
+        meta_payload["reliability_score"] = float(np.max(reliabilities))
         meta_payload.setdefault("is_constant_track", False)
         return self._package(y, track, meta_payload)
 
@@ -621,6 +806,7 @@ class oscillator_PLL(_BaseOscillatorHead):
     def run(self, signal: np.ndarray, fs: float, meta: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
         p = self.params
         fs = fs or p.fs
+        self._maybe_apply_autotune(meta)
         y = self._preprocess(signal, fs)
         n = y.size
         if n == 0:
@@ -635,25 +821,24 @@ class oscillator_PLL(_BaseOscillatorHead):
         integrator = 0.0
 
         if p.pll_autogain or p.pll_kp <= 0 or p.pll_ki <= 0:
-            omega_n = 2.0 * np.pi / max(p.pll_ttrack, 1e-3)
-            kp = 2.0 * p.pll_zeta * omega_n * dt
-            ki = (omega_n * dt) ** 2
+            controller = PLLAdaptiveController(p.pll_zeta, p.pll_ttrack, fs)
+            kp, ki = controller.gains(self._last_snr or 0.0, p.pll_kp_min, p.pll_ki_min)
         else:
-            kp = p.pll_kp
-            ki = p.pll_ki
-        kp_min = p.pll_kp_min if getattr(p, "pll_kp_min", None) is not None else 0.0
-        ki_min = p.pll_ki_min if getattr(p, "pll_ki_min", None) is not None else 0.0
-        kp = max(kp, float(kp_min))
-        ki = max(ki, float(ki_min))
+            kp = max(p.pll_kp, float(p.pll_kp_min))
+            ki = max(p.pll_ki, float(p.pll_ki_min))
 
         track = np.zeros(n, dtype=np.float64)
         osc = np.zeros(n, dtype=np.float64)
         omega_min = 2.0 * np.pi * p.f_min
         omega_max = 2.0 * np.pi * p.f_max
+        phase_noise = 0.0
 
         for t in range(n):
             phase_y = float(np.angle(analytic[t]))
-            err = np.arctan2(np.sin(phase_y - phase_nco), np.cos(phase_y - phase_nco))
+            err_raw = np.arctan2(np.sin(phase_y - phase_nco), np.cos(phase_y - phase_nco))
+            # simple phase-noise shaping
+            err = err_raw - 0.1 * phase_noise
+            phase_noise = err_raw
             integrator_candidate = integrator + ki * err
             omega_candidate = omega + kp * err + integrator_candidate
             omega_clamped = float(np.clip(omega_candidate, omega_min, omega_max))
@@ -670,6 +855,9 @@ class oscillator_PLL(_BaseOscillatorHead):
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
         meta_payload.setdefault("is_constant_track", False)
+        consistency = float(np.std(np.diff(track))) if track.size > 2 else 0.0
+        reliability = float(np.exp(-consistency * 10.0))
+        meta_payload["reliability_score"] = reliability
         return self._package(osc, track, meta_payload)
 
 

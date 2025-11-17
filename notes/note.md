@@ -4,6 +4,21 @@
 
 ---
 
+## 0. 최신 패치 요약 (2025-11)
+
+| Prompt | 내용 | 소스 |
+| --- | --- | --- |
+| 1 | 트랙 강제 사용, 품질 로깅(`std_bpm`, `unique`, `edge`, `track_frac_saturated_eval`, `reliability`) 및 aux/meta 반영 | `run_all.py` |
+| 2 | Trial별 MAD/SNR 로그 + coarse init 블렌딩 + autotune JSON 로딩 | `riv/estimators/params_autotune.py`, `_BaseOscillatorHead` |
+| 3 | PLL adaptive gain + phase noise shaping, Spec-Ridge multi-resolution STFT, 신뢰도 추가 | `oscillator_heads.py` |
+| 4 | 다중 헤드 앙상블 옵션 + 컴포넌트 결과 저장 | `riv/estimators/head_ensemble.py`, `motion/method_oscillator_wrapped.py` |
+| 5 | EM 기반 Kalman gain 학습 + Optuna 연동(`optuna_runner.py --em-mode`, MLflow trial 로깅) | `riv/optim/em_kalman.py`, `train_em.py`, `optuna_runner.py` |
+| 6 | README/notes/metadata 지침 업데이트, `results/<run>/metadata.json` 템플릿 확립 | 본 문서 & README |
+
+남은 과제: metadata 자동 생성 스크립트(실제 JSON 생성기).
+
+---
+
 ## 1. 문제 배경과 연구 철학
 
 카메라 기반 비접촉 호흡 추정은 주로 rPPG(피부 광학)에서 호흡 저주파(0.1–0.5 Hz) 성분을 분리하는 방식이 널리 쓰였으나, 조명·자세·미세운동 노이즈와 대역이 겹쳐 근본적 한계가 있었다. 본 연구는 관측 양식-생리 기원 정합성에 착안해 “혈류” 대신 “상체의 기계적 운동”을 직관적으로 추적한다. 즉, 상체 변위로 얻은 1D 시계열을 호흡 공진자로 해석하고, 상태공간 추정(칼만/UKF/PLL/스펙트럼 능선 추적)로 주파수·위상·진폭을 안정적으로 복원한다.
@@ -50,20 +65,56 @@ python run_all.py --config configs/cohface_motion_oscillator.json --step metrics
 
 # 병렬
 AUTO_PROFILE_PARALLEL=5 eval "$(python setup/auto_profile.py)"
-python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 0
-python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 4
+for idx in 0 1 2 3 4; do
+  python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index $idx
+done
 
-python run_all.py -c configs/cohface_motion_oscillator.json -s evaluate metrics --auto_discover_methods
-python run_all.py -c configs/cohface_motion_oscillator.json -s evaluate metrics --auto_discover_methods --override gating.debug.disable_gating=true
+# 평가/메트릭 (트랙만 사용, fallback 비활성화가 기본)
+python run_all.py -c configs/cohface_motion_oscillator.json \
+  -s evaluate metrics \
+  --auto_discover_methods true \
+  --allow-missing-methods
 
+# (중요) 저장된 run 재평가 시 --runs에 run 라벨만 넣는다 (예: cohface_motion_oscillator)
+python run_all.py -c configs/cohface_motion_oscillator.json \
+  -s evaluate metrics \
+  --auto_discover_methods true \
+  --allow-missing-methods \
+  --runs cohface_motion_oscillator
+
+# EM 기반 Kalman gain 학습 (모든 메소드 일괄 적용 예시)
+METHODS=(
+  of_farneback__kfstd of_farneback__ukffreq of_farneback__spec_ridge of_farneback__pll
+  dof__kfstd dof__ukffreq dof__spec_ridge dof__pll
+  profile1d_linear__kfstd profile1d_linear__ukffreq profile1d_linear__spec_ridge profile1d_linear__pll
+  profile1d_quadratic__kfstd profile1d_quadratic__ukffreq profile1d_quadratic__spec_ridge profile1d_quadratic__pll
+  profile1d_cubic__kfstd profile1d_cubic__ukffreq profile1d_cubic__spec_ridge profile1d_cubic__pll
+)
+for method in "${METHODS[@]}"; do
+  python train_em.py \
+    --results results/cohface_motion_oscillator \
+    --dataset COHFACE \
+    --method "$method"
+done
+
+# Optuna + EM/MLflow
 python optuna_runner.py \
   --config configs/cohface_motion_oscillator.json \
-  --output runs/optuna_shard0 \
-  --num-shards 5 --shard-index 0 \
-  --n-trials 20
+  --output runs/optuna_all \
+  --n-trials 40 \
+  --em-mode trial \
+  --mlflow-uri file:mlruns/optuna \
+  --mlflow-experiment respyre-optuna
 
-cd runs/optuna/_bundles/best20_<ts>
+# (옵션) Optuna 결과 bundle 적용
+cd runs/optuna_all/_bundles/best20_<ts>
 ./apply_all.sh
+
+# 메타데이터 자동 생성
+python tools/write_metadata.py \
+  --run results/cohface_motion_oscillator \
+  --command "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics" \
+  --notes "shards 0-4, em-mode=trial"
 ```
 
 실행 결과
@@ -191,6 +242,15 @@ if clip is not None:
 ## 4.0 오실레이터 헤드 설계 철학(의도/관점/선택 이유)
 
 이 섹션은 왜 “모션 5개(관측) + 오실레이터 4개(모델링)”을 이런 식으로 설계했는지, 그리고 각 헤드가 내 연구 의도를 어떻게 구현하는지 정리한다. 핵심은 “호흡은 좁은 주파수 대역에서 움직이는 준주기적 진동”이라는 생리적 사실을 최대한 존중하고, 관측 시계열의 불안정성(자세·카메라·조명 등)이 **시간영역 추정치 자체를 왜곡**시키지 않도록 **주파수-위상 중심**으로 신뢰도를 확보하는 것이다.
+
+### 4.0.a 이번 패치로 추가된 기능
+
+1. 전 trial 트랙 품질 로깅(`track_reliability`, `track_frac_saturated_eval`, gating flags) 및 aux/meta 반영.
+2. Welch+autocorr+Hilbert coarse init 블렌딩, trial별 MAD/SNR 로그 → `runs/autotune`.
+3. PLL adaptive gain + phase-noise shaping, Spec-Ridge multi-resolution STFT + reliability 가중합.
+4. 앙상블 옵션(`ensemble.enabled`)으로 KFstd/UKF/Spec-Ridge/PLL 동시 실행, 결과/컴포넌트 NPZ 모두 저장.
+5. `train_em.py` + `optuna_runner.py --em-mode` 기반 EM Kalman gain 학습, MLflow trial 로깅.
+6. `results/<run>/metadata.json` 템플릿 적용으로 reproducibility 문서화.
 
 ### 4.0.1 기본 관점: “시간영역 신호값”보다 “대역·스펙트럼 구조”가 먼저다
 
