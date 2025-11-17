@@ -6,6 +6,7 @@ import numpy as np
 
 import run_all  # type: ignore
 from riv.estimators.oscillator_heads import OscillatorParams, build_head
+from riv.estimators.head_ensemble import OscillatorEnsemble
 
 
 def _normalize_base(name: str) -> str:
@@ -70,6 +71,7 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
         osc_params: Optional[OscillatorParams] = None,
         save_payload: Optional[Dict[str, bool]] = None,
         preproc_cfg: Optional[Dict] = None,
+        ensemble_cfg: Optional[Dict] = None
     ):
         super().__init__()
         self.base_key = base_key
@@ -78,6 +80,11 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
         self.data_type = "chest"
         self.base_method = _build_base(base_key)
         self.osc_head = build_head(head_key, params=osc_params)
+        self.ensemble_cfg = ensemble_cfg or {}
+        self.ensemble_runner = None
+        if self.ensemble_cfg.get("enabled"):
+            head_defs = self.ensemble_cfg.get("heads") or [{"name": "kfstd"}, {"name": "ukffreq"}, {"name": "spec_ridge"}, {"name": "pll"}]
+            self.ensemble_runner = OscillatorEnsemble(head_defs, self.preproc_cfg)
         self.save_payload = save_payload or {"npz": True}
         self._base_meta = {"base_method": base_key}
         self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
@@ -97,6 +104,21 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
             "meta": np.array([result["meta"]], dtype=object),
         }
         np.savez_compressed(os.path.join(aux_dir, f"{trial_key}.npz"), **payload)
+        components = result.get("components")
+        if components:
+            comp_dir = os.path.join(aux_dir, "components", trial_key)
+            os.makedirs(comp_dir, exist_ok=True)
+            for comp in components:
+                comp_result = comp['result']
+                head_name = comp['name']
+                comp_payload = {
+                    "signal_hat": np.asarray(comp_result["signal_hat"], dtype=np.float32),
+                    "track_hz": np.asarray(comp_result["track_hz"], dtype=np.float32),
+                    "rr_hz": np.array([comp_result["rr_hz"]], dtype=np.float32),
+                    "rr_bpm": np.array([comp_result["rr_bpm"]], dtype=np.float32),
+                    "meta": np.array([comp_result["meta"]], dtype=object),
+                }
+                np.savez_compressed(os.path.join(comp_dir, f"{head_name}.npz"), **comp_payload)
 
     def process(self, data: Dict) -> np.ndarray:
         # Execute base method first to obtain motion proxy y(t).
@@ -104,8 +126,21 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
         base_signal = np.asarray(base_signal, dtype=np.float64).reshape(-1)
         fs = float(data.get("fps", self.osc_head.params.fs))
         meta = dict(self._base_meta)
-        meta.update({"head": self.head_key, "fs": fs})
-        result = self.osc_head.run(base_signal, fs, meta)
+        dataset_label = data.get("dataset_name") or data.get("dataset") or data.get("dataset_slug") or "unknown"
+        trial_key = data.get("trial_key")
+        meta.update({
+            "head": self.head_key,
+            "fs": fs,
+            "dataset": dataset_label,
+            "dataset_slug": dataset_label,
+            "trial_key": trial_key,
+            "method_name": self.name,
+            "data_file": data.get("video_path")
+        })
+        if self.ensemble_runner:
+            result = self.ensemble_runner.run(base_signal, fs, meta)
+        else:
+            result = self.osc_head.run(base_signal, fs, meta)
         if self.save_payload.get("npz", True):
             self._store_npz(data, result)
         return np.asarray(result["signal_hat"], dtype=np.float64)
@@ -132,10 +167,11 @@ def create_wrapped_method(method_name: str, params: Optional[Dict] = None, prepr
             merged_params.update(params[key])
     merged_params.update({k: v for k, v in params.items() if k not in ("name", "params", "head_params", "oscillator", "oscillator_params", "preproc")})
 
+    ensemble_cfg = params.get("ensemble")
     osc_kwargs = {}
     for field in OscillatorParams().__dict__.keys():
         if field in merged_params:
             osc_kwargs[field] = merged_params[field]
     osc_params = OscillatorParams(**osc_kwargs) if osc_kwargs else None
     save_payload = params.get("save_payload")
-    return OscillatorWrappedMethod(base_key, head_key, osc_params=osc_params, save_payload=save_payload, preproc_cfg=preproc_cfg)
+    return OscillatorWrappedMethod(base_key, head_key, osc_params=osc_params, save_payload=save_payload, preproc_cfg=preproc_cfg, ensemble_cfg=ensemble_cfg)

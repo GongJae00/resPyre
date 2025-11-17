@@ -21,6 +21,12 @@ import optuna
 import pickle
 
 from config_loader import load_config
+from riv.optim.em_kalman import EMKalmanTrainer, save_em_params, log_em_result
+
+try:
+	import mlflow  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+	mlflow = None
 
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "cohface_motion_oscillator.json"
@@ -45,7 +51,7 @@ DEFAULT_WEIGHTS = {
 }
 TRIAL_CSV_FIELDS = [
     'trial', 'objective', 'MAE_bpm_med', 'RMSE_bpm_med', 'PCC_mean', 'CCC_mean',
-    'edge_sat', 'nan_rate', 'jerk_hzps', 'params'
+    'edge_sat', 'nan_rate', 'jerk_hzps', 'em_q', 'em_r', 'em_ll', 'params'
 ]
 
 
@@ -65,6 +71,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--list', action='store_true', help='List tuned methods and exit')
     parser.add_argument('--num-shards', type=int, default=1, help='Split allowlist into this many shards (default: 1)')
     parser.add_argument('--shard-index', type=int, default=0, help='Shard index to run (0-based)')
+    parser.add_argument('--em-mode', choices=['off', 'trial', 'best'], default='off', help='Run EM-based Kalman gain learning per trial or only for the best config')
+    parser.add_argument('--mlflow-uri', help='Optional MLflow tracking URI for trial logging')
+    parser.add_argument('--mlflow-experiment', default='respyre-optuna', help='MLflow experiment name (default: %(default)s)')
     weight_help_msg = (
         "Objective = 0.85*MAE + 0.15*RMSE (기본). MAE가 1차 판단지표, RMSE는 대형오류 억제를 위한 보조 항. 모든 값은 bpm 단위."
     )
@@ -462,6 +471,10 @@ class StudyArgs:
     sampler_seed: int
     pruner_enabled: bool
     keep_artifacts: bool
+    dataset_name: str
+    em_mode: str
+    mlflow_uri: Optional[str]
+    mlflow_experiment: Optional[str]
 
 
 class MethodStudy:
@@ -475,6 +488,21 @@ class MethodStudy:
         self.artifacts_dir.mkdir(exist_ok=True)
         self.trials_csv = self.study_dir / 'trials.csv'
         self.best_path = self.study_dir / 'best.json'
+        self.dataset_name = args.dataset_name or 'UNKNOWN'
+        self.em_mode = args.em_mode or 'off'
+        self.em_trainer = EMKalmanTrainer() if self.em_mode != 'off' else None
+        self.mlflow_uri = args.mlflow_uri
+        self.mlflow_experiment = args.mlflow_experiment
+        self.mlflow_enabled = False
+        if self.mlflow_uri and mlflow is not None:
+            try:
+                mlflow.set_tracking_uri(self.mlflow_uri)
+                mlflow.set_experiment(self.mlflow_experiment or 'respyre-optuna')
+                self.mlflow_enabled = True
+            except Exception as exc:  # pragma: no cover - optional path
+                print(f"> Warning: failed to configure MLflow ({exc}); logging disabled.")
+        elif self.mlflow_uri and mlflow is None:
+            print("> Warning: mlflow package not installed; MLflow logging disabled.")
 
     def optimize(self):
         sampler = optuna.samplers.TPESampler(seed=self.args.sampler_seed)
@@ -492,13 +520,15 @@ class MethodStudy:
 
     def _objective(self, trial: optuna.trial.Trial) -> float:
         params = suggest_params(trial, self.family)
-        metrics, summary = self._run_trial(trial.number, params)
+        summary, em_result, trial_root = self._run_trial(trial.number, params)
         objective, _ = combine_objective(summary, self.args.weights)
-        self._record_trial(trial.number, objective, summary, params)
-        self._update_best(objective, summary, params)
+        self._record_trial(trial.number, objective, summary, params, em_result)
+        self._update_best(objective, summary, params, em_result, trial_root)
+        self._log_mlflow(trial.number, objective, summary, params, em_result)
+        self._cleanup_trial(trial_root)
         return objective
 
-    def _record_trial(self, trial_num: int, objective: float, summary: Dict[str, float], params: Dict[str, float]):
+    def _record_trial(self, trial_num: int, objective: float, summary: Dict[str, float], params: Dict[str, float], em_result: Optional[Dict]):
         row = {
             'trial': trial_num,
             'objective': objective,
@@ -509,6 +539,9 @@ class MethodStudy:
             'edge_sat': summary.get('edge_sat'),
             'nan_rate': summary.get('nan_rate'),
             'jerk_hzps': summary.get('jerk_hzps'),
+            'em_q': em_result.get('q') if em_result else None,
+            'em_r': em_result.get('r') if em_result else None,
+            'em_ll': em_result.get('ll') if em_result else None,
             'params': json.dumps(params, sort_keys=True)
         }
         write_header = not self.trials_csv.exists()
@@ -518,7 +551,7 @@ class MethodStudy:
                 writer.writeheader()
             writer.writerow(row)
 
-    def _update_best(self, objective: float, summary: Dict[str, float], params: Dict[str, float]):
+    def _update_best(self, objective: float, summary: Dict[str, float], params: Dict[str, float], em_result: Optional[Dict], trial_root: Optional[Path]):
         best = None
         if self.best_path.exists():
             try:
@@ -538,6 +571,13 @@ class MethodStudy:
         }
         with open(self.best_path, 'w', encoding='utf-8') as fp:
             json.dump(payload, fp, ensure_ascii=False, indent=2)
+        if self.em_mode in ('trial', 'best'):
+            if self.em_mode == 'best' or em_result is None:
+                results_dir = trial_root / 'results' if trial_root else None
+                em_result = self._run_em_learning(results_dir) if results_dir else None
+            if em_result:
+                save_em_params(self.dataset_name, self.method, em_result)
+                log_em_result(self.dataset_name, self.method, em_result, source="optuna_best")
 
     def _run_trial(self, trial_number: int, params: Dict[str, float]):
         cfg = json.loads(json.dumps(self.args.base_cfg))
@@ -555,21 +595,27 @@ class MethodStudy:
         with open(cfg_path, 'w', encoding='utf-8') as fp:
             json.dump(cfg, fp, ensure_ascii=False, indent=2)
         cmd = [sys.executable, str(REPO_ROOT / 'run_all.py'), '-c', str(cfg_path), '-s', 'estimate', 'evaluate', 'metrics', '--no-profile-steps']
+        trial_root = Path(cfg['results_dir']).parent
         try:
             subprocess.run(cmd, check=True, cwd=str(REPO_ROOT))
         except subprocess.CalledProcessError as exc:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+            shutil.rmtree(trial_root, ignore_errors=True)
             raise optuna.TrialPruned(f"Pipeline failed: {exc}")
         metrics_path = locate_metrics_file(Path(cfg['results_dir']))
         if not metrics_path:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+            shutil.rmtree(trial_root, ignore_errors=True)
             raise optuna.TrialPruned('metrics file missing')
         metric_names, records = load_method_records(metrics_path, self.method)
         summary = summarize_records(metric_names, records)
-        if not self.args.keep_artifacts:
-            shutil.rmtree(Path(cfg['results_dir']).parent, ignore_errors=True)
+        em_result = None
+        if self.em_mode == 'trial':
+            em_result = self._run_em_learning(Path(cfg['results_dir']))
+            if em_result:
+                log_em_result(self.dataset_name, self.method, em_result, source=f"optuna_trial_{trial_number:04d}")
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        return metrics_path, summary
+        return summary, em_result, trial_root
 
     def _apply_no_fallback(self, cfg: Dict) -> None:
         gating = cfg.setdefault('gating', {})
@@ -595,6 +641,65 @@ class MethodStudy:
                     node[key] = {}
                 node = node[key]
             node.setdefault(keys[-1], value)
+
+    def _collect_tracks(self, results_dir: Optional[Path]) -> List[np.ndarray]:
+        tracks: List[np.ndarray] = []
+        if results_dir is None:
+            return tracks
+        aux_dir = results_dir / 'aux' / self.method
+        if not aux_dir.exists():
+            return tracks
+        for npz in aux_dir.glob('*.npz'):
+            try:
+                with np.load(npz, allow_pickle=True) as data:
+                    if 'track_hz' in data:
+                        track = np.asarray(data['track_hz'], dtype=np.float64)
+                        if track.size:
+                            tracks.append(track)
+            except Exception:
+                continue
+        return tracks
+
+    def _run_em_learning(self, results_dir: Optional[Path]) -> Optional[Dict]:
+        if not self.em_trainer or results_dir is None:
+            return None
+        tracks = self._collect_tracks(results_dir)
+        if not tracks:
+            return None
+        stacked = np.concatenate(tracks)
+        return self.em_trainer.fit(stacked)
+
+    def _cleanup_trial(self, trial_root: Optional[Path]) -> None:
+        if self.args.keep_artifacts:
+            return
+        if trial_root and trial_root.exists():
+            shutil.rmtree(trial_root, ignore_errors=True)
+
+    def _log_mlflow(self, trial_num: int, objective: float, summary: Dict[str, float], params: Dict[str, float], em_result: Optional[Dict]):
+        if not self.mlflow_enabled:
+            return
+        metrics = {'objective': float(objective)}
+        for key, value in summary.items():
+            if isinstance(value, (int, float)) and np.isfinite(value):
+                metrics[key] = float(value)
+        if em_result:
+            for key in ('q', 'r', 'll'):
+                val = em_result.get(key)
+                if isinstance(val, (int, float)) and np.isfinite(val):
+                    metrics[f'em_{key}'] = float(val)
+        params_payload = {
+            'method': self.method,
+            'family': self.family,
+            'dataset': self.dataset_name
+        }
+        params_payload.update({k: v for k, v in params.items()})
+        run_name = f"{self.method}_trial{trial_num:04d}"
+        try:
+            with mlflow.start_run(run_name=run_name):
+                mlflow.log_params(params_payload)
+                mlflow.log_metrics(metrics)
+        except Exception as exc:  # pragma: no cover
+            print(f"> Warning: MLflow logging failed ({exc})")
 
 
 def aggregate_best_entries(output_root: Path, allowed_methods: Optional[Sequence[str]] = None) -> List[Dict[str, str]]:
@@ -720,6 +825,10 @@ def main():
     if args.shard_index < 0 or args.shard_index >= args.num_shards:
         raise SystemExit("--shard-index must satisfy 0 <= index < num_shards")
     base_cfg = load_config(args.config)
+    dataset_entries = base_cfg.get('datasets') or []
+    dataset_name = 'UNKNOWN'
+    if dataset_entries:
+        dataset_name = str(dataset_entries[0].get('name') or 'unknown').upper()
     method_names = _extract_method_names(base_cfg.get('methods', []))
     allowlist = _allowlist_methods(method_names, args.methods)
     shard_methods = _select_shard_methods(allowlist, args.num_shards, args.shard_index)
@@ -749,6 +858,10 @@ def main():
         sampler_seed=args.sampler_seed,
         pruner_enabled=not args.no_prune,
         keep_artifacts=args.keep_artifacts,
+        dataset_name=dataset_name,
+        em_mode=args.em_mode,
+        mlflow_uri=args.mlflow_uri,
+        mlflow_experiment=args.mlflow_experiment,
     )
     for method in shard_methods:
         family = _method_family(method)

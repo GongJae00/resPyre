@@ -1,88 +1,108 @@
 # configs/how2use.md
 
 ## 개요
-`configs/` 디렉토리에는 실험을 재현하거나 배포용으로 제공하기 위한 JSON 설정 파일을 보관합니다. 하나의 JSON만 선택해서 `run_all.py`에 넘기면 데이터셋 선정 → ROI 추출 파라미터 → 사용 메소드 → 평가/시각화 옵션까지 한 번에 적용됩니다.
+`configs/` 디렉터리는 `run_all.py` 실행을 위한 **단일 진실 소스(single source of truth)** 입니다. 하나의 JSON을 선택해서 `--config`로 넘기면
+데이터셋 로딩 → ROI 추출 파라미터 → 사용할 메소드/오실레이터 헤드 → 평가/게이팅/리포트 조건까지 모두 한 번에 적용됩니다.
 
-## 설정 파일 구조
+## 설정 파일 구조(예시)
 ```jsonc
 {
-  "name": "cohface_motion",            // (선택) 런 이름. 로그/리포트 정리에 활용
-  "results_dir": "results",            // 결과 루트 (상대/절대 경로 모두 가능)
+  "name": "cohface_motion_oscillator",        // run 라벨. results/<name>/ 로 저장
+  "results_dir": "results",                   // 모든 산출물의 루트
   "datasets": [
     {
       "name": "COHFACE",
-      "roi": {                          // 선택: ROI 추출 파라미터 외부화
-        "chest": {"mp_complexity": 1, "skip_rate": 10},
-        "face": { }
-      }
+      "roi": {"chest": {"mp_complexity": 1, "skip_rate": 10}}
     }
   ],
-  "methods": [                          // 사용할 메소드 목록
-    "OF_Model",
-    "DoF",
-    "profile1D"                         // 문자열 하나면 linear/quadratic/cubic 세 가지가 모두 추가됨
+  "methods": [
+    "of_farneback",
+    "dof",
+    {"name": "profile1d_linear__spec_ridge",  // 문자열 or dict 혼용 가능
+     "preproc": {"robust_zscore": {"clip": null}}}
   ],
-  "eval": {                             // 평가 옵션
-    "win_size": 30,                    // 초 단위 또는 "video"
-    "stride": 1                        // 윈도우 stride (초)
+  "eval": {
+    "win_size": 30,
+    "stride": 1,
+    "min_hz": 0.08,
+    "max_hz": 0.5,
+    "use_track": true
   },
-    "report": {                           // 리포트 합본 설정
-    "runs": ["results/COHFACE_OF_DoF_profile1D"],
-    "output": "reports/cohface_motion",   // 결과 저장 경로
-    "unique_window": false                 // metrics_1w 우선 사용할지 여부
+  "gating": {
+    "profile": "diagnostic-relaxed"           // _BUILTIN_GATING_PROFILES 의 키 혹은 직접 정의
   },
-  "steps": ["estimate", "evaluate", "metrics"] // 기본 실행 단계
+  "oscillator": {
+    "f_min": 0.08,
+    "f_max": 0.5
+  },
+  "report": {
+    "runs": ["cohface_motion_oscillator"],
+    "output": "reports/cohface_motion_oscillator",
+    "unique_window": false
+  },
+  "runtime": {
+    "device": "cpu"
+  },
+  "steps": ["estimate", "evaluate", "metrics"]
 }
 ```
-- `datasets`/`methods`/`report.runs` 항목은 문자열 또는 상세 딕셔너리를 혼용할 수 있습니다.
-- `roi.chest.skip_rate`는 **초 단위**가 아니라 “frame 스킵 주기”처럼 정의됩니다. (예: 10 → `fps * 10` 프레임마다 Mediapipe Pose 갱신)
+- `datasets`/`methods`/`report.runs`는 문자열과 상세 dict를 섞어도 됩니다. 문자열 `profile1d` 하나로 linear/quadratic/cubic을 한 번에 추가할 수도 있습니다.
+- `name`을 지정하면 run 디렉터리는 항상 `results/<name>`(단일 데이터셋 기준)로 생성되므로, 이후 `--runs <name>` 형식으로 바로 재사용할 수 있습니다.
+- `gating.profile`은 `_DEFAULT_GATING_CFG` → 프로필 → 사용자가 입력한 override 순으로 깊은 병합됩니다.
 
-## 명령 예시
-### 1. 설정 파일 하나로 추정→평가→지표 출력까지
+## 실행 시나리오
+### 1) 전체 파이프라인 한 번에 돌리기
 ```bash
-python3 run_all.py --config configs/cohface_motion.json
+python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics
 ```
-- `configs/cohface_motion.json` 안의 `steps`가 `estimate → evaluate → metrics`로 정의되어 있으므로 한 번 실행으로 전 단계 진행.
-- 결과 디렉터리: `results/COHFACE_OF_DoF_profile1D/` (자동 생성)
-- 평가 단계에서 `plots/`에 bar/scatter/time/PSD/Bland-Altman plot까지 자동 생성.
+- `steps`를 생략하면 config에 지정된 기본 단계(또는 `["estimate"]`)만 실행됩니다.
+- 산출물은 `results/cohface_motion_oscillator/` 아래에 `data/`, `aux/`, `metrics/`, `plots/`, `logs/`로 자동 정리됩니다.
 
-### 2. 단계별로 나눠 실행
+### 2) 단계별로 나눠 실행
 ```bash
-# (1) 추정만 수행
-python3 run_all.py --config configs/cohface_motion.json --step estimate
+# 추정만
+python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index 0
 
-# (2) 기존 결과에 대해 다시 평가 (stride만 일시적으로 바꾸고 싶을 때)
-python3 run_all.py --config configs/cohface_motion.json \
-  --step evaluate --win 30 --stride 2
+# 저장된 결과 재평가(윈도우/stride override)
+python run_all.py -c configs/cohface_motion_oscillator.json \
+  -s evaluate \
+  --win 30 --stride 1 \
+  --auto_discover_methods true \
+  --allow-missing-methods \
+  --runs cohface_motion_oscillator
 
-# (3) 저장된 metrics 출력만 하고 싶을 때
-python3 run_all.py --config configs/cohface_motion.json --step metrics
+# 메트릭 요약만 다시 출력
+python run_all.py -c configs/cohface_motion_oscillator.json \
+  -s metrics \
+  --auto_discover_methods true \
+  --runs cohface_motion_oscillator
 ```
+- `--runs` 값은 **config의 `results_dir` 기준 상대경로**를 넘기면 됩니다. (예: `cohface_motion_oscillator` 또는 절대경로 `/.../results/cohface_motion_oscillator`).  
+  `results/COHFACE_...` 처럼 `results/`를 한 번 더 붙이면 실제 경로가 `results/results/...`가 되어 평가가 실패하니 주의하세요.
+- `--auto_discover_methods true`를 주면 `aux/<method>/` 폴더를 스캔해서 현재 run에 존재하는 메소드만 자동으로 평가해 줍니다.
 
-### 3. 리포트 합본 생성
+### 3) 리포트 합본 생성
 ```bash
-# 특정 run 디렉토리 집계 (상대/절대 경로 모두 지원)
-python3 run_all.py --config configs/cohface_motion.json \
-  --step report --runs results/COHFACE_OF_DoF_profile1D
-
-# config.report.runs 를 활용하고 싶다면 --runs 생략
-python3 run_all.py --config configs/cohface_motion.json --step report
+python run_all.py -c configs/cohface_motion_oscillator.json \
+  -s report \
+  --runs cohface_motion_oscillator another_run \
+  --prefer-unique
 ```
-- `reports/<이름>/combined_metrics.csv`, `combined_metrics.txt`에 종합표 저장.
-- `--prefer-unique` 옵션을 주면 `metrics_1w.pkl`을 우선 사용합니다.
+- `reports/<label>/combined_metrics.csv` + `.txt`가 생성되고, 각 run의 `metrics.pkl`/`metrics_1w.pkl`에서 중앙값·표준편차가 합쳐집니다.
+- config에 이미 `report.runs`가 있다면 `--runs`를 생략해도 됩니다.
 
-## CLI 단축 옵션
-- `--step` 대신 기존 `-a {0,1,2,3}` 형식도 유지됩니다. (`0=estimate`, `1=evaluate`, `2=metrics`, `3=report`)
-- `--results`로 config의 `results_dir`를 일시적으로 바꿀 수 있습니다.
-- 평가 단계는 `--win`, `--stride`로 1회성 override 가능합니다. 플롯(bar/scatter/time/PSD/Bland-Altman)과 요약 로그는 항상 생성됩니다. 표는 기본적으로 중앙값±표준편차(median±std)로 집계됩니다.
+## CLI 팁
+- `--override foo.bar=value` 또는 `--override-from overrides.json`으로 config의 일부를 1회성 패치할 수 있습니다. (예: `--override eval.win_size=45`)
+- 평가 단계는 항상 `metrics/eval_settings.json`, `metrics/metrics.pkl`, `metrics_summary.txt`, `logs/method_quality*.{csv,json}`, `logs/methods_seen.txt`를 생성합니다. 문제 발생 시 이 로그들을 확인하세요.
+- `--allow-missing-methods` 기본값은 `true`입니다. 특정 메소드가 빠져 있어도 전체 파이프라인이 멈추지 않게 하려면 그대로 두고, 엄격 검증이 필요할 때 `--no-allow-missing-methods`를 사용하세요.
+- `--num_shards/--shard_index`로 메소드 집합을 N-way로 나눌 수 있습니다. `methods` 목록 전체를 기준으로 round-robin 됩니다.
 
-## 새로운 config 만들기
-1. `configs/` 아래에 JSON 파일 추가
-2. `datasets`에 사용할 데이터셋 이름과 ROI 설정을 정의
-3. `methods`에 모듈 이름을 나열 (`OF_Deep` 등 파라미터 필요 시 `name` 키 포함 딕셔너리 사용)
-4. 필요 시 `eval`, `report`, `steps`로 기본 동작 지정
+## 새 config 작성 절차
+1. `configs/`에 JSON 파일을 생성하고 `name`, `results_dir`, `datasets`, `methods` 블록을 채웁니다.
+2. 필요에 따라 `eval`, `gating`, `oscillator`, `report`, `runtime`, `steps` 블록을 덧붙입니다.
+3. 실험 기록을 위해 `notes/` 또는 `results/<run>/metadata.json`을 `tools/write_metadata.py`로 생성해 두면 재현성이 좋아집니다.
 
-예시:
+간단한 예:
 ```json
 {
   "name": "mahnob_rppg",
@@ -94,8 +114,7 @@ python3 run_all.py --config configs/cohface_motion.json --step report
 }
 ```
 
-## 참고
-- ROI 추출/플롯/평가에 SciPy, Matplotlib 등 Python 패키지가 필요합니다. `setup/` 절차로 제작한 conda 환경(`resPyre`)을 활성화한 뒤 실행하세요.
-- 리포트 합본 시 각 run 디렉터리의 `metrics.pkl` 또는 `metrics_1w.pkl`이 존재해야 합니다.
-- config 없이 실행하면 기존 기본값( COHFACE + OF/DoF/profile1D )으로 동작합니다.
-- `profile1D`를 문자열로 넣으면 linear/quadratic/cubic 세 가지 보간법이 모두 포함되고, 결과 플롯에는 Bland-Altman, 시간 오버레이, PSD, scatter가 자동으로 생성됩니다. `metrics_summary.txt`에는 `PCC`(Pearson 상관계수)도 포함됩니다.
+## 참고 & 권장 워크플로
+- ROI 추출·평가에는 SciPy/Matplotlib 등 추가 의존성이 필요합니다. `setup/` 문서대로 환경(`resPyre`)을 활성화한 뒤 실행하세요.
+- `results/<run>/data/*.pkl` 하나당 trial이 1개 들어가며, `aux/<method>/<trial>.npz`에 오실레이터 출력이 저장됩니다. 평가가 제대로 진행됐다면 `logs/methods_seen.txt`에 메소드 명단이 기록되고, `metrics/metrics_summary.txt`에 25개 메소드 전부의 지표가 채워집니다.
+- `tools/write_metadata.py --run results/<run> --command "python run_all.py ..."`를 실행하면 run 디렉터리 내에 `metadata.json`을 남길 수 있습니다. Optuna/EM 튜닝 후 산출물 정리에 적극 활용하세요.

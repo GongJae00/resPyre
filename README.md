@@ -9,26 +9,46 @@
 
 **resPyre** is a comprehensive framework for estimating respiratory rate from video, using different methods and datasets.
 
-## Overview
-
-The main script [run_all.py](run_all.py) supports:
-
-1. Extracting respiratory signals from videos using different methods
-2. Evaluating the results with multiple metrics 
-3. Printing the evaluation metrics
-
-## Usage
+## Quick Start (COHFACE + Oscillator Heads)
 
 ```bash
-python run_all.py -a <action> -d <results_dir>
+# 1) Auto profile runtime threads / device
+eval "$(python setup/auto_profile.py)"
+
+# 2) Estimate (sharded example: 5 shards)
+for idx in 0 1 2 3 4; do
+  python run_all.py -c configs/cohface_motion_oscillator.json \
+    -s estimate --num_shards 5 --shard_index $idx
+done
+
+# 3) Evaluate + Metrics (track usage enforced; spectral fallback disabled by default)
+python run_all.py -c configs/cohface_motion_oscillator.json \
+  -s evaluate metrics --auto_discover_methods true
+
+# 3-b) Re-run evaluate/metrics later (specify the run label, not results/<label>)
+python run_all.py -c configs/cohface_motion_oscillator.json \
+  -s evaluate metrics \
+  --auto_discover_methods true \
+  --runs cohface_motion_oscillator
+
+# 4) (Optional) Fit EM-based Kalman gain for a method
+python train_em.py \
+  --results results/cohface_motion_oscillator \
+  --dataset COHFACE \
+  --method profile1d_cubic__pll
 ```
 
-Arguments:
-- `-a`: Action to perform 
-  - `0`: Extract respiratory signals
-  - `1`: Evaluate results
-  - `2`: Print metrics
-- `-d`: Directory to save/load results (default: `results/`)
+- 결과는 `results/cohface_motion_oscillator/...`에 저장됩니다. `metrics/metrics_summary.txt` 외에도 `logs/method_quality.csv`, `logs/method_quality_summary.json`, `logs/methods_seen.txt`를 확인하세요.
+- `--runs`로 기존 산출물을 지정할 때는 run 라벨(예: `cohface_motion_oscillator`)이나 절대 경로를 사용하세요. `results/` 접두사는 내부적으로 자동으로 붙으므로 다시 추가하면 `results/results/...`처럼 잘못된 위치가 됩니다.
+- 동일 run 디렉터리에 `metadata.json`을 남겨 명령어·git 커밋·autotune/EM 버전·주요 메트릭 경로를 기록하는 것을 권장합니다 (템플릿은 아래 참조).
+
+## Pipeline Overview
+
+The main script [run_all.py](run_all.py) drives a three-stage pipeline:
+
+1. **estimate**: Extract motion-based respiration signals (5 baselines) and pass each through an oscillator head (KFstd, UKF, Spec-Ridge, PLL).
+2. **evaluate**: Consume the oscillator-provided `track_hz` directly (no spectral fallback) while logging full quality diagnostics per trial.
+3. **metrics**: Aggregate medians/variability, emit tables/plots, and persist `method_quality` summaries.
 
 ## Supported Methods
 
@@ -50,11 +70,80 @@ The following methods are implemented:
 - [`bss_ssa`](run_all.py): Blind Source Separation with SSA
 - [`bss_emd`](run_all.py): Blind Source Separation with EMD
 
-**Oscillator Heads**
+### Oscillator Heads & SOMATA-style pipeline
+
 - Baseline motion estimators (`of_farneback`, `dof`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`) can be paired with four oscillator refinement heads (`kfstd`, `ukffreq`, `spec_ridge`, `pll`) for 20 additional method names such as `of_farneback__kfstd`.
 - Use `configs/cohface_motion_oscillator.json` to run all 25 variants on COHFACE with `python run_all.py --config configs/cohface_motion_oscillator.json --step estimate evaluate metrics`.
-- Each wrapped method writes its smoothed waveform to the main pickle file and stores detailed diagnostics (signal, frequency track, RR summary) under `results/<run_name>/aux/<method>/<trial>.npz` when the config defines a `name` (falling back to the legacy layout otherwise).
-- Evaluation-wide frequency bands are controlled via `eval.min_hz`/`eval.max_hz` (default `0.08–0.5 Hz`), and setting `eval.use_track=true` makes the scorer consume the oscillator-provided `track_hz`/`rr_bpm` instead of a Welch fallback.
+- Each wrapped method writes its smoothed waveform to the main pickle file and stores detailed diagnostics (signal, frequency track, RR summary, quality flags) under `results/<run_name>/aux/<method>/<trial>.npz`. Ensemble mode additionally stores each component under `aux/<method>/components/<trial>/<head>.npz`.
+- Evaluation-wide frequency bands are controlled via `eval.min_hz`/`eval.max_hz` (default `0.08–0.5 Hz`). Track outputs are always used (`gating.debug.disable_fallback=true` by default); fallback events are only recorded in the logs.
+- Quality columns now include `std_bpm`, `unique_fraction`, `edge_saturation_fraction`, `track_frac_saturated_eval`, and a synthetic `track_reliability` score.
+
+### Parameter autotune & EM gain learning
+
+- `_BaseOscillatorHead` logs per-trial MAD/SNR/frequency stats through `riv/estimators/params_autotune.py` → `runs/autotune/<dataset>/<method>_stats.json`.
+- To override parameters globally, drop a JSON file under `runs/autotune/<dataset>/<method>.json`:
+
+```json
+{
+  "params": {
+    "qx_override": 5e-5,
+    "rv_floor_override": 0.02,
+    "qf_override": 2e-4
+  }
+}
+```
+- Additional coarse frequency initialisers (Welch/autocorr/Hilbert) are blended by confidence; their candidates are preserved in `meta["coarse_candidates"]`.
+- **EM gain optimisation:** after running `estimate` (and storing tracks), execute
+
+```bash
+python train_em.py \
+  --results results/cohface_motion_oscillator \
+  --dataset COHFACE \
+  --method profile1d_cubic__pll
+```
+
+This stacks every `aux/<method>/<trial>.npz` track, fits Q/R via EM, saves `runs/em_params/cohface_profile1d_cubic__pll.json`, and appends a row to `runs/em_logs/em_training.csv`. The oscillator heads automatically load these Q/R overrides on the next run.
+
+### PLL / Spec-Ridge upgrades & Ensemble mode
+
+- `oscillator_PLL` now uses an adaptive controller (`PLLAdaptiveController`) that scales KP/KI based on the observed SNR and adds a phase-noise shaping term; reliability is reported via track variance.
+- `oscillator_Spec_ridge` performs multi-resolution STFT (0.75×/1×/1.5× window scales), computes ridge regularisation, and fuses tracks according to power-driven reliability. Meta includes `multi_resolution_used` and the final reliability score.
+- Optional ensemble execution mixes the four heads:
+
+```json
+{
+  "name": "profile1d_cubic__ensemble",
+  "ensemble": {
+    "enabled": true,
+    "heads": [
+      {"name": "kfstd", "weight": 1.0},
+      {"name": "ukffreq", "weight": 1.2},
+      {"name": "spec_ridge", "weight": 1.0},
+      {"name": "pll", "weight": 0.8}
+    ]
+  }
+}
+```
+
+The ensemble stores both the fused track and the component outputs so you can compare single-head vs. mixed performance from the same run.
+
+### Quality logging & metadata
+
+- `results/<run>/logs/method_quality.csv` and `method_quality_summary.json` now have extra columns summarising `track_frac_saturated_eval` and reliability percentiles. `logs/methods_seen.txt` and `logs/evaluate_appends.log` include every trial/method pair, even if metrics fail.
+- After `metrics`, drop a `results/<run>/metadata.json` describing the exact command, config overrides, git commit, EM/autotune versions, and notable metric summaries. A minimal template:
+
+```json
+{
+  "command": "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics",
+  "git_commit": "<abc1234>",
+  "gating": {"disable_fallback": true},
+  "autotune": "runs/autotune/cohface/...",
+  "em_params": "runs/em_params/cohface_profile1d_cubic__pll.json",
+  "metrics": "results/cohface_motion_oscillator/metrics/metrics_summary.txt"
+}
+```
+
+Keeping this metadata alongside the metrics folder ensures full reproducibility for paper submissions.
 
 ## Supported Datasets 
 
@@ -64,27 +153,49 @@ The code works with the following datasets:
 - [`COHFACE`](run_all.py): COHFACE Dataset  
 - [`MAHNOB`](run_all.py): MAHNOB-HCI Dataset
 
-## Example Usage
+## Metadata & Reproducibility
 
-1. Extract respiratory signals using deep learning methods:
+After every run, create a `metadata.json` alongside `metrics/` summarising the configuration (command line, git commit, gating overrides, autotune/EM versions, shards, etc.). Template:
 
-```python
-methods = [BigSmall(), MTTS_CAN()]
-datasets = [BP4D(), COHFACE()]
-extract_respiration(datasets, methods, "results/")
+```json
+{
+  "command": "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics",
+  "git_commit": "<commit>",
+  "gating": {"disable_fallback": true},
+  "autotune": "runs/autotune/cohface/profile1d_cubic__pll.json",
+  "em_params": "runs/em_params/cohface_profile1d_cubic__pll.json",
+  "ensemble": false,
+  "metrics_summary": "results/cohface_motion_oscillator/metrics/metrics_summary.txt",
+  "quality_logs": "results/cohface_motion_oscillator/logs/method_quality.csv"
+}
 ```
 
-2. Evaluate the results:
+This, combined with `runs/em_logs/em_training.csv` and the per-trial meta stored in `aux/`, makes the entire SOMATA-style pipeline reproducible for paper submission or peer review.
+
+- Scripted helper:
 
 ```bash
-python run_all.py -a 1 -d results/
+python tools/write_metadata.py \
+  --run results/cohface_motion_oscillator \
+  --command "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics"
 ```
 
-3. Print metrics:
+This reads `metrics/eval_settings.json`, fills in git commit/artifact paths, and writes `results/<run>/metadata.json`. Add `--notes "shard run 0-4"` if you need additional context.
 
-```bash 
-python run_all.py -a 2 -d results/
+## Optuna + EM/MLflow Integration
+
+```bash
+python optuna_runner.py \
+  --config configs/cohface_motion_oscillator.json \
+  --output runs/optuna_all \
+  --n-trials 40 \
+  --em-mode trial \
+  --mlflow-uri file:mlruns/optuna \
+  --mlflow-experiment respyre-optuna
 ```
+
+- `--em-mode off|trial|best`: run EM-based Kalman gain learning after each trial (`trial`) or only for the best configuration (`best`). Best trials automatically persist to `runs/em_params/<dataset>_<method>.json` and append a row to `runs/em_logs/em_training.csv`.
+- `--mlflow-uri`, `--mlflow-experiment`: if [MLflow](https://mlflow.org) is installed, every trial logs params/metrics (including EM `q`, `r`, `ll`) to the selected tracking server. When MLflow is unavailable the script falls back to CSV logging (`trials.csv`) and prints a warning.
 
 ## Paper Evaluation Settings
 
@@ -207,3 +318,64 @@ If you use this code, please cite the paper:
 ## License
 
 This project is licensed under the GNU General Public License - see the [LICENSE](LICENSE) file for details.
+
+
+---
+
+```mermaid
+flowchart LR
+    subgraph obs["Observation Layers"]
+        video[Video Frames]
+        roi[Chest ROI Extraction]
+        motion1["1D Motion Signals\n(Optical Flow, DoF, 1D Profiles)"]
+        y["Raw Motion y(t)"]
+        subgraph pre["Preprocess (per-signal)"]
+            det[Linear Detrend]
+            bp["Bandpass 0.08–0.5 Hz"]
+            sign[Sign Alignment]
+            rz["Robust Z-Score"]
+        end
+        video --> roi --> motion1 --> y
+        y --> det --> bp --> sign --> rz --> ytilde["ŷ(t)"]
+    end
+
+    ytilde --> osc
+
+    subgraph osc["Oscillator Head"]
+        band["Respiratory Band Config\n(f_min=0.08 Hz, f_max=0.5 Hz)"]
+        coarse["Coarse RR (Welch PSD) → f₀"]
+        ssm["State-Space Oscillator Setup\n(F(ρ, ω₀), Q, R from MAD)"]
+        band --> coarse --> ssm
+        ssm -->|ŷ(t), f₀, F, Q, R| trackers
+    end
+
+    subgraph trackers["Tracker Head (Parallel)"]
+        direction TB
+        subgraph kf["KFstd"]
+            kfin["Fixed-frequency Kalman smoother\nState [x1, x2]"]
+            kfout["ŝ_KF(t), track_hz=f₀,\nA=√(x̂1²+x̂2²), φ=atan2(x̂2,x̂1)"]
+            kfin --> kfout
+        end
+        subgraph ukf["UKF"]
+            ukfin["State [x1, x2, log f]\nUnscented update"]
+            ukfout["ŝ_UKF(t), track_hz=exp(log f̂),\nA/φ from [x̂1,x̂2]"]
+            ukfin --> ukfout
+        end
+        subgraph spec["Spec-Ridge"]
+            stft["STFT (12 s win, 50% overlap)"]
+            ridge["Dynamic-program ridge\n+ sub-bin refine"]
+            smooth["Temporal smoothing & interpolation"]
+            specout["track_hz^SR(t)\n(ŷ(t) reused as ŝ)"]
+            stft --> ridge --> smooth --> specout
+        end
+        subgraph pll["PLL"]
+            hilbert["Hilbert transform → φ_y(t)"]
+            loop["Phase detector + PI loop\n(NCO init at f₀)"]
+            pllout["ŝ_PLL(t)=cos φ_PLL,\ntrack_hz=ω/(2π), φ=φ_PLL"]
+            hilbert --> loop --> pllout
+        end
+    end
+
+    trackers --> payload["Result Payload\n{signal_hat, track_hz, rr_bpm, meta}"]
+
+```
