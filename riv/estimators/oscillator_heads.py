@@ -59,9 +59,13 @@ class OscillatorParams:
     spec_peak_smooth_len: int = 1
     spec_subbin_interp: str = "parabolic"
     post_smooth_alpha: float = 0.0
-    stft_win: float = 12.0
+    stft_win: float = 30.0
     stft_hop: float = 1.0
     ridge_penalty: float = 250.0
+    spec_guidance_strength: float = 0.8
+    spec_guidance_offset: float = 0.1
+    spec_guidance_confidence_scale: float = 5.0
+    spec_guidance_snr_scale: float = 3.5
     pll_autogain: bool = True
     pll_kp: float = 0.0  # legacy manual override
     pll_ki: float = 0.0  # legacy manual override
@@ -69,6 +73,9 @@ class OscillatorParams:
     pll_ki_min: float = 0.0
     pll_zeta: float = 0.9
     pll_ttrack: float = 7.0
+    pll_err_clip: float = float(np.pi / 2.0)
+    pll_max_hz_step: float = 0.04
+    pll_snr_ref_db: float = 12.0
     detrend: bool = True
     bandpass: bool = True
     zscore: bool = True
@@ -209,9 +216,13 @@ class _BaseOscillatorHead:
         return "unknown"
 
     def _method_identifier(self, meta: Optional[Dict]) -> str:
-        base = "unknown"
         if isinstance(meta, dict):
-            base = meta.get("method_name") or meta.get("base_method") or "unknown"
+            name = meta.get("method_name")
+            if isinstance(name, str) and name:
+                return name
+            base = meta.get("base_method") or "unknown"
+        else:
+            base = "unknown"
         return f"{base}__{self.head_key}"
 
     def _maybe_apply_autotune(self, meta: Optional[Dict]):
@@ -220,16 +231,10 @@ class _BaseOscillatorHead:
         cache_key = (dataset, method_id)
         if cache_key in self._autotune_cache:
             return
+        # 1) Load dataset/head-specific autotune overrides (top-K heuristics).
         overrides = self._autotune_repo.load_params(dataset, method_id)
         if not overrides:
-            # fallback to head-only overrides
             overrides = self._autotune_repo.load_params(dataset, self.head_key)
-        em_overrides = load_em_params(dataset, method_id)
-        if em_overrides:
-            if 'q' in em_overrides:
-                setattr(self.params, 'qx_override', float(em_overrides['q']))
-            if 'r' in em_overrides:
-                setattr(self.params, 'rv_floor_override', float(em_overrides['r']))
         if overrides:
             for field, value in overrides.items():
                 if hasattr(self.params, field) and value is not None:
@@ -237,6 +242,15 @@ class _BaseOscillatorHead:
                         setattr(self.params, field, float(value))
                     except Exception:
                         setattr(self.params, field, value)
+        # 2) EM-based Q/R estimates always take precedence for qx/rv_floor,
+        # ensuring that principled EM training cannot be silently overridden
+        # by heuristic autotune files.
+        em_overrides = load_em_params(dataset, method_id)
+        if em_overrides:
+            if 'q' in em_overrides:
+                setattr(self.params, 'qx_override', float(em_overrides['q']))
+            if 'r' in em_overrides:
+                setattr(self.params, 'rv_floor_override', float(em_overrides['r']))
         self._autotune_cache[cache_key] = True
 
     def _log_autotune_stats(self, meta: Optional[Dict], freq: float):
@@ -327,9 +341,9 @@ class _BaseOscillatorHead:
             freq_final = 0.5 * (p.f_min + p.f_max)
             self._last_init_freq = {"raw_hz": freq_final}
             return freq_final
-        weights = np.asarray([max(v[1], 1e-6) for v in valid], dtype=np.float64)
+        conf_values = np.asarray([max(v[1], 1e-6) for v in valid], dtype=np.float64)
         freqs = np.asarray([v[0] for v in valid], dtype=np.float64)
-        weights = weights / np.sum(weights)
+        weights = conf_values / np.sum(conf_values)
         blended = float(np.sum(freqs * weights))
         best_idx = int(np.argmax([v[1] for v in valid]))
         freq_raw = float(valid[best_idx][0])
@@ -358,11 +372,15 @@ class _BaseOscillatorHead:
             if isinstance(meta, dict):
                 entry.update(meta)
             candidate_meta.append(entry)
+        max_conf = float(np.max([v[1] for v in valid]))
+        weighted_conf = float(np.sum(weights * np.asarray([v[1] for v in valid], dtype=np.float64)))
         self._last_init_freq = {
             "raw_hz": float(freq_raw),
             "interior_hz": float(freq_interior),
             "final_hz": float(freq_final),
-            "candidates": candidate_meta
+            "candidates": candidate_meta,
+            "confidence_weighted": weighted_conf,
+            "confidence_max": float(max_conf)
         }
         return freq_final
 
@@ -386,15 +404,81 @@ class _BaseOscillatorHead:
             rv = max((p.rv_mad_scale * sigma) ** 2, rv_floor)
         else:
             rv = max(p.rv, rv_floor)
-        qf = p.qf if (p.qf and p.qf > 0) else 5e-5
+        # Base (pre-guidance) frequency diffusion level used to bound qf.
+        qf_base = p.qf if (p.qf and p.qf > 0) else 5e-5
+        qf = qf_base
         if p.qf_override is not None and p.qf_override > 0:
             qf = float(p.qf_override)
+            qf_base = qf
+        qx, qf, rv = self._apply_spectral_guidance(qx, qf, rv, rv_floor, qf_base)
+        snr = self._last_snr if (self._last_snr is not None and np.isfinite(self._last_snr)) else 0.0
+        snr = float(max(0.0, snr))
+        snr_ref = getattr(self.params, "pll_snr_ref_db", 12.0) or 12.0
+        snr_norm = float(np.clip(snr / max(snr_ref, 1e-6), 0.0, 1.0))
+        qx_scale = 0.4 + 1.6 * snr_norm
+        rv_scale = 1.4 - 0.6 * snr_norm
+        qf_scale = 0.5 + snr_norm
+        qx = max(qx * qx_scale, 1e-9)
+        rv = max(rv * rv_scale, rv_floor)
+        qf = max(qf * qf_scale, 1e-8)
         return {
             'rho': float(rho),
             'qx': float(qx),
             'rv': float(rv),
             'qf': float(qf)
         }
+
+    def _spectral_guidance_score(self) -> float:
+        info = getattr(self, "_last_init_freq", {}) or {}
+        candidates = info.get("candidates") if isinstance(info, dict) else None
+        best_conf = 0.0
+        if isinstance(candidates, (list, tuple)):
+            for cand in candidates:
+                if isinstance(cand, dict):
+                    try:
+                        val = float(cand.get('confidence', 0.0))
+                    except (TypeError, ValueError):
+                        val = 0.0
+                    if np.isfinite(val):
+                        best_conf = max(best_conf, val)
+        conf_scale = getattr(self.params, 'spec_guidance_confidence_scale', 5.0) or 5.0
+        if conf_scale <= 0.0:
+            conf_scale = 5.0
+        conf_norm = float(np.clip(best_conf / conf_scale, 0.0, 1.0))
+        snr_val = max(self._last_snr or 0.0, 0.0)
+        snr_scale = getattr(self.params, 'spec_guidance_snr_scale', 3.5) or 3.5
+        if snr_scale <= 0.0:
+            snr_scale = 3.5
+        snr_norm = float(np.clip(np.tanh(snr_val / snr_scale), 0.0, 1.0))
+        return float(0.6 * conf_norm + 0.4 * snr_norm)
+
+    def _apply_spectral_guidance(self, qx: float, qf: float, rv: float, rv_floor: float, qf_base: float) -> Tuple[float, float, float]:
+        strength = float(getattr(self.params, 'spec_guidance_strength', 0.0) or 0.0)
+        if strength <= 0.0:
+            # Even when guidance is nominally off, keep a minimal random-walk
+            # variance so that trackers never become perfectly static and
+            # frequency-locked at band edges.
+            qf_floor_rel = max(0.1 * float(qf_base), 1e-7)
+            qf = max(qf, qf_floor_rel)
+            return qx, qf, rv
+        offset = float(getattr(self.params, 'spec_guidance_offset', 0.0) or 0.0)
+        score = np.clip(self._spectral_guidance_score(), 0.0, 1.0)
+        centered = score - offset
+        # Bound qf between a floor/ceiling derived from the configured level so
+        # that spectral guidance cannot collapse it to ~0 or explode it.
+        qf_floor_rel = max(0.1 * float(qf_base), 1e-7)
+        qf_ceil_rel = max(10.0 * float(qf_base), 1e-3)
+        if centered >= 0.0:
+            tighten = 1.0 / max(1.0 + strength * centered, 1e-6)
+            qf = max(qf * tighten, qf_floor_rel)
+            qx = max(qx * (0.7 * tighten + 0.3), 1e-9)
+            rv = max(rv * (0.6 * tighten + 0.4), rv_floor)
+        else:
+            loosen = 1.0 + strength * (-centered)
+            qf = min(qf * loosen, qf_ceil_rel)
+            qx = min(qx * (0.5 * loosen + 0.5), 1.0)
+            rv = max(min(rv * (0.5 * loosen + 0.5), 10.0), rv_floor)
+        return qx, qf, rv
 
     def _package(
         self,
@@ -421,6 +505,8 @@ class _BaseOscillatorHead:
             "track_frac_saturated": frac_saturated,
             "track_dyn_range_hz": dyn_range
         }
+        snr_val = self._last_snr if (self._last_snr is not None and np.isfinite(self._last_snr)) else float('nan')
+        meta["snr_estimate"] = float(snr_val) if np.isfinite(snr_val) else float('nan')
         init_freq = getattr(self, "_last_init_freq", None)
         if isinstance(init_freq, dict):
             raw_val = init_freq.get("raw_hz")
@@ -475,7 +561,7 @@ class oscillator_KFstd(_BaseOscillatorHead):
 
         cos_w = np.cos(omega0 * dt)
         sin_w = np.sin(omega0 * dt)
-        A = rho * np.array([[cos_w, -sin_w], [sin_w, cos_w]], dtype=np.float64)
+        F = rho * np.array([[cos_w, -sin_w], [sin_w, cos_w]], dtype=np.float64)
         C = np.array([[1.0, 0.0]], dtype=np.float64)
         Q = qx * np.eye(2, dtype=np.float64)
         R = np.array([[rv]], dtype=np.float64)
@@ -486,43 +572,75 @@ class oscillator_KFstd(_BaseOscillatorHead):
         P_pred = np.zeros((n, 2, 2), dtype=np.float64)
 
         x = np.zeros(2, dtype=np.float64)
-        P = np.eye(2, dtype=np.float64)
+        # Somata-style initial covariance: start from the state noise level.
+        P = Q.copy()
 
         I = np.eye(2, dtype=np.float64)
         for t in range(n):
-            x = A @ x
-            P = A @ P @ A.T + Q
+            # Prediction
+            x = F @ x
+            P = F @ P @ F.T + Q
             x_pred[t] = x
             P_pred[t] = P
 
+            # Update (standard linear Kalman filter for 1D observation)
             y_t = y[t]
-            S = C @ P @ C.T + R
+            S = float(C @ P @ C.T + R)
+            if S <= 1e-12 or not np.isfinite(S):
+                S = 1e-12
             K = (P @ C.T) / S
-            innovation = y_t - (C @ x)[0]
+            innovation = float(y_t - (C @ x)[0])
             x = x + (K[:, 0] * innovation)
-            P = (I - K @ C) @ P @ (I - K @ C).T + K @ R @ K.T
+            P = (I - K @ C) @ P
+            P = 0.5 * (P + P.T)
+            for i in range(2):
+                if P[i, i] < 1e-10 or not np.isfinite(P[i, i]):
+                    P[i, i] = 1e-10
 
             x_filt[t] = x
             P_filt[t] = P
 
         x_smooth = np.copy(x_filt)
         P_smooth = np.copy(P_filt)
-        A_T = A.T
+        F_T = F.T
         for t in range(n - 2, -1, -1):
             try:
                 P_inv = np.linalg.pinv(P_pred[t + 1])
             except np.linalg.LinAlgError:
                 P_inv = np.linalg.inv(P_pred[t + 1] + 1e-9 * np.eye(2))
-            G = P_filt[t] @ A_T @ P_inv
+            G = P_filt[t] @ F_T @ P_inv
             x_smooth[t] += G @ (x_smooth[t + 1] - x_pred[t + 1])
             P_smooth[t] += G @ (P_smooth[t + 1] - P_pred[t + 1]) @ G.T
 
-        track_hz = np.full(n, freq0, dtype=np.float64)
+        # Derive amplitude/phase and instantaneous frequency from smoothed state.
+        x1 = x_smooth[:, 0]
+        x2 = x_smooth[:, 1]
+        if n > 1:
+            phase = np.unwrap(np.arctan2(x2, x1))
+            dphi = np.diff(phase)
+            inst_freq = (fs / (2.0 * np.pi)) * dphi
+            track_hz = np.empty(n, dtype=np.float64)
+            if inst_freq.size:
+                track_hz[0] = inst_freq[0]
+                track_hz[1:] = inst_freq
+            else:
+                track_hz[:] = freq0
+        else:
+            track_hz = np.full(n, freq0, dtype=np.float64)
+
+        # Constrain and stabilise the frequency track within the respiratory band.
+        track_hz = np.asarray(track_hz, dtype=np.float64)
+        bad_mask = ~np.isfinite(track_hz)
+        if np.any(bad_mask):
+            track_hz[bad_mask] = freq0
+        track_hz = np.clip(track_hz, p.f_min, p.f_max)
         track_hz = self._apply_post_smoothing(track_hz)
+
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
-        meta_payload.setdefault("is_constant_track", True)
-        return self._package(x_smooth[:, 0], track_hz, meta_payload)
+        meta_payload["freq_source"] = "kf_phase"
+        meta_payload.setdefault("is_constant_track", False)
+        return self._package(x1, track_hz, meta_payload)
 
 
 class oscillator_UKF_freq(_BaseOscillatorHead):
@@ -718,6 +836,7 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
         p = self.params
         base_win = max(16, int(p.stft_win * fs))
         scales = [0.75, 1.0, 1.5]
+        duration = float(signal.size / fs) if fs > 0 else float(signal.size)
         results = []
         for scale in scales:
             win = max(16, int(base_win * scale))
@@ -736,6 +855,12 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
                 padded=False,
                 nfft=nfft
             )
+            times = np.asarray(times, dtype=np.float64)
+            if fs > 0:
+                center_shift = 0.5 * (win / fs)
+                times = times - center_shift
+                if duration > 0.0:
+                    times = np.clip(times, 0.0, duration)
             results.append((freqs, times, Zxx))
         return results
 
@@ -803,6 +928,20 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
 class oscillator_PLL(_BaseOscillatorHead):
     head_key = "pll"
 
+    def _estimate_pll_snr(self, analytic: np.ndarray) -> float:
+        """Robust SNR estimate based on analytic envelope dispersion."""
+        if analytic.size == 0:
+            return 0.0
+        amp = np.abs(analytic)
+        finite = amp[np.isfinite(amp)]
+        if finite.size == 0:
+            return 0.0
+        p75 = float(np.percentile(finite, 75))
+        p25 = float(np.percentile(finite, 25))
+        noise = max(p25, 1e-6)
+        snr_lin = (max(p75, noise) ** 2) / (noise ** 2)
+        return float(np.clip(np.log10(snr_lin + 1e-9) * 10.0, 0.0, 30.0))
+
     def run(self, signal: np.ndarray, fs: float, meta: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
         p = self.params
         fs = fs or p.fs
@@ -820,9 +959,12 @@ class oscillator_PLL(_BaseOscillatorHead):
         phase_nco = float(np.angle(analytic[0]))
         integrator = 0.0
 
+        pll_snr = self._estimate_pll_snr(analytic)
+        snr_weight = pll_snr
         if p.pll_autogain or p.pll_kp <= 0 or p.pll_ki <= 0:
             controller = PLLAdaptiveController(p.pll_zeta, p.pll_ttrack, fs)
-            kp, ki = controller.gains(self._last_snr or 0.0, p.pll_kp_min, p.pll_ki_min)
+            gain_snr = pll_snr if np.isfinite(pll_snr) else (self._last_snr or 0.0)
+            kp, ki = controller.gains(gain_snr, p.pll_kp_min, p.pll_ki_min)
         else:
             kp = max(p.pll_kp, float(p.pll_kp_min))
             ki = max(p.pll_ki, float(p.pll_ki_min))
@@ -832,15 +974,27 @@ class oscillator_PLL(_BaseOscillatorHead):
         omega_min = 2.0 * np.pi * p.f_min
         omega_max = 2.0 * np.pi * p.f_max
         phase_noise = 0.0
+        snr_ref = getattr(p, "pll_snr_ref_db", 12.0) or 12.0
+        snr_norm = float(np.clip((snr_weight if np.isfinite(snr_weight) else 0.0) / snr_ref, 0.0, 1.0))
+        err_clip_base = float(getattr(p, "pll_err_clip", np.pi / 2.0))
+        err_clip = err_clip_base * (0.35 + 0.65 * snr_norm)
+        freq_step = max(float(getattr(p, "pll_max_hz_step", 0.0)), 0.0)
 
         for t in range(n):
             phase_y = float(np.angle(analytic[t]))
             err_raw = np.arctan2(np.sin(phase_y - phase_nco), np.cos(phase_y - phase_nco))
             # simple phase-noise shaping
+            err_raw = np.clip(err_raw, -err_clip, err_clip)
             err = err_raw - 0.1 * phase_noise
+            err *= (0.5 + 0.5 * snr_norm)
             phase_noise = err_raw
             integrator_candidate = integrator + ki * err
             omega_candidate = omega + kp * err + integrator_candidate
+            if freq_step > 0.0:
+                prev_hz = omega / (2.0 * np.pi)
+                cand_hz = omega_candidate / (2.0 * np.pi)
+                cand_hz = float(np.clip(cand_hz, prev_hz - freq_step, prev_hz + freq_step))
+                omega_candidate = 2.0 * np.pi * cand_hz
             omega_clamped = float(np.clip(omega_candidate, omega_min, omega_max))
             if omega_clamped != omega_candidate:
                 integrator_candidate += omega_clamped - omega_candidate
@@ -854,6 +1008,9 @@ class oscillator_PLL(_BaseOscillatorHead):
         track = self._apply_post_smoothing(track)
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
+        meta_payload["pll_snr_db"] = float(pll_snr)
+        meta_payload["pll_gain_kp"] = float(kp)
+        meta_payload["pll_gain_ki"] = float(ki)
         meta_payload.setdefault("is_constant_track", False)
         consistency = float(np.std(np.diff(track))) if track.size > 2 else 0.0
         reliability = float(np.exp(-consistency * 10.0))

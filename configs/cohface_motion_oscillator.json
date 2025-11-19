@@ -18,8 +18,28 @@
     "profile1d_linear",
     "profile1d_quadratic",
     "profile1d_cubic",
-    "of_farneback__kfstd",
-    "of_farneback__ukffreq",
+    {
+      "name": "of_farneback__kfstd",
+      "params": {
+        "oscillator": {
+          "qx": 0.0003,
+          "rv_floor": 0.03,
+          "post_smooth_alpha": 0.9
+        }
+      }
+    },
+    {
+      "name": "of_farneback__ukffreq",
+      "params": {
+        "oscillator": {
+          "qf": 0.00032,
+          "qx": 0.0001,
+          "rv_floor": 0.03,
+          "tau_env": 35,
+          "ukf_alpha": 0.08
+        }
+      }
+    },
     {
       "name": "of_farneback__spec_ridge",
       "preproc": {
@@ -28,9 +48,39 @@
         }
       }
     },
-    "of_farneback__pll",
-    "dof__kfstd",
-    "dof__ukffreq",
+    {
+      "name": "of_farneback__pll",
+      "params": {
+        "oscillator": {
+          "pll_ttrack": 5.5,
+          "pll_zeta": 0.85,
+          "pll_kp_min": 0.0005,
+          "pll_ki_min": 2e-05
+        }
+      }
+    },
+    {
+      "name": "dof__kfstd",
+      "params": {
+        "oscillator": {
+          "qx": 0.0004,
+          "rv_floor": 0.05,
+          "post_smooth_alpha": 0.88
+        }
+      }
+    },
+    {
+      "name": "dof__ukffreq",
+      "params": {
+        "oscillator": {
+          "qf": 0.00045,
+          "qx": 0.00025,
+          "rv_floor": 0.05,
+          "tau_env": 42,
+          "ukf_alpha": 0.12
+        }
+      }
+    },
     {
       "name": "dof__spec_ridge",
       "preproc": {
@@ -39,9 +89,39 @@
         }
       }
     },
-    "dof__pll",
-    "profile1d_linear__kfstd",
-    "profile1d_linear__ukffreq",
+    {
+      "name": "dof__pll",
+      "params": {
+        "oscillator": {
+          "pll_ttrack": 7.5,
+          "pll_zeta": 0.75,
+          "pll_kp_min": 0.001,
+          "pll_ki_min": 8e-05
+        }
+      }
+    },
+    {
+      "name": "profile1d_linear__kfstd",
+      "params": {
+        "oscillator": {
+          "qx": 0.00025,
+          "rv_floor": 0.03,
+          "post_smooth_alpha": 0.9
+        }
+      }
+    },
+    {
+      "name": "profile1d_linear__ukffreq",
+      "params": {
+        "oscillator": {
+          "qf": 0.0003,
+          "qx": 0.0001,
+          "rv_floor": 0.034,
+          "tau_env": 33,
+          "ukf_alpha": 0.09
+        }
+      }
+    },
     {
       "name": "profile1d_linear__spec_ridge",
       "preproc": {
@@ -50,9 +130,39 @@
         }
       }
     },
-    "profile1d_linear__pll",
-    "profile1d_quadratic__kfstd",
-    "profile1d_quadratic__ukffreq",
+    {
+      "name": "profile1d_linear__pll",
+      "params": {
+        "oscillator": {
+          "pll_ttrack": 5.0,
+          "pll_zeta": 0.85,
+          "pll_kp_min": 0.0003,
+          "pll_ki_min": 2e-05
+        }
+      }
+    },
+    {
+      "name": "profile1d_quadratic__kfstd",
+      "params": {
+        "oscillator": {
+          "qx": 0.00025,
+          "rv_floor": 0.03,
+          "post_smooth_alpha": 0.9
+        }
+      }
+    },
+    {
+      "name": "profile1d_quadratic__ukffreq",
+      "params": {
+        "oscillator": {
+          "qf": 0.00025,
+          "qx": 8e-05,
+          "rv_floor": 0.03,
+          "tau_env": 30,
+          "ukf_alpha": 0.07
+        }
+      }
+    },
     {
       "name": "profile1d_quadratic__spec_ridge",
       "preproc": {
@@ -61,9 +171,39 @@
         }
       }
     },
-    "profile1d_quadratic__pll",
-    "profile1d_cubic__kfstd",
-    "profile1d_cubic__ukffreq",
+    {
+      "name": "profile1d_quadratic__pll",
+      "params": {
+        "oscillator": {
+          "pll_ttrack": 5.0,
+          "pll_zeta": 0.85,
+          "pll_kp_min": 0.0003,
+          "pll_ki_min": 2e-05
+        }
+      }
+    },
+    {
+      "name": "profile1d_cubic__kfstd",
+      "params": {
+        "oscillator": {
+          "qx": 0.00025,
+          "rv_floor": 0.03,
+          "post_smooth_alpha": 0.9
+        }
+      }
+    },
+    {
+      "name": "profile1d_cubic__ukffreq",
+      "params": {
+        "oscillator": {
+          "qf": 0.00022,
+          "qx": 8e-05,
+          "rv_floor": 0.03,
+          "tau_env": 28,
+          "ukf_alpha": 0.07
+        }
+      }
+    },
     {
       "name": "profile1d_cubic__spec_ridge",
       "preproc": {
@@ -72,7 +212,17 @@
         }
       }
     },
-    "profile1d_cubic__pll"
+    {
+      "name": "profile1d_cubic__pll",
+      "params": {
+        "oscillator": {
+          "pll_ttrack": 5.0,
+          "pll_zeta": 0.85,
+          "pll_kp_min": 0.0003,
+          "pll_ki_min": 2e-05
+        }
+      }
+    }
   ],
   "eval": {
     "win_size": 30,
@@ -86,17 +236,33 @@
   },
   "oscillator": {
     "f_min": 0.08,
-    "f_max": 0.5
+    "f_max": 0.5,
+    "qx": 0.0002
   },
   "preproc": {
     "robust_zscore": {
       "enabled": true,
       "eps": 1e-6,
-      "clip": 3.5
+      "clip": 3.0
     }
   },
   "gating": {
-    "profile": "diagnostic-relaxed"
+    "profile": "paper",
+    "tracker": {
+      "std_min_bpm": 0.0,
+      "unique_min": 0.0,
+      "saturation_max": 1.0,
+      "std_is_soft": true
+    },
+    "spectral": {
+      "peak_ratio_min": 0.0,
+      "prominence_min_db": -5.0,
+      "fwhm_max_hz": 1.0,
+      "fwhm_df_guard": 0.0
+    },
+    "debug": {
+      "disable_gating": false
+    }
   },
   "report": {
     "output": "reports/cohface_motion_oscillator",
