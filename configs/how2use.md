@@ -88,12 +88,12 @@ python run_all.py -c configs/cohface_motion_oscillator.json \
   --runs cohface_motion_oscillator another_run \
   --prefer-unique
 ```
-- `reports/<label>/combined_metrics.csv` + `.txt`가 생성되고, 각 run의 `metrics.pkl`/`metrics_1w.pkl`에서 중앙값·표준편차가 합쳐집니다.
+- `reports/<label>/combined_metrics.csv` + `.txt`가 생성되고, 각 run의 `metrics_track*.pkl`(track 도메인) 혹은 `metrics_spectral.pkl` 중 원하는 파일에서 중앙값·표준편차가 합쳐집니다.
 - config에 이미 `report.runs`가 있다면 `--runs`를 생략해도 됩니다.
 
 ## CLI 팁
 - `--override foo.bar=value` 또는 `--override-from overrides.json`으로 config의 일부를 1회성 패치할 수 있습니다. (예: `--override eval.win_size=45`)
-- 평가 단계는 항상 `metrics/eval_settings.json`, `metrics/metrics.pkl`, `metrics_summary.txt`, `logs/method_quality*.{csv,json}`, `logs/methods_seen.txt`를 생성합니다. 문제 발생 시 이 로그들을 확인하세요.
+- 평가 단계는 항상 `metrics/eval_settings.json`, `metrics/metrics_track*.pkl`, `metrics/metrics_spectral.pkl`, `metrics_summary.txt`/`metrics_spectral_summary.txt`, `logs/method_quality*.{csv,json}`, `logs/methods_seen.txt`를 생성합니다. 문제 발생 시 이 로그들을 확인하세요.
 - `--allow-missing-methods` 기본값은 `true`입니다. 특정 메소드가 빠져 있어도 전체 파이프라인이 멈추지 않게 하려면 그대로 두고, 엄격 검증이 필요할 때 `--no-allow-missing-methods`를 사용하세요.
 - `--num_shards/--shard_index`로 메소드 집합을 N-way로 나눌 수 있습니다. `methods` 목록 전체를 기준으로 round-robin 됩니다.
 
@@ -116,5 +116,5 @@ python run_all.py -c configs/cohface_motion_oscillator.json \
 
 ## 참고 & 권장 워크플로
 - ROI 추출·평가에는 SciPy/Matplotlib 등 추가 의존성이 필요합니다. `setup/` 문서대로 환경(`resPyre`)을 활성화한 뒤 실행하세요.
-- `results/<run>/data/*.pkl` 하나당 trial이 1개 들어가며, `aux/<method>/<trial>.npz`에 오실레이터 출력이 저장됩니다. 평가가 제대로 진행됐다면 `logs/methods_seen.txt`에 메소드 명단이 기록되고, `metrics/metrics_summary.txt`에 25개 메소드 전부의 지표가 채워집니다.
+- `results/<run>/data/*.pkl` 하나당 trial이 1개 들어가며, `aux/<method>/<trial>.npz`에 오실레이터 출력이 저장됩니다. 평가가 제대로 진행됐다면 `logs/methods_seen.txt`에 메소드 명단이 기록되고, `metrics/metrics_summary.txt`(track)와 `metrics/metrics_spectral_summary.txt`(spectral)에 25개 메소드 전부의 지표가 채워집니다.
 - `tools/write_metadata.py --run results/<run> --command "python run_all.py ..."`를 실행하면 run 디렉터리 내에 `metadata.json`을 남길 수 있습니다. Optuna/EM 튜닝 후 산출물 정리에 적극 활용하세요.
