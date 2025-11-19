@@ -12,8 +12,11 @@
 | 2 | Trial별 MAD/SNR 로그 + coarse init 블렌딩 + autotune JSON 로딩 | `riv/estimators/params_autotune.py`, `_BaseOscillatorHead` |
 | 3 | PLL adaptive gain + phase noise shaping, Spec-Ridge multi-resolution STFT, 신뢰도 추가 | `oscillator_heads.py` |
 | 4 | 다중 헤드 앙상블 옵션 + 컴포넌트 결과 저장 | `riv/estimators/head_ensemble.py`, `motion/method_oscillator_wrapped.py` |
-| 5 | EM 기반 Kalman gain 학습 + Optuna 연동(`optuna_runner.py --em-mode`, MLflow trial 로깅) | `riv/optim/em_kalman.py`, `train_em.py`, `optuna_runner.py` |
-| 6 | README/notes/metadata 지침 업데이트, `results/<run>/metadata.json` 템플릿 확립 | 본 문서 & README |
+| 5 | EM 기반 Kalman gain 학습 + Optuna 연동(`optuna_runner.py --em-mode`, MLflow trial 로깅) + top-K 기반 autotune override 생성 | `riv/optim/em_kalman.py`, `train_em.py`, `optuna_runner.py` |
+| 6 | README/notes/metadata 지침 업데이트, `results/<run>/metadata.json` 템플릿 확립. 추가 패치: `extract_respiration`이 dataset 메타를 강제로 주입해 EM/Autotune이 정확히 적용되고, 오실레이터 헤드는 스펙트럼 피크 신뢰도·SNR 기반으로 Q/R을 자동 조절(`spec_guidance_*`). | `run_all.py`, `riv/estimators/oscillator_heads.py`, README, 본 문서 |
+| 7 | 기본 모션 5종 SNR이 NaN으로 떨어지는 문제 해결: Welch 밴드비 기반 SNR 보정 + `metrics_spectral.pkl`/`metrics_spectral_summary.txt` 동시 저장(모든 25개 메서드가 트랙/스펙트럴 지표 모두 생성됨). | `run_all.py` |
+| 8 | evaluate 단계에서 `.pkl`을 하나도 발견하지 못하거나 메서드 기록이 비면 즉시 실패하도록 가드 추가. `metrics_track_summary.txt` 별도 생성 + 합산표 상단에 평가 대역 주석을 항상 기록하도록 수정(빈 표 문제 예방). | `run_all.py` |
+| 9 | 공진자 헤드 입력 윈도우를 평가와 동일한 30초 중심으로 정렬하고, SNR 기반으로 KFSTD/UKF의 q/r/qf를 자동 조정하도록 고도화. PLL은 SNR-가중 PI 제어 + 주파수 슬루 제한을 추가해 호흡 주파수 락을 안정화. 분석용 `tools/analyze_rr_metrics.py`를 추가해 메소드별 R/MAE/SNR 분포를 바로 확인할 수 있게 함. | `riv/estimators/oscillator_heads.py`, `tools/analyze_rr_metrics.py` |
 
 남은 과제: metadata 자동 생성 스크립트(실제 JSON 생성기).
 
@@ -59,21 +62,27 @@
 ```
 rm -rf results/cohface_motion_oscillator/metrics results/cohface_motion_oscillator/plots results/cohface_motion_oscillator/replot
 
-python run_all.py --config configs/cohface_motion_oscillator.json --step estimate
-python run_all.py --config configs/cohface_motion_oscillator.json --step evaluate
-python run_all.py --config configs/cohface_motion_oscillator.json --step metrics
+# 1) setup/auto_profile로 스레드 환경 고정
+eval "$(python setup/auto_profile.py)"
 
-# 병렬
-AUTO_PROFILE_PARALLEL=5 eval "$(python setup/auto_profile.py)"
-for idx in 0 1 2 3 4; do
+# 2) estimate (필수) – 새 aux에 dataset=cohface 메타를 남기기 위해 최소 1회 실행
+python run_all.py -c configs/cohface_motion_oscillator.json -s estimate
+
+# (옵션) 샤딩이 필요할 때
+AUTO_PROFILE_PARALLEL=4 eval "$(python setup/auto_profile.py)"
+for idx in 0 1 2 3; do
   python run_all.py -c configs/cohface_motion_oscillator.json -s estimate --num_shards 5 --shard_index $idx
 done
 
-# 평가/메트릭 (트랙만 사용, fallback 비활성화가 기본)
+# 3) evaluate + metrics (트랙만 사용, fallback 없음)
 python run_all.py -c configs/cohface_motion_oscillator.json \
   -s evaluate metrics \
   --auto_discover_methods true \
   --allow-missing-methods
+
+# (선택) 패밀리별 호흡 파형 overlay 플롯 (matplotlib 필요)
+python tools/plot_family_overlays.py \
+  --results results/cohface_motion_oscillator
 
 # (중요) 저장된 run 재평가 시 --runs에 run 라벨만 넣는다 (예: cohface_motion_oscillator)
 python run_all.py -c configs/cohface_motion_oscillator.json \
@@ -81,7 +90,7 @@ python run_all.py -c configs/cohface_motion_oscillator.json \
   --auto_discover_methods true \
   --allow-missing-methods \
   --runs cohface_motion_oscillator
-
+  
 # EM 기반 Kalman gain 학습 (모든 메소드 일괄 적용 예시)
 METHODS=(
   of_farneback__kfstd of_farneback__ukffreq of_farneback__spec_ridge of_farneback__pll
@@ -94,7 +103,9 @@ for method in "${METHODS[@]}"; do
   python train_em.py \
     --results results/cohface_motion_oscillator \
     --dataset COHFACE \
-    --method "$method"
+    --method "$method" \
+    --build_autotune \
+    --autotune-top-k 5
 done
 
 # Optuna + EM/MLflow
@@ -117,9 +128,24 @@ python tools/write_metadata.py \
   --notes "shards 0-4, em-mode=trial"
 ```
 
+### 2.1 실행 시 필수 점검 (2025-11 패치 이후)
+
+1. **dataset 메타 주입 확인**  
+   * `run_all.py`의 `extract_respiration` 루프가 이제 매 trial마다 `d['dataset_name']=dataset.name.lower()`, `d['dataset_slug']=dataset.name.upper()`를 강제로 넣는다. 따라서 새로 생성되는 `results/<run>/data/*.pkl`과 `aux/<method>/<trial>.npz`에는 반드시 `"dataset":"cohface"`가 기록된다. EM/Autotune 로더(`riv/estimators/oscillator_heads.py`)는 이 문자열을 사용해 `runs/em_params/cohface_<method>.json`, `runs/autotune/cohface/<method>.json`을 찾으므로, 패치 적용 이후에는 **한 번이라도 estimate를 다시 돌려 새로운 aux를 만드는 것**이 필수다. 예전 `"unknown"` aux는 더 이상 EM을 로드하지 못한다.
+
+2. **스펙트럼 기반 Q/R 가변화(spec_guidance)**  
+   * `_coarse_freq`는 이제 웰치/오토코릴/힐버트 후보의 `confidence`를 기록하고, `_spectral_guidance_score`가 `confidence`와 최근 SNR(`_last_snr`)을 조합해 0–1 점수를 만든다.  
+   * `spec_guidance_strength`, `spec_guidance_offset`, `spec_guidance_confidence_scale`, `spec_guidance_snr_scale` 파라미터를 통해, 스펙트럼 피크가 선명할수록 `qx/qf/rv`를 자동으로 줄여 드리프트를 억제하고, 잡음이 심할 때는 더 자유롭게 움직이도록 조정한다. fallback을 완전히 제거했기 때문에, 스펙트럼 품질을 모델 내부에 반영하는 이 경로가 필수적이다.  
+   * 각 trial의 `meta["coarse_candidates"]`에는 후보 Hz/신뢰도가 보존되므로 로그 분석 시 어떤 피크를 따라갔는지 확인할 수 있다.
+
+3. **EM/Autotune 파이프라인**  
+   * `train_em.py` 및 `optuna_runner.py --em-mode`는 dataset 문자열을 lower-case로 받아 `runs/em_params/<dataset>_<method>.json`에 저장한다. 이제 `dataset` 키가 확실하므로 `COHFACE` → `cohface` 파일이 제대로 로드된다.  
+   * `train_em.py --build_autotune` 옵션을 사용하면 메트릭 상위 K개의 trial(기본 5)에서 추출한 `sigma_hat`/SNR을 이용해 `runs/autotune/<dataset>/<method>.json`을 자동 생성하고, `rv_floor_override`/`qx_override`를 데이터 기반으로 설정한다.
+   * Autotune 통계(`runs/autotune/<dataset>/<method>_stats.json`)도 동일한 규칙을 따르며, 필요 시 수동으로 덮어쓸 수 있다.
+
 실행 결과
 
-* results/<run_label>/methods/<method>/<trial>.pkl : 추정 파형·점수
+* results/<run_label>/data/<DATASET>_<subject>_<trial>.pkl : trial별 추정 파형·점수
 * results/<run_label>/aux/<method>/<trial>.npz : 오실레이터 추적(예: track_hz)
 * results/<run_label>/metrics/metrics.pkl, metrics_summary.txt, eval_settings.json
 
@@ -538,7 +564,7 @@ if clip is not None:
    - 모든 추정기의 track_hz/rr_bpm 을 aux에 저장(use_track=True면 평가에서 이것을 사용).
 
 7) 출력과 기록:
-   - metrics_summary.txt 에 각 방법별 RMSE/MAE/MAPE/CORR/PCC/CCC 표와 평가 대역/플래그 기록
+   - metrics_summary.txt 에 각 방법별 RMSE/MAE/MAPE/R/SNR 표와 평가 대역/플래그 기록
    - eval_settings.json 에 대역/윈도/use_track 및 fs_gt 포함
    - 예외/경고(mpeg4 slice, cholesky fail 등)는 무해화 로깅만 하고 진행
 
@@ -620,7 +646,7 @@ Methods
 * Motion extraction: of_farneback, dof, profile1d_(linear/quadratic/cubic)
 * Oscillator heads: kfstd, ukffreq(로그 f), spec_ridge(STFT ridge), pll(PI-PLL)
 * Band/pipeline alignment: 0.08–0.50 Hz 일치, GT fs 정합, 창 기반 평가
-* Metrics: RMSE/MAE/MAPE, CORR/PCC/CCC, 창 단위·비디오 단위
+* Metrics: RMSE/MAE/MAPE, CORR(R)/SNR, 창 단위·비디오 단위
 
 Results
 
@@ -665,7 +691,7 @@ Code and Data Availability
    ```  
    - 베이스 5개는 자동 제외, `__ukffreq/__pll/__kfstd/__spec_ridge`만 대상  
    - trial당 `gating.debug.disable_gating=true`, `use_track=true`로 폴백 없이 평가  
-  - 목적함수 = **MAE + RMSE** (기본 0.85/0.15). PCC/CCC/edge/nan/jerk는 **분석용 로그**만  
+  - 목적함수 = **MAE + RMSE** (기본 0.85/0.15). 상관계수(R)/edge/nan/jerk는 **분석용 로그**만  
    - 생리 기반으로 축소된 탐색 차원 덕분에 shard당 20 trials(TPE+MedianPruner)면 수렴
 
 2. **리더보드/번들 확인**  
@@ -686,7 +712,7 @@ Code and Data Availability
 ## Optuna 사용 요약
 
 1. `python optuna_runner.py -c configs/cohface_motion_oscillator.json --output runs/optuna --n-trials 20` → allowlist 20개 파생 메소드만 튜닝하며 trial마다 게이팅 폴백을 완전히 끈다.
-2. 종료 시 `runs/optuna/dashboards/leaderboard.csv` 정렬과 `_bundles/best20_<ts>` 생성 여부만 확인하면 objective/MAE/PCC/CCC 집계와 best.json 경로를 한 번에 검증할 수 있다.
+2. 종료 시 `runs/optuna/dashboards/leaderboard.csv` 정렬과 `_bundles/best20_<ts>` 생성 여부만 확인하면 objective/MAE/R/SNR 집계와 best.json 경로를 한 번에 검증할 수 있다.
 3. 번들 안의 `apply_all.sh`는 `python run_all.py -c <config> -s estimate evaluate metrics --auto_discover_methods=false --methods <method> --override-from <best.json> --override profile=paper -d results/paper_best/<method>` 명령을 20회 반복해 scoreboard 상위 파라미터를 재평가한다.
 4. **병렬 샤딩 튜닝**  
    ```bash
@@ -728,14 +754,13 @@ Code and Data Availability
 ```bash
 python run_all.py --config configs/cohface_motion_oscillator.json --step evaluate metrics \
   --override gating.debug.disable_gating=true \
-  --override gating.common.constant_ptp_max_hz=0.0 \
-  --override heads.ukffreq.qf=3e-4 \
-  --override heads.ukffreq.qx=1e-4 \
-  --override heads.ukffreq.rv_floor=0.03
+  --override gating.common.constant_ptp_max_hz=0.0
 ```
 
 * `disable_gating=true`로 모든 하드 게이팅·상수 승격이 비활성화돼 메트릭 왜곡을 차단한다.
 * `constant_ptp_max_hz=0.0`은 paper 프로파일이라도 상수 승격이 재개되지 않음을 보장한다(추후 config 로드 시에도 안전).
+
+UKF 기본값(예: `qf=3e-4`, `qx=1e-4`, `rv_floor=0.03`)을 종종 고정해 두고 싶으면 `configs/cohface_motion_oscillator.json` 사본을 만들어 `oscillator` 블록 또는 해당 `profile1d_*__ukffreq` 메소드 항목 안에 직접 기록해 둔다. `run_all.py`는 `--override heads.*=...` 형식을 해석하지 않으므로 파라미터는 config에 정의돼 있어야 재현성이 유지된다.
 
 ### 13.2 UKF 파라미터 권장 범위
 
@@ -747,13 +772,13 @@ python run_all.py --config configs/cohface_motion_oscillator.json --step evaluat
 
 ### 13.3 NaN 처리와 kfstd 해석
 
-* 분산이 0(또는 ε 이하)인 상수 예측은 PCC/CCC가 정의되지 않으므로 **NaN 그대로 기록**한다. 이를 0으로 대체하면 통계적 의미가 왜곡된다.
-* 집계 테이블에는 항상 `nan_rate`/`len_valid`를 함께 표기해 “유효 샘플 기반 평균”임을 명시한다. 예: `PCC=0.82 (nan_rate=7%)`.
-* `kfstd`는 설계상 상수 추정기라 PCC/CCC가 NaN이거나 미정의가 정상이다. 따라서 논문에서는 `__kfstd`의 MAE/RMSE만 주 지표로 보고, 상관·일치도는 NaN 그대로 둔다.
+* 분산이 0(또는 ε 이하)인 상수 예측은 Pearson r 이 정의되지 않으므로 **NaN 그대로 기록**한다. 이를 0으로 대체하면 통계적 의미가 왜곡된다.
+* 집계 테이블에는 항상 `nan_rate`/`len_valid`를 함께 표기해 “유효 샘플 기반 평균”임을 명시한다. 예: `R=0.82 (nan_rate=7%)`.
+* `kfstd`는 설계상 상수 추정기라 상관계수가 NaN이거나 미정의가 정상이다. 따라서 논문에서는 `__kfstd`의 MAE/RMSE만 주 지표로 보고, 상관 값은 NaN 그대로 둔다.
 
 ### 13.4 체크리스트
 
 1. `method_quality.csv`에서 `constant_track_promoted`가 전부 0인지 확인.
-2. `summary.json`의 `series_stats.est_std`가 0 또는 수치오차 0+에서 벗어나며, `__ukffreq`는 0.3-0.7+ 수준 PCC/CCC로 회복됐는지 확인.
+2. `summary.json`의 `series_stats.est_std`가 0 또는 수치오차 0+에서 벗어나며, `__ukffreq`는 0.3-0.7+ 수준의 Pearson r로 회복됐는지 확인.
 3. `metrics_summary.txt` 상단에 평가 대역 `[0.08, 0.50] Hz`와 `use_track=true`가 정확히 표기돼 있는지 확인.
 4. 표/도표에 `nan_rate` 열을 넣어 상수 케이스의 비율을 명시한다.

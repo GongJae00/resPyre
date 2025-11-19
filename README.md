@@ -12,6 +12,10 @@
 ## Quick Start (COHFACE + Oscillator Heads)
 
 ```bash
+# 0) (중요) 이전 결과를 재활용하지 않는다면, 기존 metrics/plots/replot만 지우고 data/aux는 그대로 두어 재평가 가능.
+#     단, 2025-11 패치 이후에는 새 dataset 메타를 적용하기 위해 estimate를 최소 1회 다시 돌려야 함.
+rm -rf results/cohface_motion_oscillator/metrics results/cohface_motion_oscillator/plots results/cohface_motion_oscillator/replot
+
 # 1) Auto profile runtime threads / device
 eval "$(python setup/auto_profile.py)"
 
@@ -21,7 +25,7 @@ for idx in 0 1 2 3 4; do
     -s estimate --num_shards 5 --shard_index $idx
 done
 
-# 3) Evaluate + Metrics (track usage enforced; spectral fallback disabled by default)
+# 3) Evaluate + Metrics (oscillator tracks only; spectral diagnostics logged)
 python run_all.py -c configs/cohface_motion_oscillator.json \
   -s evaluate metrics --auto_discover_methods true
 
@@ -31,23 +35,29 @@ python run_all.py -c configs/cohface_motion_oscillator.json \
   --auto_discover_methods true \
   --runs cohface_motion_oscillator
 
-# 4) (Optional) Fit EM-based Kalman gain for a method
+# 4) (Optional) Fit EM-based Kalman gain for a method (e.g., KFstd/PLL on COHFACE)
 python train_em.py \
   --results results/cohface_motion_oscillator \
   --dataset COHFACE \
-  --method profile1d_cubic__pll
+  --method of_farneback__kfstd
+
+#   - EM 결과(q, r)는 runs/em_params/cohface_of_farneback__kfstd.json에 저장되고,
+#     이후 run_all.py를 다시 돌리면 oscillator_KFstd가 qx_override/rv_floor_override로
+#     이 값을 자동으로 불러와 표준 공진자 칼만필터의 Q/R을 데이터 기반으로 설정합니다.
 ```
 
 - 결과는 `results/cohface_motion_oscillator/...`에 저장됩니다. `metrics/metrics_summary.txt` 외에도 `logs/method_quality.csv`, `logs/method_quality_summary.json`, `logs/methods_seen.txt`를 확인하세요.
 - `--runs`로 기존 산출물을 지정할 때는 run 라벨(예: `cohface_motion_oscillator`)이나 절대 경로를 사용하세요. `results/` 접두사는 내부적으로 자동으로 붙으므로 다시 추가하면 `results/results/...`처럼 잘못된 위치가 됩니다.
 - 동일 run 디렉터리에 `metadata.json`을 남겨 명령어·git 커밋·autotune/EM 버전·주요 메트릭 경로를 기록하는 것을 권장합니다 (템플릿은 아래 참조).
+- COHFACE 설정은 기본적으로 `gating.profile="paper"`와 `disable_gating=false`를 사용하여 tracker 품질을 자동으로 검증합니다. 논문용으로 gating을 끄고 싶다면 평가 명령어에 `--override gating.debug.disable_gating=true`를 추가하세요.
+- 전역 `oscillator.qx`는 2e-4, `preproc.robust_zscore.clip`은 3.0으로 조정되어 모션 잡음이 많은 trial에서도 공진자 기반 칼만필터가 안정적으로 동작합니다.
 
 ## Pipeline Overview
 
 The main script [run_all.py](run_all.py) drives a three-stage pipeline:
 
 1. **estimate**: Extract motion-based respiration signals (5 baselines) and pass each through an oscillator head (KFstd, UKF, Spec-Ridge, PLL).
-2. **evaluate**: Consume the oscillator-provided `track_hz` directly (no spectral fallback) while logging full quality diagnostics per trial.
+2. **evaluate**: Consume the oscillator-provided `track_hz` directly while logging full quality diagnostics per trial.
 3. **metrics**: Aggregate medians/variability, emit tables/plots, and persist `method_quality` summaries.
 
 ## Supported Methods
@@ -75,7 +85,9 @@ The following methods are implemented:
 - Baseline motion estimators (`of_farneback`, `dof`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`) can be paired with four oscillator refinement heads (`kfstd`, `ukffreq`, `spec_ridge`, `pll`) for 20 additional method names such as `of_farneback__kfstd`.
 - Use `configs/cohface_motion_oscillator.json` to run all 25 variants on COHFACE with `python run_all.py --config configs/cohface_motion_oscillator.json --step estimate evaluate metrics`.
 - Each wrapped method writes its smoothed waveform to the main pickle file and stores detailed diagnostics (signal, frequency track, RR summary, quality flags) under `results/<run_name>/aux/<method>/<trial>.npz`. Ensemble mode additionally stores each component under `aux/<method>/components/<trial>/<head>.npz`.
-- Evaluation-wide frequency bands are controlled via `eval.min_hz`/`eval.max_hz` (default `0.08–0.5 Hz`). Track outputs are always used (`gating.debug.disable_fallback=true` by default); fallback events are only recorded in the logs.
+- Evaluation-wide frequency bands are controlled via `eval.min_hz`/`eval.max_hz` (default `0.08–0.5 Hz`). For tracker-style heads (`kfstd`, `ukffreq`, `spec_ridge`, `pll`), the evaluation step now uses their own `track_hz` outputs as the primary RR estimate; pure spectral baselines (e.g., `of_farneback`) continue to use Welch-based RR estimation.
+- Oscillator heads automatically tighten/loosen their Q/R noise levels based on the spectral peak confidence and recent SNR (`spec_guidance_*` parameters in `OscillatorParams`); strong peaks damp the random walk while low-confidence trials can drift more freely.
+- PLL heads also compute a Hilbert-envelope SNR to stabilise their adaptive gains, so they remain responsive even when `_last_snr` from preprocessing is unreliable.
 - Quality columns now include `std_bpm`, `unique_fraction`, `edge_saturation_fraction`, `track_frac_saturated_eval`, and a synthetic `track_reliability` score.
 
 ### Parameter autotune & EM gain learning
@@ -93,16 +105,20 @@ The following methods are implemented:
 }
 ```
 - Additional coarse frequency initialisers (Welch/autocorr/Hilbert) are blended by confidence; their candidates are preserved in `meta["coarse_candidates"]`.
+- Spectral guidance hooks are enabled by default (`spec_guidance_strength`, `spec_guidance_offset`, `spec_guidance_confidence_scale`, `spec_guidance_snr_scale`), so you can tune how aggressively the Kalman/PLL noise drops when the spectral peak is clean.
 - **EM gain optimisation:** after running `estimate` (and storing tracks), execute
 
 ```bash
 python train_em.py \
   --results results/cohface_motion_oscillator \
   --dataset COHFACE \
-  --method profile1d_cubic__pll
+  --method profile1d_cubic__pll \
+  --build_autotune
 ```
 
 This stacks every `aux/<method>/<trial>.npz` track, fits Q/R via EM, saves `runs/em_params/cohface_profile1d_cubic__pll.json`, and appends a row to `runs/em_logs/em_training.csv`. The oscillator heads automatically load these Q/R overrides on the next run.
+
+When `--build_autotune` is set, the script also inspects the per-trial metrics, finds the top-K (default 5) lowest-MAE trials, and writes an autotune override (`runs/autotune/cohface/<method>.json`) whose `rv_floor_override`/`qx_override` come from their median `sigma_hat`/SNR statistics. You can adjust this behaviour with `--autotune-top-k`, `--autotune-rv-scale`, and `--autotune-qx-base`.
 
 ### PLL / Spec-Ridge upgrades & Ensemble mode
 
@@ -136,7 +152,6 @@ The ensemble stores both the fused track and the component outputs so you can co
 {
   "command": "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics",
   "git_commit": "<abc1234>",
-  "gating": {"disable_fallback": true},
   "autotune": "runs/autotune/cohface/...",
   "em_params": "runs/em_params/cohface_profile1d_cubic__pll.json",
   "metrics": "results/cohface_motion_oscillator/metrics/metrics_summary.txt"
@@ -161,7 +176,6 @@ After every run, create a `metadata.json` alongside `metrics/` summarising the c
 {
   "command": "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics",
   "git_commit": "<commit>",
-  "gating": {"disable_fallback": true},
   "autotune": "runs/autotune/cohface/profile1d_cubic__pll.json",
   "em_params": "runs/em_params/cohface_profile1d_cubic__pll.json",
   "ensemble": false,
@@ -204,13 +218,12 @@ For publication-ready reporting, disable gating-based promotions and keep the UK
 ```bash
 python run_all.py --config configs/cohface_motion_oscillator.json --step evaluate metrics \
   --override gating.debug.disable_gating=true \
-  --override gating.common.constant_ptp_max_hz=0.0 \
-  --override heads.ukffreq.qf=3e-4 \
-  --override heads.ukffreq.qx=1e-4 \
-  --override heads.ukffreq.rv_floor=0.03
+  --override gating.common.constant_ptp_max_hz=0.0
 ```
 
-This combination guarantees that constant-track promotion stays off (so PCC/CCC remain `NaN` whenever the prediction is truly constant) and that the UKF frequency tracker admits slow respiratory drifts instead of collapsing to 0 variance. When aggregating metrics, always report the accompanying `nan_rate` to show how many windows produced valid correlation scores; `kfstd` is intentionally constant, so treat its MAE/RMSE as the primary indicators.
+This combination guarantees that constant-track promotion stays off (so the Pearson correlation `R` remains `NaN` whenever the prediction is truly constant) and that the UKF frequency tracker admits slow respiratory drifts instead of collapsing to 0 variance. Internally, the UKF random-walk variance `qf` is now bounded to stay within a reasonable range (≈0.1–10× the configured base value), which prevents the frequency track from becoming completely frozen or numerically unstable under aggressive spectral guidance. When aggregating metrics, always report the accompanying `nan_rate` to show how many windows produced valid correlation scores. The `kfstd` head now implements a standard linear Kalman smoother on a damped oscillator state-space model and derives a dynamic respiratory frequency track from the smoothed oscillator phase; interpret its performance using the same set of metrics (MAE/RMSE/R/SNR plus `nan_rate`) as the other tracker heads.
+
+If you need the gentler UKF parameters shown above (`qf=3e-4`, `qx=1e-4`, `rv_floor=0.03`), edit your config (either `configs/cohface_motion_oscillator.json` or a copy) and set them inside the shared `oscillator` block or within the specific `profile1d_*__ukffreq` method entry. CLI `--override heads.*` flags are not parsed by `run_all.py`, so the values must live in the config.
 
 ## Extending the Code
 
@@ -352,8 +365,8 @@ flowchart LR
     subgraph trackers["Tracker Head (Parallel)"]
         direction TB
         subgraph kf["KFstd"]
-            kfin["Fixed-frequency Kalman smoother\nState [x1, x2]"]
-            kfout["ŝ_KF(t), track_hz=f₀,\nA=√(x̂1²+x̂2²), φ=atan2(x̂2,x̂1)"]
+            kfin["Oscillator Kalman smoother\nState [x1, x2] on F(ρ,ω₀)"]
+            kfout["ŝ_KF(t)=x̂₁(t), track_hz≈(1/2π)dφ/dt,\nA=√(x̂1²+x̂2²), φ=atan2(x̂2,x̂1)"]
             kfin --> kfout
         end
         subgraph ukf["UKF"]
@@ -379,3 +392,8 @@ flowchart LR
     trackers --> payload["Result Payload\n{signal_hat, track_hz, rr_bpm, meta}"]
 
 ```
+- **실행 체크리스트:**  
+  1. `run_all.py -s estimate`를 최소 1회 실행해 `dataset_name=cohface`가 기록된 최신 aux를 생성한다(EM/autotune 로더는 이 문자열을 사용한다).  
+  2. `runs/em_params/cohface_<method>.json`과 `runs/autotune/cohface/<method>.json`이 준비돼 있는지 확인한다.  
+  3. `run_all.py -s evaluate metrics --auto_discover_methods true`를 실행하면 fallback 없이 모든 트랙이 그대로 평가되며, 품질 지표는 `results/<run>/logs/method_quality*.{csv,json}`에서 확인한다.  
+  4. 필요 시 Optuna/EM 학습을 돌리면 새 JSON이 즉시 적용된다(추가 재시작 불필요).

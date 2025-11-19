@@ -50,7 +50,7 @@ DEFAULT_WEIGHTS = {
     'rmse': 0.15
 }
 TRIAL_CSV_FIELDS = [
-    'trial', 'objective', 'MAE_bpm_med', 'RMSE_bpm_med', 'PCC_mean', 'CCC_mean',
+    'trial', 'objective', 'MAE_bpm_med', 'RMSE_bpm_med', 'R_mean', 'SNR_med',
     'edge_sat', 'nan_rate', 'jerk_hzps', 'em_q', 'em_r', 'em_ll', 'params'
 ]
 
@@ -178,22 +178,23 @@ class ParamSpec:
 # WHY: Adult respiration (0.1–0.4 Hz) at 64 Hz → gentle drift, narrow noise floors; trim non-identifiable/unused params.
 FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
     'ukffreq': [
-        ParamSpec('oscillator.qf', 'float', 5e-6, 5e-5, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.03, 0.08),
-        ParamSpec('oscillator.tau_env', 'float', 25.0, 40.0),
-        ParamSpec('oscillator.ukf_alpha', 'float', 0.03, 0.12),
+        ParamSpec('oscillator.qf', 'float', 1.5e-4, 6e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.06),
+        ParamSpec('oscillator.tau_env', 'float', 24.0, 42.0),
+        ParamSpec('oscillator.qx', 'float', 5e-5, 3e-4, log=True),
+        ParamSpec('oscillator.ukf_alpha', 'float', 0.05, 0.12),
         ParamSpec('oscillator.ukf_beta', 'choice', choices=[2.0]),
     ],
     'pll': [
-        ParamSpec('oscillator.pll_zeta', 'float', 0.8, 1.0),
-        ParamSpec('oscillator.pll_ttrack', 'float', 6.0, 9.0),
-        ParamSpec('oscillator.pll_kp_min', 'float', 1e-5, 1e-3, log=True),
-        ParamSpec('oscillator.pll_ki_min', 'float', 1e-5, 1e-3, log=True),
+        ParamSpec('oscillator.pll_zeta', 'float', 0.7, 1.0),
+        ParamSpec('oscillator.pll_ttrack', 'float', 4.0, 8.0),
+        ParamSpec('oscillator.pll_kp_min', 'float', 5e-5, 5e-3, log=True),
+        ParamSpec('oscillator.pll_ki_min', 'float', 5e-6, 5e-4, log=True),
     ],
     'kfstd': [
-        ParamSpec('oscillator.qx', 'float', 3e-6, 3e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 1e-2, 5e-2, log=True),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.90, 0.96),
+        ParamSpec('oscillator.qx', 'float', 1e-4, 6e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.05, log=True),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.85, 0.95),
     ],
     'spec_ridge': [
         ParamSpec('oscillator.stft_win', 'int', 10, 14),
@@ -208,24 +209,24 @@ FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
 # WHY: Seed each head near physiologic mid-points so Optuna explores narrow, safe bands.
 FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     'ukffreq': {
-        'oscillator.qf': 5e-5,
+        'oscillator.qf': 3e-4,
         'oscillator.qx': 1e-4,
-        'oscillator.rv_floor': 0.05,
-        'oscillator.tau_env': 30.0,
-        'oscillator.ukf_alpha': 0.06,
+        'oscillator.rv_floor': 0.03,
+        'oscillator.tau_env': 32.0,
+        'oscillator.ukf_alpha': 0.08,
         'oscillator.ukf_beta': 2.0,
         'oscillator.ukf_kappa': 0.0,
     },
     'pll': {
-        'oscillator.pll_zeta': 0.9,
-        'oscillator.pll_ttrack': 7.0,
-        'oscillator.pll_kp_min': 1e-4,
-        'oscillator.pll_ki_min': 1e-3,
+        'oscillator.pll_zeta': 0.85,
+        'oscillator.pll_ttrack': 5.5,
+        'oscillator.pll_kp_min': 3e-4,
+        'oscillator.pll_ki_min': 2e-5,
     },
     'kfstd': {
-        'oscillator.qx': 1e-6,
-        'oscillator.rv_floor': 1e-2,
-        'oscillator.post_smooth_alpha': 0.92,
+        'oscillator.qx': 2.5e-4,
+        'oscillator.rv_floor': 0.03,
+        'oscillator.post_smooth_alpha': 0.9,
     },
     'spec_ridge': {
         'oscillator.stft_win': 12,
@@ -301,14 +302,14 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
     name_to_idx = {name: idx for idx, name in enumerate(metric_names)}
     mae_vals: List[float] = []
     rmse_vals: List[float] = []
-    pcc_vals: List[float] = []
-    ccc_vals: List[float] = []
+    r_vals: List[float] = []
+    snr_vals: List[float] = []
     edge_vals: List[float] = []
     nan_vals: List[float] = []
     jerk_vals: List[float] = []
     idx_mae = name_to_idx.get('MAE')
-    idx_pcc = name_to_idx.get('PCC')
-    idx_ccc = name_to_idx.get('CCC')
+    idx_r = name_to_idx.get('R') or name_to_idx.get('PCC') or name_to_idx.get('PearsonR')
+    idx_snr = name_to_idx.get('SNR')
 
     def _ae_samples_bpm(record):
         arr = record.get('ae_bpm')
@@ -406,12 +407,16 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
         rmse_stat = _rmse_error(ae_samples)
         if rmse_stat is not None:
             rmse_vals.append(rmse_stat)
-        pcc_stat = _corr_value(record, metrics, idx_pcc, ('pcc', 'pearson'))
-        if pcc_stat is not None:
-            pcc_vals.append(pcc_stat)
-        ccc_stat = _corr_value(record, metrics, idx_ccc, ('ccc', 'lincc', 'linccc'))
-        if ccc_stat is not None:
-            ccc_vals.append(ccc_stat)
+        r_stat = _corr_value(record, metrics, idx_r, ('r', 'pcc', 'pearson'))
+        if r_stat is not None:
+            r_vals.append(r_stat)
+        if idx_snr is not None and idx_snr < len(metrics):
+            try:
+                snr_stat = float(metrics[idx_snr])
+            except Exception:
+                snr_stat = None
+            if snr_stat is not None and np.isfinite(snr_stat):
+                snr_vals.append(snr_stat)
         edge_stat = _edge_fraction(record)
         if edge_stat is not None:
             edge_vals.append(edge_stat)
@@ -431,8 +436,8 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
     return {
         'MAE_bpm_med': _extract_metric(mae_vals, np.nanmedian),
         'RMSE_bpm_med': _extract_metric(rmse_vals, np.nanmedian),
-        'PCC_mean': _extract_metric(pcc_vals, np.nanmean),
-        'CCC_mean': _extract_metric(ccc_vals, np.nanmean),
+        'R_mean': _extract_metric(r_vals, np.nanmean),
+        'SNR_med': _extract_metric(snr_vals, np.nanmedian),
         'edge_sat': _extract_metric(edge_vals, np.nanmean),
         'nan_rate': _extract_metric(nan_vals, np.nanmean),
         'jerk_hzps': _extract_metric(jerk_vals, np.nanmedian),
@@ -534,8 +539,8 @@ class MethodStudy:
             'objective': objective,
             'MAE_bpm_med': summary.get('MAE_bpm_med'),
             'RMSE_bpm_med': summary.get('RMSE_bpm_med'),
-            'PCC_mean': summary.get('PCC_mean'),
-            'CCC_mean': summary.get('CCC_mean'),
+            'R_mean': summary.get('R_mean'),
+            'SNR_med': summary.get('SNR_med'),
             'edge_sat': summary.get('edge_sat'),
             'nan_rate': summary.get('nan_rate'),
             'jerk_hzps': summary.get('jerk_hzps'),
@@ -587,7 +592,7 @@ class MethodStudy:
         cfg['results_dir'] = str(results_dir)
         cfg.setdefault('name', f"optuna_{self.method}")
         self._apply_family_defaults(cfg)
-        self._apply_no_fallback(cfg)
+        self._apply_track_enforcement(cfg)
         for path, value in params.items():
             _set_nested(cfg, path, value)
         tmp_dir = Path(tempfile.mkdtemp(prefix=f"optuna_{self.method}_"))
@@ -617,7 +622,7 @@ class MethodStudy:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return summary, em_result, trial_root
 
-    def _apply_no_fallback(self, cfg: Dict) -> None:
+    def _apply_track_enforcement(self, cfg: Dict) -> None:
         gating = cfg.setdefault('gating', {})
         gating.setdefault('debug', {})['disable_gating'] = True
         common = gating.setdefault('common', {})
@@ -723,8 +728,8 @@ def aggregate_best_entries(output_root: Path, allowed_methods: Optional[Sequence
                 'family': data.get('family', family_dir.name),
                 'objective': data.get('objective'),
                 'MAE_bpm_med': data.get('metrics', {}).get('MAE_bpm_med'),
-                'PCC_mean': data.get('metrics', {}).get('PCC_mean'),
-                'CCC_mean': data.get('metrics', {}).get('CCC_mean'),
+                'R_mean': data.get('metrics', {}).get('R_mean'),
+                'SNR_med': data.get('metrics', {}).get('SNR_med'),
                 'edge_sat': data.get('metrics', {}).get('edge_sat'),
                 'nan_rate': data.get('metrics', {}).get('nan_rate'),
                 'jerk_hzps': data.get('metrics', {}).get('jerk_hzps'),
@@ -738,8 +743,8 @@ def aggregate_best_entries(output_root: Path, allowed_methods: Optional[Sequence
     rows.sort(key=lambda r: (
         r['objective'] if isinstance(r.get('objective'), (int, float)) else float('inf'),
         r.get('MAE_bpm_med', float('inf')),
-        -(r.get('CCC_mean') or -float('inf')),
-        -(r.get('PCC_mean') or -float('inf'))
+        -(r.get('R_mean') or -float('inf')),
+        -(r.get('SNR_med') or -float('inf'))
     ))
     return rows
 
@@ -752,7 +757,7 @@ def update_leaderboard(output_root: Path, allowed_methods: Optional[Sequence[str
     dashboards.mkdir(parents=True, exist_ok=True)
     leaderboard = dashboards / 'leaderboard.csv'
     with open(leaderboard, 'w', newline='', encoding='utf-8') as fp:
-        fieldnames = ['method', 'family', 'objective', 'MAE_bpm_med', 'PCC_mean', 'CCC_mean', 'edge_sat', 'nan_rate', 'jerk_hzps', 'best_json_path']
+        fieldnames = ['method', 'family', 'objective', 'MAE_bpm_med', 'R_mean', 'SNR_med', 'edge_sat', 'nan_rate', 'jerk_hzps', 'best_json_path']
         writer = csv.DictWriter(fp, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:

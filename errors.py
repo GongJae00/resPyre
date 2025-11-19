@@ -23,7 +23,7 @@ def getErrors(bpmES, bpmGT, timesES, timesGT, metrics):
             e = MAPEerror(bpmES, bpmGT, timesES, timesGT)
         elif m == 'MAX':
             e = MAXError(bpmES, bpmGT, timesES, timesGT)
-        elif m == 'PCC':
+        elif m in ('PCC', 'R', 'PearsonR'):
             e = PearsonCorr(bpmES, bpmGT, timesES, timesGT)
         elif m == 'CCC':
             e = LinCorr(bpmES, bpmGT, timesES, timesGT)
@@ -159,9 +159,13 @@ def LinCorr(bpmES, bpmGT, timesES=None, timesGT=None):
     return round(float(result), 2)
 
 
-def printErrors(RMSE, MAE, MAX, PCC, CCC):
-    print("\n    * Errors: RMSE = %.2f, MAE = %.2f, MAX = %.2f, PCC = %.2f, CCC = %.2f" %
-          (RMSE, MAE, MAX, PCC, CCC))
+def printErrors(RMSE, MAE, MAX, R, CCC=None):
+    if CCC is None:
+        print("\n    * Errors: RMSE = %.2f, MAE = %.2f, MAX = %.2f, R = %.2f" %
+              (RMSE, MAE, MAX, R))
+    else:
+        print("\n    * Errors: RMSE = %.2f, MAE = %.2f, MAX = %.2f, R = %.2f, CCC = %.2f" %
+              (RMSE, MAE, MAX, R, CCC))
 
 
 def displayErrors(bpmES, bpmGT, timesES=None, timesGT=None):

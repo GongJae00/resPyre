@@ -25,7 +25,7 @@ from config_loader import load_config
 _STEP_PROF = defaultdict(lambda: {"calls": 0, "total": 0.0})
 _PROFILE_STEPS = True
 
-PRIMARY_METRICS = ['RMSE', 'MAE', 'MAPE', 'PCC', 'CCC']
+PRIMARY_METRICS = ['RMSE', 'MAE', 'MAPE', 'R', 'SNR']
 
 # Datasets class definitions
 
@@ -548,6 +548,42 @@ def _base_of_method(name):
 	return name.split('__', 1)[0].lower()
 
 
+def _display_method_key(name):
+	"""
+	Stable display ordering for methods.
+
+	For oscillator-wrapped motion methods we want:
+	  base, base__kfstd, base__ukffreq, base__spec_ridge, base__pll
+	in that order, and bases ordered as:
+	  of_farneback, dof, profile1d_linear, profile1d_quadratic, profile1d_cubic.
+	All other methods fall back to alphabetical order after these.
+	"""
+	if not isinstance(name, str):
+		return (99, 99, str(name))
+	lname = name.lower()
+	if '__' in lname:
+		base, head = lname.split('__', 1)
+	else:
+		base, head = lname, ''
+	base_order = (
+		'of_farneback',
+		'dof',
+		'profile1d_linear',
+		'profile1d_quadratic',
+		'profile1d_cubic',
+	)
+	head_order = ('', 'kfstd', 'ukffreq', 'spec_ridge', 'pll')
+	try:
+		base_idx = base_order.index(base)
+	except ValueError:
+		base_idx = len(base_order) + 1
+	try:
+		head_idx = head_order.index(head)
+	except ValueError:
+		head_idx = len(head_order) + 1
+	return (base_idx, head_idx, lname)
+
+
 def _ensure_dir(path):
 	os.makedirs(path, exist_ok=True)
 	return path
@@ -797,7 +833,10 @@ def _discover_methods_from_aux(run_dir):
 
 
 _TRACKER_SUFFIXES = {'pll', 'kfstd', 'ukffreq'}
-_SPECTRAL_SUFFIXES = {'spec_ridge'}
+# Suffix-based spectral classification is currently unused for oscillator heads:
+# spec_ridge-wrapped methods produce their own track_hz and should therefore be
+# treated as tracker-like in the evaluation pipeline.
+_SPECTRAL_SUFFIXES = set()
 _DEFAULT_GATING_CFG = {
 	'common': {
 		'use_track': None,
@@ -813,9 +852,9 @@ _DEFAULT_GATING_CFG = {
 		'std_is_soft': False
 	},
 	'spectral': {
-		'peak_ratio_min': 1.5,
-		'prominence_min_db': 3.0,
-		'fwhm_max_hz': 0.08,
+		'peak_ratio_min': 1.2,
+		'prominence_min_db': 1.5,
+		'fwhm_max_hz': 0.12,
 		'fwhm_df_guard': 1.25
 	},
 	'debug': {
@@ -829,7 +868,7 @@ _BUILTIN_GATING_PROFILES = {
 			'use_track': True,
 			'saturation_margin_hz': 0.005,
 			'saturation_persist_sec': 1.0,
-			'constant_ptp_max_hz': 0.008
+			'constant_ptp_max_hz': 0.0
 		},
 		'tracker': {
 			'std_min_bpm': 0.05,
@@ -837,7 +876,11 @@ _BUILTIN_GATING_PROFILES = {
 			'saturation_max': 0.4,
 			'std_is_soft': False
 		},
-		'spectral': {}
+		'spectral': {
+			'peak_ratio_min': 1.05,
+			'prominence_min_db': 0.5,
+			'fwhm_max_hz': 0.20
+		}
 	},
 	'paper': {
 		'common': {
@@ -967,6 +1010,74 @@ def _spectral_stats_from_signal(filtered_sig, fps, win_seconds, min_hz, max_hz):
 	return stats
 
 
+def _spectral_snr_from_stats(stats):
+	if not isinstance(stats, dict):
+		return float('nan')
+	peak_ratio = stats.get('peak_ratio')
+	try:
+		peak_ratio = float(peak_ratio)
+	except (TypeError, ValueError):
+		peak_ratio = float('nan')
+	if np.isfinite(peak_ratio) and peak_ratio > 0:
+		return float(10.0 * np.log10(max(peak_ratio, 1e-6)))
+	prom_db = stats.get('prominence_db')
+	try:
+		prom_db = float(prom_db)
+	except (TypeError, ValueError):
+		prom_db = float('nan')
+	return prom_db if np.isfinite(prom_db) else float('nan')
+
+
+def _band_snr_from_signal(filtered_sig, fps, min_hz, max_hz):
+	"""Fallback SNR estimate based on Welch band power ratios."""
+	try:
+		signal_array = np.asarray(filtered_sig, dtype=np.float64)
+		if signal_array.size == 0:
+			return float('nan')
+		if signal_array.ndim == 1:
+			signal_array = signal_array[np.newaxis, :]
+		try:
+			fps_val = float(fps)
+		except (TypeError, ValueError):
+			return float('nan')
+		if not np.isfinite(fps_val) or fps_val <= 0.0:
+			return float('nan')
+		snr_samples = []
+		nperseg = max(64, int(round(fps_val * 4.0)))
+		noverlap = max(1, int(round(0.5 * nperseg)))
+		sig_lo = max(0.01, float(min_hz))
+		sig_hi = max(sig_lo + 1e-6, float(max_hz))
+		noise_hi = max(sig_hi * 3.0, sig_hi + 0.75)
+		for row in signal_array:
+			row = np.asarray(row, dtype=np.float64).reshape(-1)
+			row = row[np.isfinite(row)]
+			if row.size < max(32, nperseg // 4):
+				continue
+			cur_nperseg = min(nperseg, row.size)
+			cur_noverlap = min(noverlap, max(cur_nperseg - 1, 1))
+			with np.errstate(invalid='ignore'):
+				freqs, psd = signal.welch(row, fs=fps_val, nperseg=cur_nperseg, noverlap=cur_noverlap)
+			if freqs.size == 0 or psd.size == 0:
+				continue
+			signal_mask = (freqs >= sig_lo) & (freqs <= sig_hi)
+			noise_mask = (freqs >= 0.01) & (freqs <= noise_hi) & (~signal_mask)
+			if not np.any(signal_mask) or not np.any(noise_mask):
+				continue
+			signal_power = float(np.trapz(psd[signal_mask], freqs[signal_mask]))
+			noise_power = float(np.trapz(psd[noise_mask], freqs[noise_mask]))
+			if not np.isfinite(signal_power) or not np.isfinite(noise_power):
+				continue
+			if noise_power <= 0.0:
+				continue
+			ratio = max(signal_power, 1e-12) / max(noise_power, 1e-12)
+			snr_samples.append(10.0 * np.log10(ratio))
+		if snr_samples:
+			return float(np.nanmedian(np.asarray(snr_samples, dtype=np.float64)))
+	except Exception:
+		return float('nan')
+	return float('nan')
+
+
 def _spectral_quality_flags(stats, cfg, disable=False):
 	flags = {'low_ratio': False, 'low_prom': False, 'wide_fwhm': False}
 	if disable or not stats:
@@ -1089,7 +1200,7 @@ def _quality_row_from_record(method, record):
 	data_file = quality.get('data_file') or record.get('data_file')
 	capability = record.get('capability')
 	source = record.get('source') or quality.get('source_label')
-	is_tracker_fallback = bool(capability == 'tracker' and source == 'fallback')
+	triggered_reason = quality.get('gating_trigger_reason') or record.get('gating_trigger_reason')
 	row = {
 		'method': method,
 		'capability': capability,
@@ -1098,9 +1209,7 @@ def _quality_row_from_record(method, record):
 		'source': source,
 		'track_used': int(bool(quality.get('track_used'))),
 		'track_candidate_present': int(bool(quality.get('track_candidate_present'))),
-		'is_fallback': int(is_tracker_fallback),
 		'degenerate_reason': record.get('degenerate_reason'),
-		'fallback_from': record.get('fallback_from'),
 		'std_bpm': track_stats.get('std_bpm'),
 		'unique_fraction': track_stats.get('unique_fraction'),
 		'track_dyn_range_hz_ptp': track_stats.get('track_dyn_range_hz_ptp'),
@@ -1118,9 +1227,10 @@ def _quality_row_from_record(method, record):
 		'flag_low_prom': int(bool(flags.get('low_prom'))),
 		'flag_wide_fwhm': int(bool(flags.get('wide_fwhm'))),
 		'std_is_soft': int(bool(quality.get('std_is_soft'))),
-		'std_violation_soft': int(bool(quality.get('std_violation_soft')))
+		'std_violation_soft': int(bool(quality.get('std_violation_soft'))),
+		'gating_trigger_reason': triggered_reason
 	}
-	return row, is_tracker_fallback
+	return row
 
 
 def _persist_quality_reports(method_metrics, results_dir):
@@ -1132,12 +1242,12 @@ def _persist_quality_reports(method_metrics, results_dir):
 	summary_path = os.path.join(logs_dir, 'method_quality_summary.json')
 	headers = [
 		'method', 'capability', 'trial', 'data_file', 'source', 'track_used',
-		'track_candidate_present', 'is_fallback', 'degenerate_reason', 'fallback_from',
+		'track_candidate_present', 'degenerate_reason',
 		'std_bpm', 'unique_fraction', 'track_dyn_range_hz_ptp', 'median_hz',
-		'edge_saturation_fraction', 'constant_track_promoted', 'spectral_peak_ratio',
+		'edge_saturation_fraction', 'snr_estimate', 'constant_track_promoted', 'spectral_peak_ratio',
 		'spectral_prominence_db', 'spectral_fwhm_hz', 'spectral_welch_df_hz',
 		'flag_std', 'flag_uniq', 'flag_sat', 'flag_low_ratio', 'flag_low_prom',
-		'flag_wide_fwhm', 'std_is_soft', 'std_violation_soft'
+		'flag_wide_fwhm', 'std_is_soft', 'std_violation_soft', 'gating_trigger_reason'
 	]
 	rows = []
 	method_summaries = {}
@@ -1145,32 +1255,22 @@ def _persist_quality_reports(method_metrics, results_dir):
 	overall_fwhm = []
 	overall_total = 0
 	overall_tracker_total = 0
-	overall_fallback = 0
-	overall_reasons = defaultdict(int)
 	for method, records in (method_metrics or {}).items():
 		if not records:
 			continue
-		fallback_reasons = defaultdict(int)
 		peak_vals = []
 		fwhm_vals = []
 		total = 0
-		fallbacks = 0
 		track_sources = 0
 		for record in records:
 			total += 1
-			row, is_fallback = _quality_row_from_record(method, record)
+			row = _quality_row_from_record(method, record)
 			rows.append(row)
 			source = row['source']
 			if record.get('capability') == 'tracker' and source == 'track':
 				track_sources += 1
 			if record.get('capability') == 'tracker':
 				overall_tracker_total += 1
-			if is_fallback:
-				fallbacks += 1
-				overall_fallback += 1
-				reason = record.get('degenerate_reason') or 'unknown'
-				fallback_reasons[reason] += 1
-				overall_reasons[reason] += 1
 			spectral_stats = record.get('spectral_stats') or {}
 			peak = spectral_stats.get('peak_ratio')
 			if peak is not None and np.isfinite(peak):
@@ -1183,9 +1283,6 @@ def _persist_quality_reports(method_metrics, results_dir):
 		method_summaries[method] = {
 			'total': total,
 			'track_source': track_sources,
-			'fallbacks': fallbacks,
-			'fallback_rate': float(fallbacks / total) if total else 0.0,
-			'fallback_reasons': dict(fallback_reasons),
 			'spectral_stats': {
 				'peak_ratio': _percentile_summary(peak_vals),
 				'fwhm_hz': _percentile_summary(fwhm_vals)
@@ -1197,16 +1294,12 @@ def _persist_quality_reports(method_metrics, results_dir):
 		'overall': {
 			'total': overall_total,
 			'tracker_total': overall_tracker_total,
-			'fallbacks': overall_fallback,
-			'fallback_reasons': dict(overall_reasons),
 			'spectral_stats': {
 				'peak_ratio': _percentile_summary(overall_peak),
 				'fwhm_hz': _percentile_summary(overall_fwhm)
 			}
 		}
 	}
-	rate_denom = overall_tracker_total if overall_tracker_total else overall_total
-	quality_payload['overall']['fallback_rate'] = float(overall_fallback / rate_denom) if rate_denom else 0.0
 	try:
 		with open(csv_path, 'w', newline='', encoding='utf-8') as fp:
 			writer = csv.DictWriter(fp, fieldnames=headers)
@@ -1220,8 +1313,7 @@ def _persist_quality_reports(method_metrics, results_dir):
 			json.dump(quality_payload, fp, ensure_ascii=False, indent=2)
 	except Exception as exc:
 		print(f"> Warning: failed to write quality summary JSON ({exc})")
-	fallback_rate = quality_payload['overall']['fallback_rate']
-	return f"> Quality reports saved ({csv_path}, {summary_path}) | tracker fallback rate={fallback_rate * 100:.2f}%"
+	return f"> Quality reports saved ({csv_path}, {summary_path})"
 
 
 @timed_step('evaluate')
@@ -1254,7 +1346,8 @@ def evaluate(
 	gating_common = gating_cfg.get('common', {})
 	tracker_gating_cfg = gating_cfg.get('tracker', {})
 	spectral_gating_cfg = gating_cfg.get('spectral', {})
-	disable_gating = bool(gating_cfg.get('debug', {}).get('disable_gating', False))
+	debug_gating_cfg = gating_cfg.get('debug', {})
+	disable_gating = bool(debug_gating_cfg.get('disable_gating', False))
 	if gating_common.get('use_track') is not None:
 		use_track = bool(gating_common.get('use_track'))
 	if gating_common.get('saturation_margin_hz') is not None:
@@ -1350,8 +1443,10 @@ def evaluate(
 	}
 
 	method_metrics = {}
+	method_metrics_spectral = {}
+	records_written = 0
 
-	# Prefer new structure: results_dir/data/*.pkl, fallback to flat files
+	# Prefer new structure: results_dir/data/*.pkl, otherwise read flat files
 	data_dir = os.path.join(results_dir, 'data')
 	if os.path.isdir(data_dir):
 		files = [os.path.join('data', f) for f in utils.sort_nicely(os.listdir(data_dir)) if f.endswith('.pkl')]
@@ -1386,6 +1481,12 @@ def evaluate(
 	except Exception:
 		logs_dir = None
 		debug_log_path = None
+
+	if not files:
+		raise RuntimeError(
+			f"No extracted .pkl files found under '{results_dir}'. "
+			"Run the estimate step first or pass the correct --runs directory."
+		)
 
 	for filepath in tqdm(files, desc="Processing files"):
 		tqdm.write("> Processing file %s" % (filepath))
@@ -1455,7 +1556,7 @@ def evaluate(
 		gt_rpm_full = gt_rpm_series.copy()
 		t_gt_full = t_gt.copy()
 
-		def _align_to_gt_grid(pred_times, pred_values):
+	def _align_to_gt_grid(pred_times, pred_values):
 			pred_times = np.asarray(pred_times, dtype=np.float64).reshape(-1) if pred_times is not None else np.asarray([], dtype=np.float64)
 			pred_values = np.asarray(pred_values, dtype=np.float64).reshape(-1) if pred_values is not None else np.asarray([], dtype=np.float64)
 			if pred_times.size and pred_values.size and pred_times.size != pred_values.size:
@@ -1492,6 +1593,57 @@ def evaluate(
 			gt_aligned = gt_rpm_full[sorted_gt_idx]
 			times_aligned = t_gt_full[sorted_gt_idx]
 			return pred_aligned, gt_aligned, times_aligned, meta
+
+	def _build_rr_record(rr_values, rr_times, snr_value, source_label):
+		rr_values = np.asarray(rr_values, dtype=np.float64).reshape(-1)
+		rr_times = np.asarray(rr_times, dtype=np.float64).reshape(-1)
+		if rr_values.size == 0 or rr_times.size == 0:
+			return None
+		sig_aligned, gt_aligned, times_aligned, align_meta = _align_to_gt_grid(rr_times, rr_values)
+		align_meta['len_pred'] = rr_times.size
+		align_meta['len_gt'] = gt_rpm_full.size
+		record = {
+			'source': source_label,
+			'aligned': bool(align_meta.get('aligned', False)),
+			'len_gt': int(align_meta.get('len_gt', 0)),
+			'len_pred': int(align_meta.get('len_pred', 0)),
+			'len_final': int(align_meta.get('len_final', 0)),
+			'len_valid': int(align_meta.get('len_valid', 0)),
+			'alignment': align_meta,
+		}
+		if sig_aligned.size == 0 or gt_aligned.size == 0:
+			record['metrics'] = [float('nan')] * len([m for m in metrics if m])
+			return record
+		finite_mask = np.isfinite(sig_aligned) & np.isfinite(gt_aligned)
+		sig_valid = sig_aligned[finite_mask]
+		gt_valid = gt_aligned[finite_mask]
+		times_valid = times_aligned[finite_mask]
+		if sig_valid.size < 2 or gt_valid.size < 2:
+			record['metrics'] = [float('nan')] * len([m for m in metrics if m])
+			return record
+		metrics_for_errors = [m for m in metrics if m not in ('SNR',)]
+		e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics_for_errors)
+		raw_core_metrics = e[:-1]
+		metric_values = []
+		core_iter = iter(raw_core_metrics)
+		for metric_name in metrics:
+			if metric_name == 'SNR':
+				try:
+					metric_values.append(float(snr_value))
+				except (TypeError, ValueError):
+					metric_values.append(float('nan'))
+				continue
+			val = next(core_iter, float('nan'))
+			try:
+				metric_values.append(float(val))
+			except Exception:
+				try:
+					arr = np.atleast_1d(val).astype(float)
+					metric_values.append(float(arr.flat[0]))
+				except Exception:
+					metric_values.append(float('nan'))
+		record['metrics'] = metric_values
+		return record
 
 		def _spectral_estimate_on_grid(filtered_sig, fps_val, window_size, centers):
 			if filtered_sig is None or filtered_sig.size == 0:
@@ -1570,7 +1722,9 @@ def evaluate(
 				'wide_fwhm': False
 			}
 			spectral_stats = {}
-			fallback_from = None
+			spec_rr_values = np.asarray([], dtype=np.float64)
+			spec_rr_times = np.asarray([], dtype=np.float64)
+			spec_stats_for_record = {}
 			is_trustworthy = True
 			if cur_method == 'OF_Deep':
 				cur_method += ofdeep_models[i]
@@ -1681,7 +1835,19 @@ def evaluate(
 					degenerate_track = True
 					if degenerate_reason is None:
 						degenerate_reason = 'low_unique'
-	
+			else:
+				if capability != 'tracker':
+					sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
+					spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
+					spec_rr_values = sig_rpm_values.copy()
+					spec_rr_times = np.asarray(t_sig).copy()
+					spec_stats_for_record = spectral_stats
+					track_used = True
+				else:
+					spectral_stats = {}
+					spec_rr_values, spec_rr_times = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
+					spec_stats_for_record = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
+
 			# Absolute margin in Hz prevents penalising physiologic extremes near the band edges.
 			band_hz = float(max_hz) - float(min_hz)
 			edge_margin_hz = float(saturation_margin_hz)
@@ -1730,6 +1896,35 @@ def evaluate(
 			finite_rpm = np.asarray([], dtype=np.float64)
 			allow_constant_track = bool(track_meta.get('is_constant_track')) if isinstance(track_meta, dict) else False
 			meta_for_stats = dict(track_meta) if isinstance(track_meta, dict) else {}
+			raw_snr = meta_for_stats.get('snr_estimate')
+			try:
+				snr_estimate = float(raw_snr)
+			except (TypeError, ValueError):
+				snr_estimate = float('nan')
+			if (capability != 'tracker') and (not np.isfinite(snr_estimate)):
+				spec_local = spectral_stats or {}
+				peak_ratio = spec_local.get('peak_ratio')
+				if peak_ratio is not None:
+					try:
+						peak_ratio = float(peak_ratio)
+					except (TypeError, ValueError):
+						peak_ratio = float('nan')
+					if np.isfinite(peak_ratio) and peak_ratio > 0:
+						snr_estimate = float(10.0 * np.log10(max(peak_ratio, 1e-6)))
+				if (not np.isfinite(snr_estimate)) and spec_local:
+					prom_db = spec_local.get('prominence_db')
+					try:
+						prom_db = float(prom_db)
+					except (TypeError, ValueError):
+						prom_db = float('nan')
+					if np.isfinite(prom_db):
+						snr_estimate = prom_db
+			if (capability != 'tracker') and (not np.isfinite(snr_estimate)):
+				fallback_snr = _band_snr_from_signal(filt_sig, fps, min_hz, max_hz)
+				if np.isfinite(fallback_snr):
+					snr_estimate = fallback_snr
+			if not np.isfinite(snr_estimate):
+				snr_estimate = 0.0
 			meta_for_stats['track_frac_saturated_eval'] = float(sat_frac) if np.isfinite(sat_frac) else float('nan')
 			meta_for_stats['saturation_margin_hz_used'] = float(edge_margin_hz)
 			meta_for_stats['saturation_persist_samples'] = int(persist_samples)
@@ -1754,6 +1949,7 @@ def evaluate(
 			meta_for_stats['std_below_threshold'] = std_below_threshold
 			meta_for_stats['unique_below_threshold'] = bool(nuniq_frac < float(track_unique_min))
 			meta_for_stats['edge_saturation_breach'] = bool(np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)))
+			meta_for_stats['snr_estimate'] = float(snr_estimate) if np.isfinite(snr_estimate) else float('nan')
 	
 			if constant_ptp_max_hz > 0.0 and finite_track.size:
 				# Robust range (P95−P5) guards against transient spikes while detecting quasi-constant tracks.
@@ -1785,33 +1981,31 @@ def evaluate(
 				'median_hz': meta_for_stats.get('median_track_hz_eval'),
 				'track_dyn_range_hz_ptp': meta_for_stats.get('track_range_hz_ptp'),
 				'edge_saturation_fraction': meta_for_stats.get('edge_saturation_fraction'),
+				'snr_estimate': meta_for_stats.get('snr_estimate'),
 				'constant_track_promoted': meta_for_stats.get('constant_track_promoted'),
 				'meta': meta_for_stats
 			}
-			trigger_reason = None
-			fallback_due_to_gating = False
+			gating_trigger_reason = None
 			if enable_track_processing and track_used and sig_rpm_values is not None:
-				if finite_rpm.size == 0:
-					trigger_reason = 'empty_or_allnan'
-				elif finite_rpm.size < 2 and win_size != 'video':
-					trigger_reason = 'empty_or_allnan'
-				elif win_size != 'video':
+				if finite_rpm.size == 0 or (finite_rpm.size < 2 and win_size != 'video'):
+					degenerate_track = True
+					if degenerate_reason is None:
+						degenerate_reason = 'empty_or_allnan'
+				elif not disable_gating and win_size != 'video':
 					std_invalid = not np.isfinite(est_std)
-					if std_invalid:
+					if std_invalid and (not allow_constant_track):
 						gating_flags['std'] = True
-						if not allow_constant_track:
-							trigger_reason = 'low_std'
-							fallback_due_to_gating = True
-					elif std_below_threshold:
+						if gating_trigger_reason is None:
+							gating_trigger_reason = 'low_std'
+					elif std_below_threshold and (not allow_constant_track) and (not track_std_is_soft):
 						gating_flags['std'] = True
-						if (not allow_constant_track) and (not track_std_is_soft):
-							trigger_reason = 'low_std'
-							fallback_due_to_gating = True
-					if (trigger_reason is None) and (nuniq_frac < float(track_unique_min)) and (not allow_constant_track):
-						trigger_reason = 'low_unique'
+						if gating_trigger_reason is None:
+							gating_trigger_reason = 'low_std'
+					if (nuniq_frac < float(track_unique_min)) and (not allow_constant_track):
 						gating_flags['uniq'] = True
-						fallback_due_to_gating = True
-					elif (trigger_reason is None) and np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)):
+						if gating_trigger_reason is None:
+							gating_trigger_reason = 'low_unique'
+					elif np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)):
 						sat_repr = f"{sat_frac:.3f}" if np.isfinite(sat_frac) else "nan"
 						med_repr = f"{median_track_hz:.3f}" if np.isfinite(median_track_hz) else "nan"
 						const_repr = 'promoted' if constant_promoted else ('true' if allow_constant_track else 'false')
@@ -1832,125 +2026,74 @@ def evaluate(
 							if (not at_edge) or sat_frac < 0.98:
 								should_trigger = False
 						if should_trigger:
-							trigger_reason = reason_detail
 							gating_flags['sat'] = True
-							fallback_due_to_gating = True
-			if fallback_due_to_gating and disable_gating:
-				trigger_reason = None
-				fallback_due_to_gating = False
-			if trigger_reason:
-				track_used = False
-				sig_rpm_values = None
-				degenerate_track = True
-				if degenerate_reason is None:
-					degenerate_reason = trigger_reason
-				if track_candidate_present and degenerate_reason is None:
-					degenerate_track = True
-					degenerate_reason = 'empty_or_allnan'
-				if capability == 'tracker':
-					fallback_from = 'track'
-	
-			if not track_used:
-				if enable_track_processing:
-					flag_snapshot = {k: v for k, v in gating_flags.items() if v}
-					if track_candidate_present:
-						reason = degenerate_reason or 'unknown'
-						tqdm.write(f"WARNING [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={reason} -> fallback=spectral")
-					elif '__' in sanitized_method:
-						if degenerate_reason is None:
-							degenerate_reason = 'missing_track'
-						degenerate_track = True
-						tqdm.write(f"WARNING [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={degenerate_reason} -> fallback=spectral")
-					else:
-						tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
-				sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
-				spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
-				if capability == 'tracker':
-					source_label = 'fallback'
-					if fallback_from is None:
-						fallback_from = 'track'
-				else:
-					source_label = 'spectral'
-			else:
-				source_label = 'track' if capability == 'tracker' else 'spectral'
-	
-			recomputed_spectral = False
-			while True:
-				if sig_rpm_values is None:
-					sig_array_raw = np.asarray([], dtype=np.float64)
-				else:
-					sig_array_raw = np.asarray(sig_rpm_values, dtype=np.float64).reshape(-1)
-				pred_len_raw = int(sig_array_raw.size)
-				if t_sig is None:
-					t_sig_array = np.asarray([], dtype=np.float64)
-				else:
-					t_sig_array = np.asarray(t_sig, dtype=np.float64).reshape(-1)
-				if pred_len_raw and t_sig_array.size and pred_len_raw != t_sig_array.size:
-					min_len_local = min(pred_len_raw, t_sig_array.size)
-					sig_array = sig_array_raw[:min_len_local]
-					t_sig_local = t_sig_array[:min_len_local]
-				else:
-					sig_array = sig_array_raw
-					t_sig_local = t_sig_array
-				sig_aligned_tmp, gt_aligned_tmp, times_aligned_tmp, align_meta = _align_to_gt_grid(t_sig_local, sig_array)
-				align_meta['len_pred'] = pred_len_raw
-				align_meta['len_gt'] = int(gt_rpm_full.size)
-				sig_aligned_tmp = np.asarray(sig_aligned_tmp, dtype=np.float64).reshape(-1)
-				gt_aligned_tmp = np.asarray(gt_aligned_tmp, dtype=np.float64).reshape(-1)
-				times_aligned_tmp = np.asarray(times_aligned_tmp, dtype=np.float64).reshape(-1)
-				min_len_aligned = min(sig_aligned_tmp.size, gt_aligned_tmp.size, times_aligned_tmp.size)
-				if min_len_aligned:
-					sig_aligned_tmp = sig_aligned_tmp[:min_len_aligned]
-					gt_aligned_tmp = gt_aligned_tmp[:min_len_aligned]
-					times_aligned_tmp = times_aligned_tmp[:min_len_aligned]
-				else:
-					sig_aligned_tmp = np.asarray([], dtype=np.float64)
-					gt_aligned_tmp = np.asarray([], dtype=np.float64)
-					times_aligned_tmp = np.asarray([], dtype=np.float64)
-				align_meta['len_final'] = int(min_len_aligned)
-				finite_mask_pair = np.isfinite(sig_aligned_tmp) & np.isfinite(gt_aligned_tmp)
-				valid_count = int(finite_mask_pair.sum())
-				align_meta['len_valid'] = valid_count
-				if valid_count:
-					sig_valid_tmp = sig_aligned_tmp[finite_mask_pair]
-					gt_valid_tmp = gt_aligned_tmp[finite_mask_pair]
-					times_valid_tmp = times_aligned_tmp[finite_mask_pair]
-				else:
-					sig_valid_tmp = np.asarray([], dtype=np.float64)
-					gt_valid_tmp = np.asarray([], dtype=np.float64)
-					times_valid_tmp = np.asarray([], dtype=np.float64)
-				if source_label == 'track' and (align_meta['len_final'] == 0 or valid_count < 2) and not recomputed_spectral:
-					degenerate_track = True
-					if degenerate_reason is None:
-						degenerate_reason = 'empty_or_allnan'
-					track_used = False
-					source_label = 'fallback' if capability == 'tracker' else 'spectral'
+							if gating_trigger_reason is None:
+								gating_trigger_reason = reason_detail
+			if capability == 'tracker':
+				source_label = 'track'
+				if not track_used:
 					if enable_track_processing:
+						flag_snapshot = {k: v for k, v in gating_flags.items() if v}
 						if track_candidate_present:
 							reason = degenerate_reason or 'unknown'
-							tqdm.write(f"> Warning: track rejected for {method_storage_name}::{trial_key} [reason: {reason}], falling back to spectral RPM")
+							tqdm.write(f"WARNING [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={reason} -> track unavailable")
 						elif '__' in sanitized_method:
 							if degenerate_reason is None:
 								degenerate_reason = 'missing_track'
 							degenerate_track = True
-							tqdm.write(f"> Warning: track missing for {method_storage_name}::{trial_key}; falling back to spectral RPM")
+							tqdm.write(f"WARNING [evaluate] method={method_storage_name} cap=tracker flags={flag_snapshot or gating_flags} reason={degenerate_reason} -> track unavailable")
 						else:
-							tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; using spectral RPM")
+							tqdm.write(f"> Info: no track for base method {method_storage_name}::{trial_key}; track unavailable")
+			else:
+				if sig_rpm_values is None:
 					sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
 					spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
-					if capability == 'tracker' and fallback_from is None:
-						fallback_from = 'track'
-					recomputed_spectral = True
-					continue
-				sig_aligned = sig_aligned_tmp
-				gt_aligned = gt_aligned_tmp
-				times_aligned = times_aligned_tmp
-				sig_valid = sig_valid_tmp
-				gt_valid = gt_valid_tmp
-				times_valid = times_valid_tmp
-				alignment_meta = align_meta
-				break
-	
+				source_label = 'spectral'
+
+			if sig_rpm_values is None:
+				sig_array_raw = np.asarray([], dtype=np.float64)
+			else:
+				sig_array_raw = np.asarray(sig_rpm_values, dtype=np.float64).reshape(-1)
+			pred_len_raw = int(sig_array_raw.size)
+			if t_sig is None:
+				t_sig_array = np.asarray([], dtype=np.float64)
+			else:
+				t_sig_array = np.asarray(t_sig, dtype=np.float64).reshape(-1)
+			if pred_len_raw and t_sig_array.size and pred_len_raw != t_sig_array.size:
+				min_len_local = min(pred_len_raw, t_sig_array.size)
+				sig_array = sig_array_raw[:min_len_local]
+				t_sig_local = t_sig_array[:min_len_local]
+			else:
+				sig_array = sig_array_raw
+				t_sig_local = t_sig_array
+			sig_aligned, gt_aligned, times_aligned, align_meta = _align_to_gt_grid(t_sig_local, sig_array)
+			align_meta['len_pred'] = pred_len_raw
+			align_meta['len_gt'] = int(gt_rpm_full.size)
+			sig_aligned = np.asarray(sig_aligned, dtype=np.float64).reshape(-1)
+			gt_aligned = np.asarray(gt_aligned, dtype=np.float64).reshape(-1)
+			times_aligned = np.asarray(times_aligned, dtype=np.float64).reshape(-1)
+			min_len_aligned = min(sig_aligned.size, gt_aligned.size, times_aligned.size)
+			if min_len_aligned:
+				sig_aligned = sig_aligned[:min_len_aligned]
+				gt_aligned = gt_aligned[:min_len_aligned]
+				times_aligned = times_aligned[:min_len_aligned]
+			else:
+				sig_aligned = np.asarray([], dtype=np.float64)
+				gt_aligned = np.asarray([], dtype=np.float64)
+				times_aligned = np.asarray([], dtype=np.float64)
+			align_meta['len_final'] = int(min_len_aligned)
+			finite_mask_pair = np.isfinite(sig_aligned) & np.isfinite(gt_aligned)
+			valid_count = int(finite_mask_pair.sum())
+			align_meta['len_valid'] = valid_count
+			if valid_count:
+				sig_valid = sig_aligned[finite_mask_pair]
+				gt_valid = gt_aligned[finite_mask_pair]
+				times_valid = times_aligned[finite_mask_pair]
+			else:
+				sig_valid = np.asarray([], dtype=np.float64)
+				gt_valid = np.asarray([], dtype=np.float64)
+				times_valid = np.asarray([], dtype=np.float64)
+
 			sig_finite = sig_valid[np.isfinite(sig_valid)] if sig_valid.size else np.asarray([], dtype=np.float64)
 			gt_finite = gt_valid[np.isfinite(gt_valid)] if gt_valid.size else np.asarray([], dtype=np.float64)
 	
@@ -2020,22 +2163,39 @@ def evaluate(
 				corr_degenerate = True
 
 			if sig_valid.size >= 2 and gt_valid.size >= 2:
-				e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics)
-				raw_metrics = e[:-1]
-				pair = e[-1]
+				metrics_for_errors = [m for m in metrics if m not in ('SNR',)]
+				if metrics_for_errors:
+					e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics_for_errors)
+					raw_core_metrics = e[:-1]
+					pair = e[-1]
+				else:
+					raw_core_metrics = []
+					pair = [
+						np.atleast_2d(sig_valid.astype(np.float64)),
+						gt_valid.astype(np.float64)
+					]
 				if corr_degenerate:
-					for idx, metric_name in enumerate(metrics):
-						if metric_name in ('PCC', 'CCC'):
-							raw_metrics[idx] = float('nan')
+					for idx, metric_name in enumerate(metrics_for_errors):
+						if metric_name in ('PCC', 'CCC', 'R', 'PearsonR'):
+							raw_core_metrics[idx] = float('nan')
 			else:
-				raw_metrics = [float('nan')] * len(metrics)
+				raw_core_metrics = [float('nan')] * len([m for m in metrics if m not in ('SNR',)])
 				pair = [
 					np.atleast_2d(sig_valid.astype(np.float64)),
 					gt_valid.astype(np.float64)
 				]
-	
+
+			core_iter = iter(raw_core_metrics)
 			metric_values = []
-			for val in raw_metrics:
+			for metric_name in metrics:
+				if metric_name == 'SNR':
+					val = track_stats.get('snr_estimate')
+					try:
+						metric_values.append(float(val))
+					except (TypeError, ValueError):
+						metric_values.append(float('nan'))
+					continue
+				val = next(core_iter, float('nan'))
 				try:
 					metric_values.append(float(val))
 				except Exception:
@@ -2047,11 +2207,11 @@ def evaluate(
 	
 			times_valid_for_record = np.asarray(times_valid, dtype=np.float64)
 			record_alignment = {
-				'aligned': bool(alignment_meta.get('aligned', False)),
-				'len_gt': int(alignment_meta.get('len_gt', 0)),
-				'len_pred': int(alignment_meta.get('len_pred', 0)),
-				'len_final': int(alignment_meta.get('len_final', 0)),
-				'len_valid': int(alignment_meta.get('len_valid', 0))
+				'aligned': bool(align_meta.get('aligned', False)),
+				'len_gt': int(align_meta.get('len_gt', 0)),
+				'len_pred': int(align_meta.get('len_pred', 0)),
+				'len_final': int(align_meta.get('len_final', 0)),
+				'len_valid': int(align_meta.get('len_valid', 0))
 			}
 			spectral_snapshot = spectral_stats if isinstance(spectral_stats, dict) else {}
 			quality_snapshot = {
@@ -2059,12 +2219,13 @@ def evaluate(
 				'track_candidate_present': bool(track_candidate_present),
 				'source_label': source_label,
 				'degenerate_reason': degenerate_reason,
-				'fallback_from': fallback_from,
+				'gating_trigger_reason': gating_trigger_reason,
 				'std_bpm': track_stats.get('std_bpm'),
 				'unique_fraction': track_stats.get('unique_fraction'),
 				'track_dyn_range_hz_ptp': track_stats.get('track_dyn_range_hz_ptp'),
 				'median_hz': track_stats.get('median_hz'),
 				'edge_saturation_fraction': track_stats.get('edge_saturation_fraction'),
+				'snr_estimate': track_stats.get('snr_estimate'),
 				'constant_track_promoted': track_stats.get('constant_track_promoted'),
 				'spectral_peak_ratio': spectral_snapshot.get('peak_ratio'),
 				'spectral_prominence_db': spectral_snapshot.get('prominence_db'),
@@ -2093,7 +2254,7 @@ def evaluate(
 					'track_stats': track_stats,
 					'spectral_stats': spectral_stats,
 					'gating_flags': dict(gating_flags),
-					'fallback_from': fallback_from,
+					'gating_trigger_reason': gating_trigger_reason,
 					'is_trustworthy': bool(is_trustworthy),
 					'est_mean': est_mean_val,
 					'est_std': est_std_val,
@@ -2113,6 +2274,12 @@ def evaluate(
 					'data_file': filepath
 				}
 				method_metrics.setdefault(method_key, []).append(record)
+				records_written += 1
+				if spec_rr_values.size:
+					snr_spec = _spectral_snr_from_stats(spec_stats_for_record)
+					spec_record = _build_rr_record(spec_rr_values, spec_rr_times, snr_spec, 'spectral')
+					if spec_record:
+						method_metrics_spectral.setdefault(method_key, []).append(spec_record)
 				if debug_log_path:
 					with open(debug_log_path, 'a') as fp:
 						fp.write(f"{os.path.basename(filepath)}\t{method_key}\tsource={source_label}\tlen_valid={record.get('len_valid', 0)}\n")
@@ -2131,7 +2298,6 @@ def evaluate(
 					'track_stats': {},
 					'spectral_stats': {},
 					'gating_flags': dict(gating_flags),
-					'fallback_from': fallback_from,
 					'is_trustworthy': False,
 					'est_mean': float('nan'),
 					'est_std': float('nan'),
@@ -2150,7 +2316,6 @@ def evaluate(
 						'track_candidate_present': False,
 						'source_label': 'error',
 						'degenerate_reason': f'exception:{type(exc).__name__}',
-						'fallback_from': fallback_from,
 						'std_bpm': float('nan'),
 						'unique_fraction': float('nan'),
 						'track_dyn_range_hz_ptp': float('nan'),
@@ -2173,6 +2338,12 @@ def evaluate(
 					'data_file': filepath
 				}
 				method_metrics.setdefault(method_key, []).append(placeholder)
+				records_written += 1
+				if spec_rr_values.size:
+					method_metrics_spectral.setdefault(method_key, []).append({
+						'metrics': [float('nan')] * len(metrics),
+						'source': 'spectral_error'
+					})
 				if debug_log_path:
 					try:
 						with open(debug_log_path, 'a') as fp:
@@ -2180,6 +2351,14 @@ def evaluate(
 					except Exception:
 						pass
 	
+	if records_written == 0:
+		print(f"> Debug: processed files={len(files)} but no records were written. "
+		      f"Check run directory '{results_dir}'.")
+		raise RuntimeError(
+			f"Evaluation produced no method records for '{results_dir}'. "
+			"Verify that data/*.pkl contains estimates and re-run the evaluate step."
+		)
+
 	# Before saving, report which methods produced metrics (helps debug filtering issues)
 	try:
 		seen_methods = sorted(list(method_metrics.keys()))
@@ -2222,16 +2401,44 @@ def evaluate(
 		print(f"> Warning: failed to write evaluation settings ({exc})")
 	# Save the results of the applied methods
 	print(f"> Saving metrics to {os.path.join(metrics_dir, fn)}")
-	with open(os.path.join(metrics_dir, fn), 'wb') as fp:
-		pickle.dump([metrics, method_metrics] , fp)
+	track_metrics_path = os.path.join(metrics_dir, fn)
+	with open(track_metrics_path, 'wb') as fp:
+		pickle.dump([metrics, method_metrics], fp)
 		print('> Metrics saved!\n')
+	track_copy_path = os.path.join(metrics_dir, 'metrics_track.pkl')
+	try:
+		shutil.copyfile(track_metrics_path, track_copy_path)
+	except Exception:
+		pass
+	if not win_size == 'video':
+		try:
+			shutil.copyfile(track_metrics_path, os.path.join(metrics_dir, 'metrics.pkl'))
+		except Exception:
+			pass
+	if win_size == 'video':
+		try:
+			shutil.copyfile(track_metrics_path, os.path.join(metrics_dir, 'metrics_1w.pkl'))
+		except Exception:
+			pass
+
+	spec_metrics_path = os.path.join(metrics_dir, 'metrics_spectral.pkl')
+	with open(spec_metrics_path, 'wb') as fp:
+		pickle.dump([metrics, method_metrics_spectral], fp)
+		print('> Spectral metrics saved!\n')
 
 	# Save human-readable table and plots (best-effort)
 	try:
 		annotation = f"# eval_band [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={use_track}"
-		summaries = _save_metrics_table(metrics_dir, method_metrics, metrics, win_size == 'video', annotation=annotation)
+		track_summaries = _save_metrics_table(metrics_dir, method_metrics, metrics, win_size == 'video', annotation=annotation, summary_filename='metrics_summary.txt')
+		track_summary_path = os.path.join(metrics_dir, 'metrics_summary.txt')
+		track_alias_path = os.path.join(metrics_dir, 'metrics_track_summary.txt')
+		try:
+			shutil.copyfile(track_summary_path, track_alias_path)
+		except Exception:
+			pass
+		_save_metrics_table(metrics_dir, method_metrics_spectral, metrics, win_size == 'video', annotation=f"{annotation}\n# mode: spectral", summary_filename='metrics_spectral_summary.txt')
 		if visualize:
-			_generate_plots(results_dir, summaries, metrics, win_size == 'video', stride=stride)
+			_generate_plots(results_dir, track_summaries, metrics, win_size == 'video', stride=stride)
 	except Exception as e:
 		print(f"> Plot/log generation skipped due to error: {e}")
 	quality_msg = _persist_quality_reports(method_metrics, results_dir)
@@ -2254,15 +2461,18 @@ def print_metrics(results_dir, unique_window=False):
 		metrics, method_metrics = pickle.load(f)
 		metrics, method_metrics = _normalize_metrics_payload(metrics, method_metrics)
 	settings_path = os.path.join(metrics_dir, 'eval_settings.json')
+	annotation_line = None
+	use_track_flag = None
 	if os.path.exists(settings_path):
 		try:
 			with open(settings_path, 'r') as fp:
 				eval_settings = json.load(fp)
 			min_hz = eval_settings.get('min_hz')
 			max_hz = eval_settings.get('max_hz')
-			use_track = eval_settings.get('use_track')
+			use_track_flag = eval_settings.get('use_track')
 			if min_hz is not None and max_hz is not None:
-				print(f"Evaluation band: [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={bool(use_track)}\n")
+				annotation_line = f"# eval_band [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={bool(use_track_flag)}"
+				print(annotation_line + "\n")
 		except Exception:
 			pass
 
@@ -2289,12 +2499,19 @@ def print_metrics(results_dir, unique_window=False):
 		table_rows.append(row_vals)
 
 	table_str = _render_table(headers, table_rows)
+	if annotation_line:
+		full_table = annotation_line + "\n" + table_str
+	else:
+		full_table = table_str
 
-	print(table_str)
+	print(full_table)
 	# Save alongside pkl for reporting
 	try:
 		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
-			fp.write(table_str + "\n")
+			fp.write(full_table + "\n")
+		if not unique_window:
+			with open(os.path.join(metrics_dir, 'metrics_track_summary.txt'), 'w') as fp:
+				fp.write(full_table + "\n")
 	except Exception:
 		pass
 
@@ -2366,6 +2583,11 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
 		dataset.load_dataset()
 		# Loop over the dataset
 		for d in tqdm(dataset.data, desc="Processing files"):
+			dataset_label = str(getattr(dataset, 'name', '') or '').strip().lower() or 'unknown'
+			dataset_slug = dataset_label.upper()
+			d['dataset_name'] = dataset_label
+			d.setdefault('dataset', dataset_label)
+			d['dataset_slug'] = dataset_slug
 
 			if 'trial' in d.keys(): 
 				outfilename = os.path.join(data_dir, dataset.name + '_' + d['subject'] + '_' + d['trial'] + '.pkl')
@@ -2378,6 +2600,9 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
 			d['trial_key'] = trial_key
 
 			results_payload = {
+				'dataset': dataset_label,
+				'dataset_name': dataset_label,
+				'dataset_slug': dataset_slug,
 				'video_path': d['video_path'],
 				'fps': d['fps'],
 				'gt': d['gt'],
@@ -2439,8 +2664,11 @@ def _summaries_with_samples(method_metrics, metrics, unique_window):
 	if not method_metrics:
 		return summaries
 	if unique_window:
-		from errors import RMSEerror, MAEerror, MAPEerror, PearsonCorr, LinCorr
-	for method, records in method_metrics.items():
+		from errors import RMSEerror, MAEerror, MAPEerror, PearsonCorr
+	# Iterate in a stable, human-friendly order so that tables/plots are
+	# grouped by base method and oscillator head.
+	for method in sorted(method_metrics.keys(), key=_display_method_key):
+		records = method_metrics[method]
 		if not records:
 			summaries[method] = {
 				'values': {m: float('nan') for m in metrics},
@@ -2483,11 +2711,29 @@ def _summaries_with_samples(method_metrics, metrics, unique_window):
 				values['RMSE'] = RMSEerror(est_concat, gt_concat)
 				values['MAE'] = MAEerror(est_concat, gt_concat)
 				values['MAPE'] = MAPEerror(est_concat, gt_concat)
-				values['PCC'] = PearsonCorr(est_concat, gt_concat)
-				values['CCC'] = LinCorr(est_concat, gt_concat)
+				values['R'] = PearsonCorr(est_concat, gt_concat)
 			else:
 				for key in PRIMARY_METRICS:
+					if key == 'SNR':
+						continue
 					values[key] = float('nan')
+			if 'SNR' in PRIMARY_METRICS:
+				snr_samples = []
+				for record in records:
+					qual = record.get('quality') or {}
+					val = qual.get('snr_estimate')
+					if val is None:
+						val = (record.get('track_stats') or {}).get('snr_estimate')
+					try:
+						val = float(val)
+					except (TypeError, ValueError):
+						continue
+					if np.isfinite(val):
+						snr_samples.append(val)
+				if snr_samples:
+					values['SNR'] = float(np.median(np.asarray(snr_samples, dtype=np.float64)))
+				else:
+					values['SNR'] = float('nan')
 		else:
 			for idx, metric_name in enumerate(metrics):
 				data = []
@@ -2553,7 +2799,7 @@ def _render_table(headers, rows):
 
 
 
-def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window, annotation=None):
+def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window, annotation=None, summary_filename='metrics_summary.txt'):
 	"""Save a pretty metrics summary table to text for reporting."""
 	summaries = _summaries_with_samples(method_metrics, metrics, unique_window)
 	if unique_window:
@@ -2580,7 +2826,7 @@ def _save_metrics_table(metrics_dir, method_metrics, metrics, unique_window, ann
 	table_str = _render_table(table_headers, table_rows)
 
 	try:
-		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
+		with open(os.path.join(metrics_dir, summary_filename), 'w') as fp:
 			if annotation:
 				fp.write(annotation.rstrip() + "\n")
 			fp.write(table_str + "\n")
