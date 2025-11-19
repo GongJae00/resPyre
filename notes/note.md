@@ -14,9 +14,6 @@
 | 4 | 다중 헤드 앙상블 옵션 + 컴포넌트 결과 저장 | `riv/estimators/head_ensemble.py`, `motion/method_oscillator_wrapped.py` |
 | 5 | EM 기반 Kalman gain 학습 + Optuna 연동(`optuna_runner.py --em-mode`, MLflow trial 로깅) + top-K 기반 autotune override 생성 | `riv/optim/em_kalman.py`, `train_em.py`, `optuna_runner.py` |
 | 6 | README/notes/metadata 지침 업데이트, `results/<run>/metadata.json` 템플릿 확립. 추가 패치: `extract_respiration`이 dataset 메타를 강제로 주입해 EM/Autotune이 정확히 적용되고, 오실레이터 헤드는 스펙트럼 피크 신뢰도·SNR 기반으로 Q/R을 자동 조절(`spec_guidance_*`). | `run_all.py`, `riv/estimators/oscillator_heads.py`, README, 본 문서 |
-| 7 | 기본 모션 5종 SNR이 NaN으로 떨어지는 문제 해결: Welch 밴드비 기반 SNR 보정 + `metrics_spectral.pkl`/`metrics_spectral_summary.txt` 동시 저장(모든 25개 메서드가 트랙/스펙트럴 지표 모두 생성됨). | `run_all.py` |
-| 8 | evaluate 단계에서 `.pkl`을 하나도 발견하지 못하거나 메서드 기록이 비면 즉시 실패하도록 가드 추가. `metrics_track_summary.txt` 별도 생성 + 합산표 상단에 평가 대역 주석을 항상 기록하도록 수정(빈 표 문제 예방). | `run_all.py` |
-| 9 | 공진자 헤드 입력 윈도우를 평가와 동일한 30초 중심으로 정렬하고, SNR 기반으로 KFSTD/UKF의 q/r/qf를 자동 조정하도록 고도화. PLL은 SNR-가중 PI 제어 + 주파수 슬루 제한을 추가해 호흡 주파수 락을 안정화. 분석용 `tools/analyze_rr_metrics.py`를 추가해 메소드별 R/MAE/SNR 분포를 바로 확인할 수 있게 함. | `riv/estimators/oscillator_heads.py`, `tools/analyze_rr_metrics.py` |
 
 남은 과제: metadata 자동 생성 스크립트(실제 JSON 생성기).
 

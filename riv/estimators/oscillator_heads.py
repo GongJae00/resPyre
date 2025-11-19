@@ -59,7 +59,7 @@ class OscillatorParams:
     spec_peak_smooth_len: int = 1
     spec_subbin_interp: str = "parabolic"
     post_smooth_alpha: float = 0.0
-    stft_win: float = 30.0
+    stft_win: float = 12.0
     stft_hop: float = 1.0
     ridge_penalty: float = 250.0
     spec_guidance_strength: float = 0.8
@@ -73,9 +73,6 @@ class OscillatorParams:
     pll_ki_min: float = 0.0
     pll_zeta: float = 0.9
     pll_ttrack: float = 7.0
-    pll_err_clip: float = float(np.pi / 2.0)
-    pll_max_hz_step: float = 0.04
-    pll_snr_ref_db: float = 12.0
     detrend: bool = True
     bandpass: bool = True
     zscore: bool = True
@@ -411,16 +408,6 @@ class _BaseOscillatorHead:
             qf = float(p.qf_override)
             qf_base = qf
         qx, qf, rv = self._apply_spectral_guidance(qx, qf, rv, rv_floor, qf_base)
-        snr = self._last_snr if (self._last_snr is not None and np.isfinite(self._last_snr)) else 0.0
-        snr = float(max(0.0, snr))
-        snr_ref = getattr(self.params, "pll_snr_ref_db", 12.0) or 12.0
-        snr_norm = float(np.clip(snr / max(snr_ref, 1e-6), 0.0, 1.0))
-        qx_scale = 0.4 + 1.6 * snr_norm
-        rv_scale = 1.4 - 0.6 * snr_norm
-        qf_scale = 0.5 + snr_norm
-        qx = max(qx * qx_scale, 1e-9)
-        rv = max(rv * rv_scale, rv_floor)
-        qf = max(qf * qf_scale, 1e-8)
         return {
             'rho': float(rho),
             'qx': float(qx),
@@ -836,7 +823,6 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
         p = self.params
         base_win = max(16, int(p.stft_win * fs))
         scales = [0.75, 1.0, 1.5]
-        duration = float(signal.size / fs) if fs > 0 else float(signal.size)
         results = []
         for scale in scales:
             win = max(16, int(base_win * scale))
@@ -855,12 +841,6 @@ class oscillator_Spec_ridge(_BaseOscillatorHead):
                 padded=False,
                 nfft=nfft
             )
-            times = np.asarray(times, dtype=np.float64)
-            if fs > 0:
-                center_shift = 0.5 * (win / fs)
-                times = times - center_shift
-                if duration > 0.0:
-                    times = np.clip(times, 0.0, duration)
             results.append((freqs, times, Zxx))
         return results
 
@@ -960,7 +940,6 @@ class oscillator_PLL(_BaseOscillatorHead):
         integrator = 0.0
 
         pll_snr = self._estimate_pll_snr(analytic)
-        snr_weight = pll_snr
         if p.pll_autogain or p.pll_kp <= 0 or p.pll_ki <= 0:
             controller = PLLAdaptiveController(p.pll_zeta, p.pll_ttrack, fs)
             gain_snr = pll_snr if np.isfinite(pll_snr) else (self._last_snr or 0.0)
@@ -974,27 +953,15 @@ class oscillator_PLL(_BaseOscillatorHead):
         omega_min = 2.0 * np.pi * p.f_min
         omega_max = 2.0 * np.pi * p.f_max
         phase_noise = 0.0
-        snr_ref = getattr(p, "pll_snr_ref_db", 12.0) or 12.0
-        snr_norm = float(np.clip((snr_weight if np.isfinite(snr_weight) else 0.0) / snr_ref, 0.0, 1.0))
-        err_clip_base = float(getattr(p, "pll_err_clip", np.pi / 2.0))
-        err_clip = err_clip_base * (0.35 + 0.65 * snr_norm)
-        freq_step = max(float(getattr(p, "pll_max_hz_step", 0.0)), 0.0)
 
         for t in range(n):
             phase_y = float(np.angle(analytic[t]))
             err_raw = np.arctan2(np.sin(phase_y - phase_nco), np.cos(phase_y - phase_nco))
             # simple phase-noise shaping
-            err_raw = np.clip(err_raw, -err_clip, err_clip)
             err = err_raw - 0.1 * phase_noise
-            err *= (0.5 + 0.5 * snr_norm)
             phase_noise = err_raw
             integrator_candidate = integrator + ki * err
             omega_candidate = omega + kp * err + integrator_candidate
-            if freq_step > 0.0:
-                prev_hz = omega / (2.0 * np.pi)
-                cand_hz = omega_candidate / (2.0 * np.pi)
-                cand_hz = float(np.clip(cand_hz, prev_hz - freq_step, prev_hz + freq_step))
-                omega_candidate = 2.0 * np.pi * cand_hz
             omega_clamped = float(np.clip(omega_candidate, omega_min, omega_max))
             if omega_clamped != omega_candidate:
                 integrator_candidate += omega_clamped - omega_candidate
@@ -1009,8 +976,6 @@ class oscillator_PLL(_BaseOscillatorHead):
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
         meta_payload["pll_snr_db"] = float(pll_snr)
-        meta_payload["pll_gain_kp"] = float(kp)
-        meta_payload["pll_gain_ki"] = float(ki)
         meta_payload.setdefault("is_constant_track", False)
         consistency = float(np.std(np.diff(track))) if track.size > 2 else 0.0
         reliability = float(np.exp(-consistency * 10.0))
