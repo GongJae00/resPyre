@@ -1556,94 +1556,94 @@ def evaluate(
 		gt_rpm_full = gt_rpm_series.copy()
 		t_gt_full = t_gt.copy()
 
-	def _align_to_gt_grid(pred_times, pred_values):
-			pred_times = np.asarray(pred_times, dtype=np.float64).reshape(-1) if pred_times is not None else np.asarray([], dtype=np.float64)
-			pred_values = np.asarray(pred_values, dtype=np.float64).reshape(-1) if pred_values is not None else np.asarray([], dtype=np.float64)
-			if pred_times.size and pred_values.size and pred_times.size != pred_values.size:
-				min_len_local = min(pred_times.size, pred_values.size)
-				pred_times = pred_times[:min_len_local]
-				pred_values = pred_values[:min_len_local]
-			meta = {
-				'aligned': False,
-				'len_gt': int(gt_rpm_full.size),
-				'len_pred': int(pred_values.size),
-				'len_final': 0,
-				'len_valid': 0
-			}
-			if pred_times.size == 0 or pred_values.size == 0 or gt_rpm_full.size == 0:
-				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), meta
-			tol = grid_tolerance if grid_tolerance > 0 else 1e-6
-			matched = {}
-			for idx_pred, tp in enumerate(pred_times):
-				diff = np.abs(t_gt_full - tp)
-				if diff.size == 0:
-					continue
-				gt_idx = int(np.argmin(diff))
-				if diff[gt_idx] > tol:
-					continue
-				prev = matched.get(gt_idx)
-				if prev is None or diff[gt_idx] < prev[1]:
-					matched[gt_idx] = (idx_pred, diff[gt_idx])
-			if not matched:
-				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), meta
-			sorted_gt_idx = sorted(matched.keys())
-			meta['aligned'] = True
-			meta['len_final'] = len(sorted_gt_idx)
-			pred_aligned = pred_values[[matched[idx][0] for idx in sorted_gt_idx]]
-			gt_aligned = gt_rpm_full[sorted_gt_idx]
-			times_aligned = t_gt_full[sorted_gt_idx]
-			return pred_aligned, gt_aligned, times_aligned, meta
+		def _align_to_gt_grid(pred_times, pred_values):
+				pred_times = np.asarray(pred_times, dtype=np.float64).reshape(-1) if pred_times is not None else np.asarray([], dtype=np.float64)
+				pred_values = np.asarray(pred_values, dtype=np.float64).reshape(-1) if pred_values is not None else np.asarray([], dtype=np.float64)
+				if pred_times.size and pred_values.size and pred_times.size != pred_values.size:
+					min_len_local = min(pred_times.size, pred_values.size)
+					pred_times = pred_times[:min_len_local]
+					pred_values = pred_values[:min_len_local]
+				meta = {
+					'aligned': False,
+					'len_gt': int(gt_rpm_full.size),
+					'len_pred': int(pred_values.size),
+					'len_final': 0,
+					'len_valid': 0
+				}
+				if pred_times.size == 0 or pred_values.size == 0 or gt_rpm_full.size == 0:
+					return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), meta
+				tol = grid_tolerance if grid_tolerance > 0 else 1e-6
+				matched = {}
+				for idx_pred, tp in enumerate(pred_times):
+					diff = np.abs(t_gt_full - tp)
+					if diff.size == 0:
+						continue
+					gt_idx = int(np.argmin(diff))
+					if diff[gt_idx] > tol:
+						continue
+					prev = matched.get(gt_idx)
+					if prev is None or diff[gt_idx] < prev[1]:
+						matched[gt_idx] = (idx_pred, diff[gt_idx])
+				if not matched:
+					return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), meta
+				sorted_gt_idx = sorted(matched.keys())
+				meta['aligned'] = True
+				meta['len_final'] = len(sorted_gt_idx)
+				pred_aligned = pred_values[[matched[idx][0] for idx in sorted_gt_idx]]
+				gt_aligned = gt_rpm_full[sorted_gt_idx]
+				times_aligned = t_gt_full[sorted_gt_idx]
+				return pred_aligned, gt_aligned, times_aligned, meta
 
-	def _build_rr_record(rr_values, rr_times, snr_value, source_label):
-		rr_values = np.asarray(rr_values, dtype=np.float64).reshape(-1)
-		rr_times = np.asarray(rr_times, dtype=np.float64).reshape(-1)
-		if rr_values.size == 0 or rr_times.size == 0:
-			return None
-		sig_aligned, gt_aligned, times_aligned, align_meta = _align_to_gt_grid(rr_times, rr_values)
-		align_meta['len_pred'] = rr_times.size
-		align_meta['len_gt'] = gt_rpm_full.size
-		record = {
-			'source': source_label,
-			'aligned': bool(align_meta.get('aligned', False)),
-			'len_gt': int(align_meta.get('len_gt', 0)),
-			'len_pred': int(align_meta.get('len_pred', 0)),
-			'len_final': int(align_meta.get('len_final', 0)),
-			'len_valid': int(align_meta.get('len_valid', 0)),
-			'alignment': align_meta,
-		}
-		if sig_aligned.size == 0 or gt_aligned.size == 0:
-			record['metrics'] = [float('nan')] * len([m for m in metrics if m])
-			return record
-		finite_mask = np.isfinite(sig_aligned) & np.isfinite(gt_aligned)
-		sig_valid = sig_aligned[finite_mask]
-		gt_valid = gt_aligned[finite_mask]
-		times_valid = times_aligned[finite_mask]
-		if sig_valid.size < 2 or gt_valid.size < 2:
-			record['metrics'] = [float('nan')] * len([m for m in metrics if m])
-			return record
-		metrics_for_errors = [m for m in metrics if m not in ('SNR',)]
-		e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics_for_errors)
-		raw_core_metrics = e[:-1]
-		metric_values = []
-		core_iter = iter(raw_core_metrics)
-		for metric_name in metrics:
-			if metric_name == 'SNR':
+		def _build_rr_record(rr_values, rr_times, snr_value, source_label):
+			rr_values = np.asarray(rr_values, dtype=np.float64).reshape(-1)
+			rr_times = np.asarray(rr_times, dtype=np.float64).reshape(-1)
+			if rr_values.size == 0 or rr_times.size == 0:
+				return None
+			sig_aligned, gt_aligned, times_aligned, align_meta = _align_to_gt_grid(rr_times, rr_values)
+			align_meta['len_pred'] = rr_times.size
+			align_meta['len_gt'] = gt_rpm_full.size
+			record = {
+				'source': source_label,
+				'aligned': bool(align_meta.get('aligned', False)),
+				'len_gt': int(align_meta.get('len_gt', 0)),
+				'len_pred': int(align_meta.get('len_pred', 0)),
+				'len_final': int(align_meta.get('len_final', 0)),
+				'len_valid': int(align_meta.get('len_valid', 0)),
+				'alignment': align_meta,
+			}
+			if sig_aligned.size == 0 or gt_aligned.size == 0:
+				record['metrics'] = [float('nan')] * len([m for m in metrics if m])
+				return record
+			finite_mask = np.isfinite(sig_aligned) & np.isfinite(gt_aligned)
+			sig_valid = sig_aligned[finite_mask]
+			gt_valid = gt_aligned[finite_mask]
+			times_valid = times_aligned[finite_mask]
+			if sig_valid.size < 2 or gt_valid.size < 2:
+				record['metrics'] = [float('nan')] * len([m for m in metrics if m])
+				return record
+			metrics_for_errors = [m for m in metrics if m not in ('SNR',)]
+			e = errors.getErrors(sig_valid, gt_valid, times_valid, times_valid, metrics_for_errors)
+			raw_core_metrics = e[:-1]
+			metric_values = []
+			core_iter = iter(raw_core_metrics)
+			for metric_name in metrics:
+				if metric_name == 'SNR':
+					try:
+						metric_values.append(float(snr_value))
+					except (TypeError, ValueError):
+						metric_values.append(float('nan'))
+					continue
+				val = next(core_iter, float('nan'))
 				try:
-					metric_values.append(float(snr_value))
-				except (TypeError, ValueError):
-					metric_values.append(float('nan'))
-				continue
-			val = next(core_iter, float('nan'))
-			try:
-				metric_values.append(float(val))
-			except Exception:
-				try:
-					arr = np.atleast_1d(val).astype(float)
-					metric_values.append(float(arr.flat[0]))
+					metric_values.append(float(val))
 				except Exception:
-					metric_values.append(float('nan'))
-		record['metrics'] = metric_values
-		return record
+					try:
+						arr = np.atleast_1d(val).astype(float)
+						metric_values.append(float(arr.flat[0]))
+					except Exception:
+						metric_values.append(float('nan'))
+			record['metrics'] = metric_values
+			return record
 
 		def _spectral_estimate_on_grid(filtered_sig, fps_val, window_size, centers):
 			if filtered_sig is None or filtered_sig.size == 0:
