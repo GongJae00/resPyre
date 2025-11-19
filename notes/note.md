@@ -4,21 +4,6 @@
 
 ---
 
-## 0. 최신 패치 요약 (2025-11)
-
-| Prompt | 내용 | 소스 |
-| --- | --- | --- |
-| 1 | 트랙 강제 사용, 품질 로깅(`std_bpm`, `unique`, `edge`, `track_frac_saturated_eval`, `reliability`) 및 aux/meta 반영 | `run_all.py` |
-| 2 | Trial별 MAD/SNR 로그 + coarse init 블렌딩 + autotune JSON 로딩 | `riv/estimators/params_autotune.py`, `_BaseOscillatorHead` |
-| 3 | PLL adaptive gain + phase noise shaping, Spec-Ridge multi-resolution STFT, 신뢰도 추가 | `oscillator_heads.py` |
-| 4 | 다중 헤드 앙상블 옵션 + 컴포넌트 결과 저장 | `riv/estimators/head_ensemble.py`, `motion/method_oscillator_wrapped.py` |
-| 5 | EM 기반 Kalman gain 학습 + Optuna 연동(`optuna_runner.py --em-mode`, MLflow trial 로깅) + top-K 기반 autotune override 생성 | `riv/optim/em_kalman.py`, `train_em.py`, `optuna_runner.py` |
-| 6 | README/notes/metadata 지침 업데이트, `results/<run>/metadata.json` 템플릿 확립. 추가 패치: `extract_respiration`이 dataset 메타를 강제로 주입해 EM/Autotune이 정확히 적용되고, 오실레이터 헤드는 스펙트럼 피크 신뢰도·SNR 기반으로 Q/R을 자동 조절(`spec_guidance_*`). | `run_all.py`, `riv/estimators/oscillator_heads.py`, README, 본 문서 |
-
-남은 과제: metadata 자동 생성 스크립트(실제 JSON 생성기).
-
----
-
 ## 1. 문제 배경과 연구 철학
 
 카메라 기반 비접촉 호흡 추정은 주로 rPPG(피부 광학)에서 호흡 저주파(0.1–0.5 Hz) 성분을 분리하는 방식이 널리 쓰였으나, 조명·자세·미세운동 노이즈와 대역이 겹쳐 근본적 한계가 있었다. 본 연구는 관측 양식-생리 기원 정합성에 착안해 “혈류” 대신 “상체의 기계적 운동”을 직관적으로 추적한다. 즉, 상체 변위로 얻은 1D 시계열을 호흡 공진자로 해석하고, 상태공간 추정(칼만/UKF/PLL/스펙트럼 능선 추적)로 주파수·위상·진폭을 안정적으로 복원한다.
