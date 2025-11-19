@@ -1442,7 +1442,7 @@ def evaluate(
 		'fwhm_df_guard': float(spectral_gating_cfg.get('fwhm_df_guard', _DEFAULT_GATING_CFG['spectral']['fwhm_df_guard']))
 	}
 
-	method_metrics = {}
+	method_metrics_track = {}
 	method_metrics_spectral = {}
 	records_written = 0
 
@@ -1712,7 +1712,7 @@ def evaluate(
 			method_key = str(cur_method)
 			method_storage_name = est['method']
 			capability = _infer_method_capability(method_storage_name)
-			enable_track_processing = bool(use_track and capability == 'tracker')
+			enable_track_processing = bool(capability == 'tracker')
 			gating_flags = {
 				'std': False,
 				'uniq': False,
@@ -1769,8 +1769,8 @@ def evaluate(
 				rr_vals = None
 
 			except Exception as exc:
-				# Early fail-safe to keep evaluation running; downstream blocks proceed
-				pass
+				tqdm.write(f"> Exception while preparing method {method_storage_name}::{trial_key}: {exc}")
+				raise
 
 			if enable_track_processing:
 				aux_dir = os.path.join(results_dir, 'aux', sanitized_method)
@@ -2273,7 +2273,7 @@ def evaluate(
 					'trial_key': trial_key,
 					'data_file': filepath
 				}
-				method_metrics.setdefault(method_key, []).append(record)
+				method_metrics_track.setdefault(method_key, []).append(record)
 				records_written += 1
 				if spec_rr_values.size:
 					snr_spec = _spectral_snr_from_stats(spec_stats_for_record)
@@ -2337,7 +2337,7 @@ def evaluate(
 					'trial_key': trial_key,
 					'data_file': filepath
 				}
-				method_metrics.setdefault(method_key, []).append(placeholder)
+				method_metrics_track.setdefault(method_key, []).append(placeholder)
 				records_written += 1
 				if spec_rr_values.size:
 					method_metrics_spectral.setdefault(method_key, []).append({
@@ -2361,7 +2361,7 @@ def evaluate(
 
 	# Before saving, report which methods produced metrics (helps debug filtering issues)
 	try:
-		seen_methods = sorted(list(method_metrics.keys()))
+		seen_methods = sorted(list(method_metrics_track.keys()))
 		print(f"\n> Methods evaluated: {len(seen_methods)} -> {', '.join(seen_methods) if seen_methods else '(none)'}")
 		# Persist a small debug log to help users verify which methods were seen
 		logs_dir = os.path.join(results_dir, 'logs')
@@ -2376,9 +2376,11 @@ def evaluate(
 	# Choose metrics output directory (new structure prefers results_dir/metrics)
 	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
 	if win_size == 'video':
-		fn = 'metrics_1w.pkl'
+		track_filename = 'metrics_track_1w.pkl'
+		legacy_filename = 'metrics_1w.pkl'
 	else:
-		fn = 'metrics.pkl'
+		track_filename = 'metrics_track.pkl'
+		legacy_filename = 'metrics.pkl'
 	settings_path = os.path.join(metrics_dir, 'eval_settings.json')
 	try:
 		with open(settings_path, 'w') as fp:
@@ -2400,26 +2402,21 @@ def evaluate(
 	except Exception as exc:
 		print(f"> Warning: failed to write evaluation settings ({exc})")
 	# Save the results of the applied methods
-	print(f"> Saving metrics to {os.path.join(metrics_dir, fn)}")
-	track_metrics_path = os.path.join(metrics_dir, fn)
+	print(f"> Saving metrics to {os.path.join(metrics_dir, track_filename)}")
+	track_metrics_path = os.path.join(metrics_dir, track_filename)
 	with open(track_metrics_path, 'wb') as fp:
-		pickle.dump([metrics, method_metrics], fp)
+		pickle.dump([metrics, method_metrics_track], fp)
 		print('> Metrics saved!\n')
+	legacy_path = os.path.join(metrics_dir, legacy_filename)
+	try:
+		shutil.copyfile(track_metrics_path, legacy_path)
+	except Exception:
+		pass
 	track_copy_path = os.path.join(metrics_dir, 'metrics_track.pkl')
 	try:
 		shutil.copyfile(track_metrics_path, track_copy_path)
 	except Exception:
 		pass
-	if not win_size == 'video':
-		try:
-			shutil.copyfile(track_metrics_path, os.path.join(metrics_dir, 'metrics.pkl'))
-		except Exception:
-			pass
-	if win_size == 'video':
-		try:
-			shutil.copyfile(track_metrics_path, os.path.join(metrics_dir, 'metrics_1w.pkl'))
-		except Exception:
-			pass
 
 	spec_metrics_path = os.path.join(metrics_dir, 'metrics_spectral.pkl')
 	with open(spec_metrics_path, 'wb') as fp:
@@ -2429,7 +2426,7 @@ def evaluate(
 	# Save human-readable table and plots (best-effort)
 	try:
 		annotation = f"# eval_band [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={use_track}"
-		track_summaries = _save_metrics_table(metrics_dir, method_metrics, metrics, win_size == 'video', annotation=annotation, summary_filename='metrics_summary.txt')
+		track_summaries = _save_metrics_table(metrics_dir, method_metrics_track, metrics, win_size == 'video', annotation=annotation, summary_filename='metrics_summary.txt')
 		track_summary_path = os.path.join(metrics_dir, 'metrics_summary.txt')
 		track_alias_path = os.path.join(metrics_dir, 'metrics_track_summary.txt')
 		try:
@@ -2441,28 +2438,44 @@ def evaluate(
 			_generate_plots(results_dir, track_summaries, metrics, win_size == 'video', stride=stride)
 	except Exception as e:
 		print(f"> Plot/log generation skipped due to error: {e}")
-	quality_msg = _persist_quality_reports(method_metrics, results_dir)
+	quality_msg = _persist_quality_reports(method_metrics_track, results_dir)
 	if quality_msg:
 		print(quality_msg)
-	return method_metrics
+	return method_metrics_track
 
 
-def print_metrics(results_dir, unique_window=False):
+def print_metrics(results_dir, unique_window=False, mode='track'):
+	mode = (mode or 'track').lower()
+	if mode not in ('track', 'spectral'):
+		raise ValueError(f"Unsupported metrics mode '{mode}'")
 	if unique_window:
-		print("Considering one window per video\n")
-		fn = 'metrics_1w.pkl'
+		print(f"Considering one window per video [{mode}]\n")
 	else:
-		print("Considering time windowing per each video\n")
-		fn = 'metrics.pkl'
+		print(f"Considering time windowing per each video [{mode}]\n")
 
-	# Load the calculated metrics (prefer new structure metrics/)
 	metrics_dir = os.path.join(results_dir, 'metrics') if os.path.isdir(os.path.join(results_dir, 'metrics')) else results_dir
-	with open(os.path.join(metrics_dir, fn), 'rb') as f: 
+	if mode == 'spectral':
+		candidate_files = ['metrics_spectral.pkl']
+	else:
+		if unique_window:
+			candidate_files = ['metrics_track_1w.pkl', 'metrics_1w.pkl', 'metrics_track.pkl', 'metrics.pkl']
+		else:
+			candidate_files = ['metrics_track.pkl', 'metrics.pkl', 'metrics_track_1w.pkl', 'metrics_1w.pkl']
+	metrics_path = None
+	for cand in candidate_files:
+		target = os.path.join(metrics_dir, cand)
+		if os.path.exists(target):
+			metrics_path = target
+			break
+	if metrics_path is None:
+		print(f"> {mode.title()} metrics file not found in {metrics_dir}")
+		return
+
+	with open(metrics_path, 'rb') as f: 
 		metrics, method_metrics = pickle.load(f)
 		metrics, method_metrics = _normalize_metrics_payload(metrics, method_metrics)
 	settings_path = os.path.join(metrics_dir, 'eval_settings.json')
 	annotation_line = None
-	use_track_flag = None
 	if os.path.exists(settings_path):
 		try:
 			with open(settings_path, 'r') as fp:
@@ -2471,7 +2484,7 @@ def print_metrics(results_dir, unique_window=False):
 			max_hz = eval_settings.get('max_hz')
 			use_track_flag = eval_settings.get('use_track')
 			if min_hz is not None and max_hz is not None:
-				annotation_line = f"# eval_band [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={bool(use_track_flag)}"
+				annotation_line = f"# eval_band [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={bool(use_track_flag)} | mode={mode}"
 				print(annotation_line + "\n")
 		except Exception:
 			pass
@@ -2505,11 +2518,11 @@ def print_metrics(results_dir, unique_window=False):
 		full_table = table_str
 
 	print(full_table)
-	# Save alongside pkl for reporting
+	summary_filename = 'metrics_summary.txt' if mode == 'track' else 'metrics_spectral_summary.txt'
 	try:
-		with open(os.path.join(metrics_dir, 'metrics_summary.txt'), 'w') as fp:
+		with open(os.path.join(metrics_dir, summary_filename), 'w') as fp:
 			fp.write(full_table + "\n")
-		if not unique_window:
+		if mode == 'track' and not unique_window:
 			with open(os.path.join(metrics_dir, 'metrics_track_summary.txt'), 'w') as fp:
 				fp.write(full_table + "\n")
 	except Exception:
@@ -3615,17 +3628,25 @@ def main(argv=None):
 							print(message)
 						else:
 							raise RuntimeError(message)
-			metrics_subdir = os.path.join(run_dir, 'metrics')
-			if os.path.isdir(metrics_subdir):
-				metrics_dir = metrics_subdir
-			else:
-				metrics_dir = run_dir
-			metrics_filename = 'metrics_1w.pkl' if win_size == 'video' else 'metrics.pkl'
-			metrics_path = os.path.join(metrics_dir, metrics_filename)
-			if not os.path.exists(metrics_path):
-				print(f"> Metrics file missing for {run_dir}; running evaluate first.")
-				evaluate(
-					run_dir,
+				metrics_subdir = os.path.join(run_dir, 'metrics')
+				if os.path.isdir(metrics_subdir):
+					metrics_dir = metrics_subdir
+				else:
+					metrics_dir = run_dir
+				if win_size == 'video':
+					candidates = ['metrics_track_1w.pkl', 'metrics_1w.pkl', 'metrics_track.pkl', 'metrics.pkl']
+				else:
+					candidates = ['metrics_track.pkl', 'metrics.pkl', 'metrics_track_1w.pkl', 'metrics_1w.pkl']
+				metrics_path = None
+				for cand in candidates:
+					cand_path = os.path.join(metrics_dir, cand)
+					if os.path.exists(cand_path):
+						metrics_path = cand_path
+						break
+				if metrics_path is None:
+					print(f"> Metrics file missing for {run_dir}; running evaluate first.")
+					evaluate(
+						run_dir,
 					metrics,
 					win_size=win_size,
 					stride=stride,
@@ -3638,15 +3659,24 @@ def main(argv=None):
 					track_saturation_max=track_saturation_max,
 					saturation_margin_hz=saturation_margin_hz,
 					saturation_persist_sec=saturation_persist_sec,
-					constant_ptp_max_hz=constant_ptp_max_hz,
-					gating=gating_cfg
+						constant_ptp_max_hz=constant_ptp_max_hz,
+						gating=gating_cfg
+					)
+					for cand in candidates:
+						cand_path = os.path.join(metrics_dir, cand)
+						if os.path.exists(cand_path):
+							metrics_path = cand_path
+							break
+				unique_window = (
+					os.path.exists(os.path.join(metrics_dir, 'metrics_track_1w.pkl'))
+					or os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
 				)
-			unique_window = os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
 			print(f"\n== Metrics for {run_dir} ==")
 			if not os.path.exists(metrics_path):
 				print(f"> Metrics still unavailable for {run_dir}. Please rerun evaluate step.")
 				continue
-			print_metrics(run_dir, unique_window=unique_window)
+			print_metrics(run_dir, unique_window=unique_window, mode='track')
+			print_metrics(run_dir, unique_window=unique_window, mode='spectral')
 		_profiler_stage_end('metrics')
 
 	if 'report' in steps:
