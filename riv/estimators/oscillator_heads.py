@@ -248,6 +248,32 @@ class _BaseOscillatorHead:
                 setattr(self.params, 'qx_override', float(em_overrides['q']))
             if 'r' in em_overrides:
                 setattr(self.params, 'rv_floor_override', float(em_overrides['r']))
+        # 3) Clamp overrides so mis-estimated EM/auto-tune values cannot explode the
+        # oscillator random walk and destabilise tracks.
+        base_qx = self.params.qx if (self.params.qx and self.params.qx > 0) else None
+        if base_qx is None or not np.isfinite(base_qx):
+            # fallback: derive a small, conservative base from qx_scale
+            base_qx = max((self.params.qx_scale or 0.0) * 1e-4, 5e-5)
+        qx_override = getattr(self.params, "qx_override", None)
+        if qx_override is not None and np.isfinite(qx_override) and qx_override > 0:
+            qx_cap = max(5.0 * base_qx, base_qx + 5e-5)
+            self.params.qx_override = float(np.clip(qx_override, 1e-7, qx_cap))
+        base_rv_floor = self.params.rv_floor if (self.params.rv_floor and self.params.rv_floor > 0) else 0.03
+        rv_override = getattr(self.params, "rv_floor_override", None)
+        if rv_override is not None and np.isfinite(rv_override) and rv_override > 0:
+            rv_cap = max(5.0 * base_rv_floor, base_rv_floor + 0.02)
+            self.params.rv_floor_override = float(np.clip(rv_override, 1e-6, rv_cap))
+        base_qf = self.params.qf if (self.params.qf and self.params.qf > 0) else 5e-5
+        qf_override = getattr(self.params, "qf_override", None)
+        if qf_override is not None and np.isfinite(qf_override) and qf_override > 0:
+            qf_cap = max(5.0 * base_qf, 1e-3)
+            self.params.qf_override = float(np.clip(qf_override, 1e-7, qf_cap))
+        # 4) Apply a light default smoother to tracker heads when none was set;
+        # helps stabilise MAE/RMSE without affecting spectral metrics.
+        if self.head_key in ("kfstd", "ukffreq", "pll"):
+            alpha = getattr(self.params, "post_smooth_alpha", 0.0)
+            if not (alpha > 0.0 and alpha < 1.0):
+                self.params.post_smooth_alpha = 0.88
         self._autotune_cache[cache_key] = True
 
     def _log_autotune_stats(self, meta: Optional[Dict], freq: float):
@@ -398,9 +424,17 @@ class _BaseOscillatorHead:
         rv_floor = p.rv_floor_override if (p.rv_floor_override is not None and p.rv_floor_override > 0) else p.rv_floor
         if p.rv_auto:
             sigma = self._last_sigma_y if (self._last_sigma_y is not None and np.isfinite(self._last_sigma_y)) else 1.0
+            # Large sigma values occasionally appear on outlier trials (e.g., extreme motion);
+            # cap to avoid inflating the measurement noise by orders of magnitude.
+            sigma_cap = 10.0
+            if sigma > sigma_cap:
+                sigma = sigma_cap
             rv = max((p.rv_mad_scale * sigma) ** 2, rv_floor)
         else:
             rv = max(p.rv, rv_floor)
+        # Upper-bound rv so the filter does not become unresponsive on high-variance clips.
+        rv_cap = max(50.0 * rv_floor, rv_floor + 1.0)
+        rv = min(rv, rv_cap)
         # Base (pre-guidance) frequency diffusion level used to bound qf.
         qf_base = p.qf if (p.qf and p.qf > 0) else 5e-5
         qf = qf_base
