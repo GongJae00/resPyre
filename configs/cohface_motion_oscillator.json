@@ -22,9 +22,12 @@
       "name": "of_farneback__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.0003,
+          "qx": 0.0001,
+          "qf": 0.0001,
           "rv_floor": 0.03,
-          "post_smooth_alpha": 0.9
+          "post_smooth_alpha": 0.9,
+          "spec_guidance_strength": 1.1,
+          "spec_guidance_offset": 0.05
         }
       }
     },
@@ -32,11 +35,14 @@
       "name": "of_farneback__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.00032,
-          "qx": 0.0001,
+          "qf": 0.00012,
+          "qx": 0.00008,
           "rv_floor": 0.03,
           "tau_env": 35,
-          "ukf_alpha": 0.08
+          "ukf_alpha": 0.05,
+          "post_smooth_alpha": 0.9,
+          "spec_guidance_strength": 1.1,
+          "spec_guidance_offset": 0.05
         }
       }
     },
@@ -52,10 +58,15 @@
       "name": "of_farneback__pll",
       "params": {
         "oscillator": {
-          "pll_ttrack": 5.5,
-          "pll_zeta": 0.85,
-          "pll_kp_min": 0.0005,
-          "pll_ki_min": 2e-05
+          "pll_ttrack": 6.5,
+          "pll_zeta": 0.9,
+          "pll_kp_min": 0.0003,
+          "pll_ki_min": 1e-05,
+          "post_smooth_alpha": 0.92,
+          "spec_guidance_strength": 1.15,
+          "spec_guidance_offset": 0.05,
+          "qf": 0.0001,
+          "qx": 0.0001
         }
       }
     },
@@ -63,9 +74,12 @@
       "name": "dof__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.0004,
+          "qx": 0.00012,
+          "qf": 0.0001,
           "rv_floor": 0.05,
-          "post_smooth_alpha": 0.88
+          "post_smooth_alpha": 0.9,
+          "spec_guidance_strength": 1.1,
+          "spec_guidance_offset": 0.05
         }
       }
     },
@@ -73,11 +87,14 @@
       "name": "dof__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.00045,
-          "qx": 0.00025,
+          "qf": 0.00012,
+          "qx": 0.0001,
           "rv_floor": 0.05,
           "tau_env": 42,
-          "ukf_alpha": 0.12
+          "ukf_alpha": 0.06,
+          "post_smooth_alpha": 0.9,
+          "spec_guidance_strength": 1.1,
+          "spec_guidance_offset": 0.05
         }
       }
     },
@@ -93,10 +110,13 @@
       "name": "dof__pll",
       "params": {
         "oscillator": {
-          "pll_ttrack": 7.5,
-          "pll_zeta": 0.75,
-          "pll_kp_min": 0.001,
-          "pll_ki_min": 8e-05
+          "pll_ttrack": 8.5,
+          "pll_zeta": 0.8,
+          "pll_kp_min": 0.0004,
+          "pll_ki_min": 3e-05,
+          "post_smooth_alpha": 0.92,
+          "spec_guidance_strength": 1.15,
+          "spec_guidance_offset": 0.05
         }
       }
     },
@@ -134,10 +154,13 @@
       "name": "profile1d_linear__pll",
       "params": {
         "oscillator": {
-          "pll_ttrack": 5.0,
-          "pll_zeta": 0.85,
-          "pll_kp_min": 0.0003,
-          "pll_ki_min": 2e-05
+          "pll_ttrack": 5.5,
+          "pll_zeta": 0.9,
+          "pll_kp_min": 0.00025,
+          "pll_ki_min": 1.5e-05,
+          "post_smooth_alpha": 0.92,
+          "spec_guidance_strength": 1.15,
+          "spec_guidance_offset": 0.05
         }
       }
     },
@@ -175,10 +198,13 @@
       "name": "profile1d_quadratic__pll",
       "params": {
         "oscillator": {
-          "pll_ttrack": 5.0,
-          "pll_zeta": 0.85,
-          "pll_kp_min": 0.0003,
-          "pll_ki_min": 2e-05
+          "pll_ttrack": 5.5,
+          "pll_zeta": 0.9,
+          "pll_kp_min": 0.00025,
+          "pll_ki_min": 1.5e-05,
+          "post_smooth_alpha": 0.92,
+          "spec_guidance_strength": 1.15,
+          "spec_guidance_offset": 0.05
         }
       }
     },
@@ -216,10 +242,13 @@
       "name": "profile1d_cubic__pll",
       "params": {
         "oscillator": {
-          "pll_ttrack": 5.0,
-          "pll_zeta": 0.85,
-          "pll_kp_min": 0.0003,
-          "pll_ki_min": 2e-05
+          "pll_ttrack": 5.5,
+          "pll_zeta": 0.9,
+          "pll_kp_min": 0.00025,
+          "pll_ki_min": 1.5e-05,
+          "post_smooth_alpha": 0.92,
+          "spec_guidance_strength": 1.15,
+          "spec_guidance_offset": 0.05
         }
       }
     }
