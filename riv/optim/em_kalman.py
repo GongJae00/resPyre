@@ -17,7 +17,9 @@ class EMConfig:
 	tol: float = 1e-4
 	# Respiration tracks are z-scored, so allow slow but non-zero drift.
 	min_q: float = 5e-5
+	max_q: float = 0.05
 	min_r: float = 5e-4
+	max_r: float = 0.5
 	init_q: float = 5e-4
 	init_r: float = 0.05
 
@@ -106,8 +108,8 @@ class EMKalmanTrainer:
 		else:
 			q_new = q
 		r_new = sum_r / total_samples
-		q_new = float(np.clip(q_new, self.cfg.min_q, 1.0))
-		r_new = float(np.clip(r_new, self.cfg.min_r, 1.0))
+		q_new = float(np.clip(q_new, self.cfg.min_q, self.cfg.max_q))
+		r_new = float(np.clip(r_new, self.cfg.min_r, self.cfg.max_r))
 		return {"q": q_new, "r": r_new, "ll": float(sum_ll)}
 
 	def _normalize_sequences(self, observations) -> List[np.ndarray]:
