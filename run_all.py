@@ -554,7 +554,7 @@ def _display_method_key(name):
 	Stable display ordering for methods.
 
 	For oscillator-wrapped motion methods we want:
-	  base, base__kfstd, base__ukffreq, base__spec_ridge, base__pll
+	  base, base__kfstd, base__ukffreq
 	in that order, and bases ordered as:
 	  of_farneback, dof, profile1d_linear, profile1d_quadratic, profile1d_cubic.
 	All other methods fall back to alphabetical order after these.
@@ -573,7 +573,7 @@ def _display_method_key(name):
 		'profile1d_quadratic',
 		'profile1d_cubic',
 	)
-	head_order = ('', 'kfstd', 'ukffreq', 'spec_ridge', 'pll')
+	head_order = ('', 'kfstd', 'ukffreq')
 	try:
 		base_idx = base_order.index(base)
 	except ValueError:
@@ -986,6 +986,7 @@ def _spectral_stats_from_signal(filtered_sig, fps, win_seconds, min_hz, max_hz):
 			return stats
 		peak_idx = int(np.argmax(mean_power))
 		peak_power = float(mean_power[peak_idx])
+		median_power = float(np.median(mean_power))
 		eps = 1e-12
 		if mean_power.size > 1:
 			second = float(np.partition(mean_power, -2)[-2])
@@ -994,6 +995,9 @@ def _spectral_stats_from_signal(filtered_sig, fps, win_seconds, min_hz, max_hz):
 		stats['peak_ratio'] = float(peak_power / max(second, eps))
 		stats['prominence_db'] = float(10.0 * np.log10((peak_power + eps) / (np.mean(mean_power) + eps)))
 		stats['peak_bpm'] = float(freqs_bpm[peak_idx]) if freqs_bpm.size else float('nan')
+		stats['peak_power'] = peak_power
+		stats['median_band_power'] = median_power
+		stats['snr_db'] = float(10.0 * np.log10(max(peak_power, eps) / max(median_power, eps)))
 		freq_hz = (np.asarray(freqs_bpm, dtype=np.float64) / 60.0) if freqs_bpm.size else np.asarray([], dtype=np.float64)
 		half_power = peak_power * 0.5
 		left = peak_idx
@@ -1014,6 +1018,12 @@ def _spectral_stats_from_signal(filtered_sig, fps, win_seconds, min_hz, max_hz):
 def _spectral_snr_from_stats(stats):
 	if not isinstance(stats, dict):
 		return float('nan')
+	if 'snr_db' in stats:
+		try:
+			val = float(stats['snr_db'])
+			return val if np.isfinite(val) else float('nan')
+		except (TypeError, ValueError):
+			return float('nan')
 	peak_ratio = stats.get('peak_ratio')
 	try:
 		peak_ratio = float(peak_ratio)
@@ -1645,7 +1655,10 @@ def evaluate(
 			sig_valid = sig_aligned[finite_mask]
 			gt_valid = gt_aligned[finite_mask]
 			times_valid = times_aligned[finite_mask]
-			if sig_valid.size < 2 or gt_valid.size < 2:
+			valid_count = int(finite_mask.sum())
+			align_meta['len_valid'] = valid_count
+			record['len_valid'] = valid_count
+			if sig_valid.size == 0 or gt_valid.size == 0:
 				record['metrics'] = [float('nan')] * len([m for m in metrics if m])
 				return record
 			metrics_for_errors = [m for m in metrics if m not in ('SNR',)]
@@ -1671,6 +1684,65 @@ def evaluate(
 						metric_values.append(float('nan'))
 			record['metrics'] = metric_values
 			return record
+
+		def _time_rr_estimate_on_grid(filtered_sig, fps_val, window_size, centers, min_band_hz, max_band_hz):
+			if filtered_sig is None or filtered_sig.size == 0:
+				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+			try:
+				fps_val = float(fps_val)
+			except (TypeError, ValueError):
+				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+			if fps_val <= 0:
+				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+			try:
+				win_seconds = float(window_size)
+			except (TypeError, ValueError):
+				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+			if win_seconds <= 0:
+				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+			centers = np.asarray(centers, dtype=np.float64).reshape(-1)
+			if centers.size == 0:
+				return np.asarray([], dtype=np.float64), centers
+			win_frames = int(round(win_seconds * fps_val))
+			if win_frames <= 0:
+				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+			half_window = 0.5 * win_seconds
+			total_frames = filtered_sig.shape[1]
+			rr_vals = []
+			valid_centers = []
+			min_dist = int(max(1, fps_val / max_band_hz)) if max_band_hz > 0 else 1
+			for center in centers:
+				start_time = center - half_window
+				end_time = center + half_window
+				start_idx = int(round(start_time * fps_val))
+				end_idx = start_idx + win_frames
+				if start_idx < 0 or end_idx > total_frames:
+					continue
+				segment = filtered_sig[:, start_idx:end_idx]
+				if segment.shape[1] != win_frames:
+					continue
+				window_rr = []
+				for row in segment:
+					row = np.asarray(row, dtype=np.float64)
+					row = row[np.isfinite(row)]
+					if row.size < 8:
+						continue
+					peaks, _ = signal.find_peaks(row, distance=min_dist)
+					if peaks.size < 2:
+						continue
+					intervals = np.diff(peaks) / fps_val
+					intervals = intervals[np.isfinite(intervals)]
+					intervals = intervals[(intervals > 1.0 / max_band_hz) & (intervals < 1.0 / min_band_hz)] if min_band_hz > 0 else intervals
+					if intervals.size == 0:
+						continue
+					median_rr_hz = 1.0 / float(np.median(intervals))
+					window_rr.append(median_rr_hz * 60.0)
+				if window_rr:
+					rr_vals.append(float(np.nanmedian(window_rr)))
+					valid_centers.append(center)
+			if not rr_vals:
+				return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+			return np.asarray(rr_vals, dtype=np.float64), np.asarray(valid_centers, dtype=np.float64)
 
 		def _spectral_estimate_on_grid(filtered_sig, fps_val, window_size, centers):
 			if filtered_sig is None or filtered_sig.size == 0:
@@ -1864,20 +1936,13 @@ def evaluate(
 						degenerate_reason = 'low_unique'
 			else:
 				if capability != 'tracker':
-					# Track evaluation: windowed spectral RR for time-domain comparison
-					sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
+					# Track evaluation: time-domain RR from peak intervals (centers = GT timestamps)
+					sig_rpm_values, t_sig = _time_rr_estimate_on_grid(filt_sig, fps, ws, t_gt_full, min_hz, max_hz)
 					spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
 					track_used = True
-					# Spectral evaluation: full-signal Welch peak as a single RR sample
-					spectral_stats_full = _spectral_stats_from_signal(filt_sig, fps, max(len(filt_sig) / max(fps, 1e-6), ws), min_hz, max_hz)
-					peak_bpm = spectral_stats_full.get('peak_bpm')
-					if peak_bpm is not None and np.isfinite(peak_bpm):
-						spec_rr_values = np.asarray([peak_bpm], dtype=np.float64)
-						spec_rr_times = np.asarray([t_gt_full[0] if t_gt_full.size else 0.0], dtype=np.float64)
-					else:
-						spec_rr_values = np.asarray([], dtype=np.float64)
-						spec_rr_times = np.asarray([], dtype=np.float64)
-					spec_stats_for_record = spectral_stats_full
+					# Spectral evaluation: 중첩 창(center=t_gt_full) with spectral RR
+					spec_rr_values, spec_rr_times = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
+					spec_stats_for_record = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
 				else:
 					spectral_stats = {}
 					spec_rr_values, spec_rr_times = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
@@ -1931,35 +1996,17 @@ def evaluate(
 			finite_rpm = np.asarray([], dtype=np.float64)
 			allow_constant_track = bool(track_meta.get('is_constant_track')) if isinstance(track_meta, dict) else False
 			meta_for_stats = dict(track_meta) if isinstance(track_meta, dict) else {}
-			raw_snr = meta_for_stats.get('snr_estimate')
-			try:
-				snr_estimate = float(raw_snr)
-			except (TypeError, ValueError):
-				snr_estimate = float('nan')
-			if (capability != 'tracker') and (not np.isfinite(snr_estimate)):
-				spec_local = spectral_stats or {}
-				peak_ratio = spec_local.get('peak_ratio')
-				if peak_ratio is not None:
-					try:
-						peak_ratio = float(peak_ratio)
-					except (TypeError, ValueError):
-						peak_ratio = float('nan')
-					if np.isfinite(peak_ratio) and peak_ratio > 0:
-						snr_estimate = float(10.0 * np.log10(max(peak_ratio, 1e-6)))
-				if (not np.isfinite(snr_estimate)) and spec_local:
-					prom_db = spec_local.get('prominence_db')
-					try:
-						prom_db = float(prom_db)
-					except (TypeError, ValueError):
-						prom_db = float('nan')
-					if np.isfinite(prom_db):
-						snr_estimate = prom_db
-			if (capability != 'tracker') and (not np.isfinite(snr_estimate)):
-				fallback_snr = _band_snr_from_signal(filt_sig, fps, min_hz, max_hz)
-				if np.isfinite(fallback_snr):
-					snr_estimate = fallback_snr
-			if not np.isfinite(snr_estimate):
-				snr_estimate = 0.0
+			# Separate SNR estimates for track vs spectral reporting
+			snr_track_est = float('nan')
+			snr_spec_est = float('nan')
+			# Track-mode SNR: unified bandpower-based estimate on the time-domain signal used for evaluation.
+			snr_track_est = _band_snr_from_signal(filt_sig, fps, min_hz, max_hz)
+			# Spectral-mode SNR: peak-based; fall back to bandpower if unavailable.
+			snr_spec_est = _spectral_snr_from_stats(spec_stats_for_record if spec_stats_for_record else spectral_stats)
+			if not np.isfinite(snr_track_est):
+				snr_track_est = float('nan')
+			if not np.isfinite(snr_spec_est):
+				snr_spec_est = float('nan')
 			meta_for_stats['track_frac_saturated_eval'] = float(sat_frac) if np.isfinite(sat_frac) else float('nan')
 			meta_for_stats['saturation_margin_hz_used'] = float(edge_margin_hz)
 			meta_for_stats['saturation_persist_samples'] = int(persist_samples)
@@ -1987,7 +2034,7 @@ def evaluate(
 			meta_for_stats['std_below_threshold'] = std_below_threshold
 			meta_for_stats['unique_below_threshold'] = bool(nuniq_frac < float(track_unique_min))
 			meta_for_stats['edge_saturation_breach'] = bool(np.isfinite(sat_frac) and (sat_frac > float(track_saturation_max)))
-			meta_for_stats['snr_estimate'] = float(snr_estimate) if np.isfinite(snr_estimate) else float('nan')
+			meta_for_stats['snr_estimate'] = float(snr_track_est) if np.isfinite(snr_track_est) else float('nan')
 	
 			if constant_ptp_max_hz > 0.0 and finite_track.size:
 				# Robust range (P95−P5) guards against transient spikes while detecting quasi-constant tracks.
@@ -2315,8 +2362,7 @@ def evaluate(
 				method_metrics_track.setdefault(method_key, []).append(record)
 				records_written += 1
 				if spec_rr_values.size:
-					snr_spec = _spectral_snr_from_stats(spec_stats_for_record)
-					spec_record = _build_rr_record(spec_rr_values, spec_rr_times, snr_spec, 'spectral')
+					spec_record = _build_rr_record(spec_rr_values, spec_rr_times, snr_spec_est, 'spectral')
 					if spec_record:
 						method_metrics_spectral.setdefault(method_key, []).append(spec_record)
 				if debug_log_path:

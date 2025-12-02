@@ -35,7 +35,7 @@ python run_all.py -c configs/cohface_motion_oscillator.json \
   --auto_discover_methods true \
   --runs cohface_motion_oscillator
 
-# 4) (Optional) Fit EM-based Kalman gain for a method (e.g., KFstd/PLL on COHFACE)
+# 4) (Optional) Fit EM-based Kalman gain for a tracker head (KFstd/UKFFreq on COHFACE)
 python train_em.py \
   --results results/cohface_motion_oscillator \
   --dataset COHFACE \
@@ -46,7 +46,7 @@ python train_em.py \
 #     이 값을 자동으로 불러와 표준 공진자 칼만필터의 Q/R을 데이터 기반으로 설정합니다.
 ```
 
-- 결과는 `results/cohface_motion_oscillator/...`에 저장됩니다. `metrics/metrics_summary.txt` 외에도 `logs/method_quality.csv`, `logs/method_quality_summary.json`, `logs/methods_seen.txt`를 확인하세요.
+- 결과는 `results/cohface_motion_oscillator/...`에 저장됩니다. `metrics/metrics_track_summary.txt`/`metrics_spectral_summary.txt` 외에도 `logs/method_quality.csv`, `logs/method_quality_summary.json`, `logs/methods_seen.txt`를 확인하세요.
 - `--runs`로 기존 산출물을 지정할 때는 run 라벨(예: `cohface_motion_oscillator`)이나 절대 경로를 사용하세요. `results/` 접두사는 내부적으로 자동으로 붙으므로 다시 추가하면 `results/results/...`처럼 잘못된 위치가 됩니다.
 - 동일 run 디렉터리에 `metadata.json`을 남겨 명령어·git 커밋·autotune/EM 버전·주요 메트릭 경로를 기록하는 것을 권장합니다 (템플릿은 아래 참조).
 - COHFACE 설정은 기본적으로 `gating.profile="paper"`와 `disable_gating=false`를 사용하여 tracker 품질을 자동으로 검증합니다. 논문용으로 gating을 끄고 싶다면 평가 명령어에 `--override gating.debug.disable_gating=true`를 추가하세요.
@@ -56,7 +56,7 @@ python train_em.py \
 
 The main script [run_all.py](run_all.py) drives a three-stage pipeline:
 
-1. **estimate**: Extract motion-based respiration signals (5 baselines) and pass each through an oscillator head (KFstd, UKF, Spec-Ridge, PLL).
+1. **estimate**: Extract motion-based respiration signals (5 baselines) and pass each through an oscillator head (KFstd, UKF; Spec-Ridge/PLL remain available but are disabled in the default config).
 2. **evaluate**: Consume the oscillator-provided `track_hz` directly while logging full quality diagnostics per trial.
 3. **metrics**: Aggregate medians/variability, emit tables/plots, and persist `method_quality` summaries.
 
@@ -82,8 +82,8 @@ The following methods are implemented:
 
 ### Oscillator Heads & SOMATA-style pipeline
 
-- Baseline motion estimators (`of_farneback`, `dof`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`) can be paired with four oscillator refinement heads (`kfstd`, `ukffreq`, `spec_ridge`, `pll`) for 20 additional method names such as `of_farneback__kfstd`.
-- Use `configs/cohface_motion_oscillator.json` to run all 25 variants on COHFACE with `python run_all.py --config configs/cohface_motion_oscillator.json --step estimate evaluate metrics`.
+- Baseline motion estimators (`of_farneback`, `dof`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`) can be paired with two tracker heads (`kfstd`, `ukffreq`) for 10 additional method names such as `of_farneback__kfstd`. (Spec-Ridge/PLL remain implemented but are excluded from the current COHFACE config and Optuna search.)
+- Use `configs/cohface_motion_oscillator.json` to run all 15 variants (5 baselines + 10 tracker wraps) on COHFACE with `python run_all.py --config configs/cohface_motion_oscillator.json --step estimate evaluate metrics`.
 - Each wrapped method writes its smoothed waveform to the main pickle file and stores detailed diagnostics (signal, frequency track, RR summary, quality flags) under `results/<run_name>/aux/<method>/<trial>.npz`. Ensemble mode additionally stores each component under `aux/<method>/components/<trial>/<head>.npz`.
 - Evaluation-wide frequency bands are controlled via `eval.min_hz`/`eval.max_hz` (default `0.08–0.5 Hz`). Every method now emits **two** metric sets per run: a track-domain table (`metrics_track*.pkl`) built from the time-varying `track_hz` (or sliding-window RR for the 5 base methods) and a spectral table (`metrics_spectral.pkl`) based on Welch peaks from the same waveform. Track heads therefore expose both their real-time tracking skill and their averaged spectral accuracy, while the base methods appear in both tables (identical values for track vs. spectral in their case).
 - Oscillator heads automatically tighten/loosen their Q/R noise levels based on the spectral peak confidence and recent SNR (`spec_guidance_*` parameters in `OscillatorParams`); strong peaks damp the random walk while low-confidence trials can drift more freely.
@@ -112,16 +112,17 @@ The following methods are implemented:
 python train_em.py \
   --results results/cohface_motion_oscillator \
   --dataset COHFACE \
-  --method profile1d_cubic__pll \
+  --method profile1d_cubic__ukffreq \
   --build_autotune
 ```
 
-This stacks every `aux/<method>/<trial>.npz` track, fits Q/R via EM, saves `runs/em_params/cohface_profile1d_cubic__pll.json`, and appends a row to `runs/em_logs/em_training.csv`. The oscillator heads automatically load these Q/R overrides on the next run.
+This stacks every `aux/<method>/<trial>.npz` track, fits Q/R via EM, saves `runs/em_params/cohface_profile1d_cubic__ukffreq.json`, and appends a row to `runs/em_logs/em_training.csv`. The oscillator heads automatically load these Q/R overrides on the next run.
 
 When `--build_autotune` is set, the script also inspects the per-trial metrics, finds the top-K (default 5) lowest-MAE trials, and writes an autotune override (`runs/autotune/cohface/<method>.json`) whose `rv_floor_override`/`qx_override` come from their median `sigma_hat`/SNR statistics. You can adjust this behaviour with `--autotune-top-k`, `--autotune-rv-scale`, and `--autotune-qx-base`.
 
 ### PLL / Spec-Ridge upgrades & Ensemble mode
 
+- These heads remain available for manual experiments but are **not** part of the current COHFACE config or Optuna search.
 - `oscillator_PLL` now uses an adaptive controller (`PLLAdaptiveController`) that scales KP/KI based on the observed SNR and adds a phase-noise shaping term; reliability is reported via track variance.
 - `oscillator_Spec_ridge` performs multi-resolution STFT (0.75×/1×/1.5× window scales), computes ridge regularisation, and fuses tracks according to power-driven reliability. Meta includes `multi_resolution_used` and the final reliability score.
 - Optional ensemble execution mixes the four heads:
@@ -153,8 +154,8 @@ The ensemble stores both the fused track and the component outputs so you can co
   "command": "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics",
   "git_commit": "<abc1234>",
   "autotune": "runs/autotune/cohface/...",
-  "em_params": "runs/em_params/cohface_profile1d_cubic__pll.json",
-  "metrics": "results/cohface_motion_oscillator/metrics/metrics_summary.txt"
+  "em_params": "runs/em_params/cohface_profile1d_cubic__ukffreq.json",
+  "metrics": "results/cohface_motion_oscillator/metrics/metrics_track_summary.txt"
 }
 ```
 
@@ -176,10 +177,10 @@ After every run, create a `metadata.json` alongside `metrics/` summarising the c
 {
   "command": "python run_all.py -c configs/cohface_motion_oscillator.json -s estimate evaluate metrics",
   "git_commit": "<commit>",
-  "autotune": "runs/autotune/cohface/profile1d_cubic__pll.json",
-  "em_params": "runs/em_params/cohface_profile1d_cubic__pll.json",
+  "autotune": "runs/autotune/cohface/profile1d_cubic__ukffreq.json",
+  "em_params": "runs/em_params/cohface_profile1d_cubic__ukffreq.json",
   "ensemble": false,
-  "metrics_summary": "results/cohface_motion_oscillator/metrics/metrics_summary.txt",
+  "metrics_summary": "results/cohface_motion_oscillator/metrics/metrics_track_summary.txt",
   "quality_logs": "results/cohface_motion_oscillator/logs/method_quality.csv"
 }
 ```
@@ -208,6 +209,8 @@ python optuna_runner.py \
   --mlflow-experiment respyre-optuna
 ```
 
+- The allowlist now covers 10 tracker methods (KFstd/UKFFreq across 5 bases); Spec-Ridge/PLL combinations are skipped.
+- Search spaces are tightened around the current COHFACE defaults (e.g., `ukffreq` sweeps `qx`≈5e-5–1.6e-4, `qf`≈5e-5–3.5e-4, `rv_floor`≈0.02–0.06) to reduce divergence and focus on physiologic drifts.
 - `--em-mode off|trial|best`: run EM-based Kalman gain learning after each trial (`trial`) or only for the best configuration (`best`). Best trials automatically persist to `runs/em_params/<dataset>_<method>.json` and append a row to `runs/em_logs/em_training.csv`.
 - `--mlflow-uri`, `--mlflow-experiment`: if [MLflow](https://mlflow.org) is installed, every trial logs params/metrics (including EM `q`, `r`, `ll`) to the selected tracking server. When MLflow is unavailable the script falls back to CSV logging (`trials.csv`) and prints a warning.
 

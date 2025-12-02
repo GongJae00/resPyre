@@ -15,13 +15,13 @@ import numpy as np
 class EMConfig:
 	max_iters: int = 25
 	tol: float = 1e-4
-	# Respiration tracks are z-scored, so allow slow but non-zero drift.
-	min_q: float = 5e-5
-	max_q: float = 0.05
-	min_r: float = 5e-4
-	max_r: float = 0.5
-	init_q: float = 5e-4
-	init_r: float = 0.05
+	# Respiration tracks are z-scored; allow slow drift but clamp to physiologic scales.
+	min_q: float = 5e-6
+	max_q: float = 5e-3
+	min_r: float = 1e-5
+	max_r: float = 0.05
+	init_q: float = 3e-4
+	init_r: float = 5e-3
 
 
 class EMKalmanTrainer:
@@ -115,13 +115,30 @@ class EMKalmanTrainer:
 	def _normalize_sequences(self, observations) -> List[np.ndarray]:
 		if isinstance(observations, np.ndarray):
 			arr = np.asarray(observations, dtype=np.float64).reshape(-1)
-			return [arr] if arr.size else []
+			return [self._clean_sequence(arr)] if arr.size else []
 		sequences: List[np.ndarray] = []
 		for seq in observations or []:
 			arr = np.asarray(seq, dtype=np.float64).reshape(-1)
-			if arr.size:
-				sequences.append(arr)
+			if not arr.size:
+				continue
+			seq_clean = self._clean_sequence(arr)
+			if seq_clean is not None:
+				sequences.append(seq_clean)
 		return sequences
+
+	def _clean_sequence(self, arr: np.ndarray) -> Optional[np.ndarray]:
+		arr = np.asarray(arr, dtype=np.float64)
+		arr = arr[np.isfinite(arr)]
+		if arr.size < 16:
+			return None
+		median = float(np.median(arr))
+		mad = float(np.median(np.abs(arr - median)))
+		sigma = 1.4826 * mad if mad > 0 else float(np.std(arr))
+		if not np.isfinite(sigma) or sigma <= 0.0:
+			return None
+		arr = (arr - median) / max(sigma, 1e-6)
+		arr = np.clip(arr, -5.0, 5.0)
+		return arr
 
 	def fit(self, observations, init_q: Optional[float] = None, init_r: Optional[float] = None) -> Dict:
 		sequences = self._normalize_sequences(observations)

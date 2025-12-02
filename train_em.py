@@ -39,10 +39,16 @@ def _load_signals(results_dir: str, method: str):
 					series = np.asarray(data['track_hz'], dtype=np.float64).reshape(-1)
 				if series is None or not series.size:
 					continue
-				series = series - float(np.mean(series))
-				std = float(np.std(series))
-				if std > 1e-8:
-					series = series / std
+				series = np.asarray(series, dtype=np.float64)
+				series = series[np.isfinite(series)]
+				if series.size < 16:
+					continue
+				median = float(np.median(series))
+				mad = float(np.median(np.abs(series - median)))
+				sigma = 1.4826 * mad if mad > 0 else float(np.std(series))
+				scale = max(sigma, 1e-6)
+				series = (series - median) / scale
+				series = np.clip(series, -5.0, 5.0)
 				signals.append(series)
 		except Exception:
 			continue
@@ -85,7 +91,17 @@ def _select_top_trials(metric_names, records, top_k):
 		trial_key = record.get('trial_key') or (record.get('quality') or {}).get('trial_key')
 		if not trial_key:
 			continue
-		candidates.append((mae_val, trial_key, record))
+		rel = None
+		track_stats = record.get('track_stats') or {}
+		try:
+			rel = float(track_stats.get('reliability_meta'))
+		except (TypeError, ValueError):
+			rel = None
+		if rel is None or not np.isfinite(rel):
+			rel = 0.5
+		rel = float(np.clip(rel, 0.05, 1.0))
+		effective_mae = mae_val / max(0.5, rel)
+		candidates.append((effective_mae, trial_key, record))
 	candidates.sort(key=lambda item: item[0])
 	return candidates[:top_k]
 
@@ -125,10 +141,22 @@ def _build_autotune_override(results_dir: str, dataset: str, method: str, top_k:
 		return None
 	sigma_vals = []
 	snr_vals = []
+	weights = []
 	for _, trial_key, record in top_trials:
 		meta = _load_aux_meta(results_dir, method, trial_key)
 		if not meta:
 			continue
+		rel = meta.get('reliability_meta')
+		if rel is None:
+			track_stats = record.get('track_stats') or {}
+			rel = track_stats.get('reliability_meta')
+		try:
+			rel = float(rel)
+		except (TypeError, ValueError):
+			rel = None
+		if rel is None or not np.isfinite(rel):
+			rel = 0.5
+		rel = float(np.clip(rel, 0.1, 1.0))
 		robust = meta.get('robust_z', {}) if isinstance(meta, dict) else {}
 		sigma = robust.get('sigma_hat') if isinstance(robust, dict) else None
 		if sigma is None:
@@ -139,6 +167,9 @@ def _build_autotune_override(results_dir: str, dataset: str, method: str, top_k:
 			sigma = None
 		if sigma is not None and np.isfinite(sigma):
 			sigma_vals.append(sigma)
+			weights.append(rel)
+		else:
+			weights.append(rel)
 		snr_val = meta.get('snr_estimate')
 		if snr_val is None:
 			track_stats = record.get('track_stats') or {}
@@ -152,8 +183,17 @@ def _build_autotune_override(results_dir: str, dataset: str, method: str, top_k:
 	if not sigma_vals:
 		print(f"> Warning: insufficient sigma_hat stats for {method}; autotune override skipped")
 		return None
-	sigma_med = float(np.median(np.asarray(sigma_vals, dtype=np.float64)))
-	snr_med = float(np.median(np.asarray(snr_vals, dtype=np.float64))) if snr_vals else float('nan')
+	if weights and len(weights) == len(sigma_vals):
+		sigma_med = float(np.average(np.asarray(sigma_vals, dtype=np.float64), weights=np.asarray(weights, dtype=np.float64)))
+	else:
+		sigma_med = float(np.median(np.asarray(sigma_vals, dtype=np.float64)))
+	if snr_vals:
+		if weights and len(weights) >= len(snr_vals):
+			snr_med = float(np.average(np.asarray(snr_vals, dtype=np.float64), weights=np.asarray(weights[:len(snr_vals)], dtype=np.float64)))
+		else:
+			snr_med = float(np.median(np.asarray(snr_vals, dtype=np.float64)))
+	else:
+		snr_med = float('nan')
 	rv_override = max((rv_scale * sigma_med) ** 2, 1e-8)
 	if np.isfinite(snr_med) and snr_med > 0.0:
 		qx_override = max(qx_base * (1.0 / max(snr_med, 1e-6)), 1e-9)

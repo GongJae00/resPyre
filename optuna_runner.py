@@ -40,11 +40,10 @@ BASE_METHODS = {
 }
 SUFFIX_FAMILY = {
     '__ukffreq': 'ukffreq',
-    '__pll': 'pll',
     '__kfstd': 'kfstd',
-    '__spec_ridge': 'spec_ridge'
 }
 ALLOWABLE_SUFFIXES = tuple(SUFFIX_FAMILY.keys())
+EXPECTED_METHODS = len(BASE_METHODS) * len(SUFFIX_FAMILY)
 DEFAULT_WEIGHTS = {
     'mae': 0.85,
     'rmse': 0.15
@@ -113,6 +112,7 @@ def _method_family(method: str) -> Optional[str]:
 def _allowlist_methods(method_names: Sequence[str], explicit: Optional[Sequence[str]] = None) -> List[str]:
     filtered = []
     selection = set(n.lower() for n in explicit) if explicit else None
+    expected = EXPECTED_METHODS
     for name in method_names:
         parts = name.split('__', 1)
         base = parts[0].lower()
@@ -132,8 +132,8 @@ def _allowlist_methods(method_names: Sequence[str], explicit: Optional[Sequence[
             continue
         dedup.append(name)
         seen.add(name.lower())
-    if len(dedup) != 20:
-        print(f"> Warning: allowlist resolved to {len(dedup)} methods (expected 20)")
+    if expected and len(dedup) != expected:
+        print(f"> Warning: allowlist resolved to {len(dedup)} methods (expected {expected})")
     return dedup
 
 
@@ -175,66 +175,39 @@ class ParamSpec:
     log: bool = False
 
 
-# WHY: Adult respiration (0.1–0.4 Hz) at 64 Hz → gentle drift, narrow noise floors; trim non-identifiable/unused params.
+# WHY: Adult respiration (0.1–0.4 Hz) at 64 Hz → gentle drift, narrow noise floors; keep only tracker heads (KFstd/UKFFreq) and bias ranges toward stable COHFACE runs.
 FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
     'ukffreq': [
-        ParamSpec('oscillator.qf', 'float', 1.5e-4, 6e-4, log=True),
+        ParamSpec('oscillator.qf', 'float', 5e-5, 3.5e-4, log=True),
+        ParamSpec('oscillator.qx', 'float', 5e-5, 1.6e-4, log=True),
         ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.06),
-        ParamSpec('oscillator.tau_env', 'float', 24.0, 42.0),
-        ParamSpec('oscillator.qx', 'float', 5e-5, 3e-4, log=True),
-        ParamSpec('oscillator.ukf_alpha', 'float', 0.05, 0.12),
-        ParamSpec('oscillator.ukf_beta', 'choice', choices=[2.0]),
-    ],
-    'pll': [
-        ParamSpec('oscillator.pll_zeta', 'float', 0.7, 1.0),
-        ParamSpec('oscillator.pll_ttrack', 'float', 4.0, 8.0),
-        ParamSpec('oscillator.pll_kp_min', 'float', 5e-5, 5e-3, log=True),
-        ParamSpec('oscillator.pll_ki_min', 'float', 5e-6, 5e-4, log=True),
+        ParamSpec('oscillator.tau_env', 'float', 24.0, 40.0),
+        ParamSpec('oscillator.ukf_alpha', 'float', 0.04, 0.1),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.965),
     ],
     'kfstd': [
-        ParamSpec('oscillator.qx', 'float', 1e-4, 6e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.05, log=True),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.85, 0.95),
-    ],
-    'spec_ridge': [
-        ParamSpec('oscillator.stft_win', 'int', 10, 14),
-        ParamSpec('oscillator.spec_overlap', 'float', 0.88, 0.93),
-        ParamSpec('oscillator.spec_nfft_factor', 'choice', choices=[1, 2]),
-        ParamSpec('oscillator.spec_peak_smooth_len', 'int', 1, 3),
-        ParamSpec('oscillator.spec_subbin_interp', 'choice', choices=['parabolic', 'none']),
-        ParamSpec('oscillator.ridge_penalty', 'float', 150.0, 350.0),
+        ParamSpec('oscillator.qx', 'float', 6e-5, 1.6e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.06, log=True),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.965),
     ],
 }
 
 # WHY: Seed each head near physiologic mid-points so Optuna explores narrow, safe bands.
 FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     'ukffreq': {
-        'oscillator.qf': 3e-4,
-        'oscillator.qx': 1e-4,
-        'oscillator.rv_floor': 0.03,
+        'oscillator.qf': 1.6e-4,
+        'oscillator.qx': 9e-05,
+        'oscillator.rv_floor': 0.032,
         'oscillator.tau_env': 32.0,
-        'oscillator.ukf_alpha': 0.08,
+        'oscillator.ukf_alpha': 0.07,
         'oscillator.ukf_beta': 2.0,
         'oscillator.ukf_kappa': 0.0,
-    },
-    'pll': {
-        'oscillator.pll_zeta': 0.85,
-        'oscillator.pll_ttrack': 5.5,
-        'oscillator.pll_kp_min': 3e-4,
-        'oscillator.pll_ki_min': 2e-5,
+        'oscillator.post_smooth_alpha': 0.94,
     },
     'kfstd': {
-        'oscillator.qx': 2.5e-4,
-        'oscillator.rv_floor': 0.03,
-        'oscillator.post_smooth_alpha': 0.9,
-    },
-    'spec_ridge': {
-        'oscillator.stft_win': 12,
-        'oscillator.spec_overlap': 0.92,
-        'oscillator.spec_nfft_factor': 2,
-        'oscillator.spec_peak_smooth_len': 3,
-        'oscillator.spec_subbin_interp': 'parabolic',
-        'oscillator.ridge_penalty': 250.0,
+        'oscillator.qx': 1e-4,
+        'oscillator.rv_floor': 0.032,
+        'oscillator.post_smooth_alpha': 0.93,
     },
 }
 
@@ -776,7 +749,8 @@ def create_bundle(output_root: Path, config_path: Path, allowed_methods: Optiona
         allowed = {name.lower() for name in allowed_methods}
         entries = [row for row in entries if row['method'].lower() in allowed]
     timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M')
-    bundle_dir = output_root / '_bundles' / f"best20_{timestamp}"
+    bundle_size = len(allowed_methods) if allowed_methods else len(entries)
+    bundle_dir = output_root / '_bundles' / f"best{bundle_size}_{timestamp}"
     bundle_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = bundle_dir / 'manifest.json'
     manifest = {

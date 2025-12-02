@@ -262,7 +262,10 @@ class _BaseOscillatorHead:
         rv_override = getattr(self.params, "rv_floor_override", None)
         if rv_override is not None and np.isfinite(rv_override) and rv_override > 0:
             rv_cap = max(5.0 * base_rv_floor, base_rv_floor + 0.02)
-            self.params.rv_floor_override = float(np.clip(rv_override, 1e-6, rv_cap))
+            # Prevent EM/autotune from collapsing the observation noise far below the
+            # dataset-tuned base; very small R makes trackers jittery and hurts MAE.
+            rv_floor_min = max(0.5 * base_rv_floor, 1e-3)
+            self.params.rv_floor_override = float(np.clip(rv_override, rv_floor_min, rv_cap))
         base_qf = self.params.qf if (self.params.qf and self.params.qf > 0) else 5e-5
         qf_override = getattr(self.params, "qf_override", None)
         if qf_override is not None and np.isfinite(qf_override) and qf_override > 0:
@@ -353,12 +356,33 @@ class _BaseOscillatorHead:
         except Exception:
             return float("nan"), 0.0, {}
 
-    def _coarse_freq(self, signal: np.ndarray, fs: float) -> float:
+    def _coarse_freq(self, signal: np.ndarray, fs: float, meta: Optional[Dict] = None) -> float:
         p = self.params
         candidates: List[Tuple[float, float, Dict]] = []
         candidates.append(self._welch_candidate(signal, fs))
         candidates.append(self._autocorr_candidate(signal, fs))
         candidates.append(self._hilbert_candidate(signal, fs))
+        # External candidates supplied by upstream motion stage
+        if isinstance(meta, dict):
+            ext_hz = meta.get("welch_peak_hz")
+            ext_ratio = meta.get("welch_peak_ratio")
+            ext_db = meta.get("welch_peak_db")
+            ext_prom = meta.get("welch_prom_db")
+            confidence = None
+            if isinstance(ext_ratio, (int, float, np.floating)) and np.isfinite(ext_ratio):
+                confidence = float(max(ext_ratio, 1e-3))
+            elif isinstance(ext_db, (int, float, np.floating)) and np.isfinite(ext_db):
+                confidence = float(max(10.0 ** (ext_db / 10.0), 1e-3))
+            if confidence is not None and isinstance(ext_hz, (int, float, np.floating)) and np.isfinite(ext_hz):
+                candidates.append((float(ext_hz), confidence, {"label": "external_welch", "peak_db": ext_db, "peak_ratio": ext_ratio, "prom_db": ext_prom}))
+            ext_custom = meta.get("external_coarse_candidates")
+            if isinstance(ext_custom, (list, tuple)):
+                for cand in ext_custom:
+                    if isinstance(cand, dict):
+                        hz = cand.get("hz")
+                        conf = cand.get("confidence", cand.get("conf", cand.get("weight")))
+                        if isinstance(hz, (int, float, np.floating)) and np.isfinite(hz) and isinstance(conf, (int, float, np.floating)) and np.isfinite(conf):
+                            candidates.append((float(hz), float(max(conf, 1e-6)), {"label": cand.get("label", "external")}))
         valid = [(freq, conf, meta) for freq, conf, meta in candidates if np.isfinite(freq) and freq > 0 and np.isfinite(conf) and conf > 0]
         if not valid:
             freq_final = 0.5 * (p.f_min + p.f_max)
@@ -407,7 +431,7 @@ class _BaseOscillatorHead:
         }
         return freq_final
 
-    def _effective_params(self, fs: float) -> Dict[str, float]:
+    def _effective_params(self, fs: float, meta: Optional[Dict] = None) -> Dict[str, float]:
         p = self.params
         fs = fs or p.fs
         tau_override = p.tau_env_override if (p.tau_env_override is not None and p.tau_env_override > 0) else None
@@ -441,6 +465,69 @@ class _BaseOscillatorHead:
         if p.qf_override is not None and p.qf_override > 0:
             qf = float(p.qf_override)
             qf_base = qf
+        # Meta-driven scaling: motion energy / ROI variance / SNR hints from the base method.
+        if isinstance(meta, dict):
+            try:
+                sig_std = float(meta.get("signal_std", float("nan")))
+            except Exception:
+                sig_std = float("nan")
+            try:
+                abs_mean = float(meta.get("signal_abs_mean", float("nan")))
+            except Exception:
+                abs_mean = float("nan")
+            try:
+                roi_std = float(meta.get("roi_intensity_std", float("nan")))
+            except Exception:
+                roi_std = float("nan")
+            try:
+                roi_mean = float(meta.get("roi_intensity_mean", float("nan")))
+            except Exception:
+                roi_mean = float("nan")
+            motion_ratios = []
+            if np.isfinite(sig_std) and abs_mean > 1e-6:
+                motion_ratios.append(sig_std / abs_mean)
+            if np.isfinite(roi_std) and roi_mean > 1e-6:
+                motion_ratios.append(roi_std / roi_mean)
+            motion_level = float(np.nanmedian(motion_ratios)) if motion_ratios else 1.0
+            motion_level = float(np.clip(motion_level, 0.3, 4.0))
+            # Scale qx/qf/rv with motion_level (higher motion -> looser filter)
+            scale = float(np.clip(1.0 + 0.35 * (motion_level - 1.0), 0.7, 2.5))
+            qx *= scale
+            qf *= scale
+            rv *= (0.8 + 0.4 * scale)
+            # ROI SNR hint
+            roi_snr_db = meta.get("roi_intensity_snr_db")
+            if isinstance(roi_snr_db, (int, float, np.floating)) and np.isfinite(roi_snr_db):
+                if roi_snr_db < 5.0:
+                    rv *= 1.5
+                    qx *= 1.2
+                    qf *= 1.2
+                elif roi_snr_db > 15.0:
+                    rv *= 0.85
+            # Spectral peak confidence hint from base stage
+            peak_ratio = meta.get("welch_peak_ratio")
+            if isinstance(peak_ratio, (int, float, np.floating)) and np.isfinite(peak_ratio):
+                if peak_ratio > 3.0:
+                    qx *= 0.85
+                    qf *= 0.85
+                    rv *= 0.9
+                elif peak_ratio < 1.5:
+                    qx *= 1.15
+                    qf *= 1.15
+                    rv *= 1.1
+            # Motion-dependent smoother (only if not explicitly set to a strong value)
+            alpha = getattr(self.params, "post_smooth_alpha", 0.0)
+            target_alpha = alpha
+            if motion_level > 1.2:
+                target_alpha = max(target_alpha, min(0.98, 0.9 + 0.03 * (motion_level - 1.0)))
+            elif motion_level < 0.9:
+                target_alpha = max(target_alpha, 0.85)
+            if np.isfinite(target_alpha) and 0.0 < target_alpha < 1.0:
+                self.params.post_smooth_alpha = float(target_alpha)
+        # Guardrails to prevent runaway variances
+        qx = float(np.clip(qx, 1e-7, 1e-1))
+        qf = float(np.clip(qf, 1e-7, 5e-3))
+        rv = float(np.clip(rv, rv_floor, rv_cap))
         qx, qf, rv = self._apply_spectral_guidance(qx, qf, rv, rv_floor, qf_base)
         return {
             'rho': float(rho),
@@ -575,7 +662,7 @@ class oscillator_KFstd(_BaseOscillatorHead):
         freq0 = self._coarse_freq(y, fs)
         freq0 = float(np.clip(freq0, p.f_min, p.f_max))
         omega0 = 2.0 * np.pi * freq0
-        eff = self._effective_params(fs)
+        eff = self._effective_params(fs, meta)
         rho = eff['rho']
         qx = eff['qx']
         rv = eff['rv']
@@ -712,9 +799,9 @@ class oscillator_UKF_freq(_BaseOscillatorHead):
             return self._package(y, np.array([], dtype=np.float64), meta)
 
         dt = 1.0 / fs
-        freq0 = self._coarse_freq(y, fs)
+        freq0 = self._coarse_freq(y, fs, meta)
         freq0 = float(np.clip(freq0, p.f_min, p.f_max))
-        eff = self._effective_params(fs)
+        eff = self._effective_params(fs, meta)
         rho = eff['rho']
         qx = eff['qx']
         rv = eff['rv']
@@ -967,7 +1054,7 @@ class oscillator_PLL(_BaseOscillatorHead):
 
         dt = 1.0 / fs
         analytic = hilbert(y)
-        freq0 = self._coarse_freq(y, fs)
+        freq0 = self._coarse_freq(y, fs, meta)
         freq0 = float(np.clip(freq0, p.f_min, p.f_max))
         omega = 2.0 * np.pi * freq0
         phase_nco = float(np.angle(analytic[0]))

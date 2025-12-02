@@ -27,7 +27,7 @@
   * method_oscillator_wrapped.py: 상기 5개 출력 신호 위에 “오실레이터 헤드”를 씌우는 래퍼
 * riv/estimators/oscillator_heads.py
 
-  * kfstd, ukffreq, spec_ridge, pll 오실레이터 헤드 4종(총 20개 조합 = 5×4) 구현
+  * kfstd, ukffreq 오실레이터 헤드 2종(기본 실험 10개 조합 = 5×2). spec_ridge, pll 구현은 남아있으나 기본 COHFACE 실험/탐색에서는 제외.
 * run_all.py
 
   * step=estimate → step=evaluate → step=metrics 파이프라인
@@ -75,11 +75,11 @@ python run_all.py -c configs/cohface_motion_oscillator.json \
   
 # EM 기반 Kalman gain 학습 (모든 메소드 일괄 적용 예시)
 METHODS=(
-  of_farneback__kfstd of_farneback__ukffreq of_farneback__spec_ridge of_farneback__pll
-  dof__kfstd dof__ukffreq dof__spec_ridge dof__pll
-  profile1d_linear__kfstd profile1d_linear__ukffreq profile1d_linear__spec_ridge profile1d_linear__pll
-  profile1d_quadratic__kfstd profile1d_quadratic__ukffreq profile1d_quadratic__spec_ridge profile1d_quadratic__pll
-  profile1d_cubic__kfstd profile1d_cubic__ukffreq profile1d_cubic__spec_ridge profile1d_cubic__pll
+  of_farneback__kfstd of_farneback__ukffreq
+  dof__kfstd dof__ukffreq
+  profile1d_linear__kfstd profile1d_linear__ukffreq
+  profile1d_quadratic__kfstd profile1d_quadratic__ukffreq
+  profile1d_cubic__kfstd profile1d_cubic__ukffreq
 )
 for method in "${METHODS[@]}"; do
   python train_em.py \
@@ -100,7 +100,7 @@ python optuna_runner.py \
   --mlflow-experiment respyre-optuna
 
 # (옵션) Optuna 결과 bundle 적용
-cd runs/optuna_all/_bundles/best20_<ts>
+cd runs/optuna_all/_bundles/best10_<ts>
 ./apply_all.sh
 
 # 메타데이터 자동 생성
@@ -249,7 +249,7 @@ if clip is not None:
 
 ## 4.0 오실레이터 헤드 설계 철학(의도/관점/선택 이유)
 
-이 섹션은 왜 “모션 5개(관측) + 오실레이터 4개(모델링)”을 이런 식으로 설계했는지, 그리고 각 헤드가 내 연구 의도를 어떻게 구현하는지 정리한다. 핵심은 “호흡은 좁은 주파수 대역에서 움직이는 준주기적 진동”이라는 생리적 사실을 최대한 존중하고, 관측 시계열의 불안정성(자세·카메라·조명 등)이 **시간영역 추정치 자체를 왜곡**시키지 않도록 **주파수-위상 중심**으로 신뢰도를 확보하는 것이다.
+이 섹션은 왜 “모션 5개(관측) + 오실레이터 헤드(주력 2개, 옵션 2개)”를 이런 식으로 설계했는지, 그리고 각 헤드가 내 연구 의도를 어떻게 구현하는지 정리한다. 핵심은 “호흡은 좁은 주파수 대역에서 움직이는 준주기적 진동”이라는 생리적 사실을 최대한 존중하고, 관측 시계열의 불안정성(자세·카메라·조명 등)이 **시간영역 추정치 자체를 왜곡**시키지 않도록 **주파수-위상 중심**으로 신뢰도를 확보하는 것이다.
 
 ### 4.0.a 이번 패치로 추가된 기능
 
@@ -275,7 +275,7 @@ if clip is not None:
   3. 노이즈 상황에서 **불확실성(P)**을 명시적으로 다룬다.
 * 이 접근은 “관측을 시계열 값으로 맞춘다”가 아니라 “**관측이 알려주는 주파수·위상 단서**를 바탕으로 진짜 호흡 진동을 복원한다”에 가깝다.
 
-### 4.0.3 4개 헤드 선택 철학(각각 다른 관점으로 ‘같은 진실’에 접근)
+### 4.0.3 헤드 구성(주력 2개 + 옵션 2개)
 
 * kfstd(표준 칼만+RTS):
   최소 가정의 **선형 2D 공진자**. 고정 또는 완만 가변 f 가정.
@@ -283,14 +283,14 @@ if clip is not None:
 * ukffreq(로그-주파수 UKF):
   **주파수 자체를 상태로 추적**한다. log f로 양수 제약과 수치 안정성을 동시에 확보.
   목적: 시간영역 왜곡 없이 **느린 f(t) 변화**를 온전히 반영. 자세 변화나 SNR 요동에도 대역 내에서 락을 유지.
-* spec_ridge(STFT 능선):
+* spec_ridge(STFT 능선, 옵션):
   “주파수는 스펙트럼에서 ‘보여야’ 한다”는 철학. **대역 제한 리지 추적**으로 track_hz를 만든 뒤 시간영역 복원을 보조한다.
   목적: 칼만류가 관측을 맞추느라 비틀릴 위험을 줄이고, **스펙트럼 밀도**를 우선 신뢰. 잡음이 커도 대역 내 에너지 흐름만 잡아도 충분히 안정적이다.
-* pll(PI-PLL):
+* pll(PI-PLL, 옵션):
   **위상 오차**를 직접 줄이는 피드백 제어 관점. 계산량이 작고, 순간 주파수 락 능력이 탁월.
   목적: 실시간·온디바이스를 염두에 둔 **경량 동기화 엔진**. 대역·게인을 올바르게 설정하면 의도한 주파수 범위 안에서 매우 견고하게 잠긴다.
 
-네 헤드는 “같은 생리적 구조”를 서로 다른 수학/공학적 관점에서 구현한다. 실험 단계에서는 서로를 **교차 검증**하는 용도로도 쓰인다(예: ukffreq가 흔들릴 때 spec_ridge가 안정해지는지, pll 락률이 떨어질 때 kfstd가 보수적으로 버텨주는지).
+기본 COHFACE 실험/Optuna는 kfstd/ukffreq 두 헤드만 사용한다. spec_ridge/pll은 필요 시 별도 실험·교차검증 용도로만 켠다(예: ukffreq가 흔들릴 때 spec_ridge 안정성 확인, 실시간 프로토타입에서 pll 테스트 등).
 
 ### 4.0.4 대역 일치와 use_track 철학
 
@@ -324,8 +324,8 @@ if clip is not None:
 
 ### 4.0.7 실패 모드와 의도된 완화
 
-* 시간영역 맞추기 집착 → 주파수 일탈: **spec_ridge** 또는 **PLL**로 주파수 앵커를 먼저 잡는다.
-* 경계 포화(0.08/0.50 Hz에 자주 닿음): **PLL BW↓** 또는 **UKF qf↓**, ridge 스무딩↑, 대역 마진 축소.
+* 시간영역 맞추기 집착 → 주파수 일탈: (**옵션 실험**) **spec_ridge** 또는 **PLL**로 주파수 앵커를 먼저 잡는다.
+* 경계 포화(0.08/0.50 Hz에 자주 닿음): **UKF qf↓**, ridge 스무딩↑, 대역 마진 축소. (PLL 사용 시 BW↓).
 * UKF 비SPD/발산: P 대칭화+εI, R 하한↑, qx/qf 재조정(주파수보다 진폭에 더 관대하게).
 * 리지 점프: hop↓, median 창↑, f-경로에 단조/가속도 제약(소프트) 도입.
 * PLL 과추종/잡음 락: BW↓, Kp↓, Ki↓, 초기 f0 웰치 재점검.
@@ -333,12 +333,12 @@ if clip is not None:
 ### 4.0.8 요약
 
 * “호흡은 대역이 먼저다.” 시계열을 꾸미는 대신 **대역 안에서 위상·주파수를 정직하게** 추적한다.
-* 오실레이터 SSM은 이 철학을 구현하는 기본 그릇이고, kfstd/ukffreq/spec_ridge/pll은 서로 다른 관점에서 같은 목표(안정·해석·재현)를 충족한다.
+* 오실레이터 SSM은 이 철학을 구현하는 기본 그릇이고, kfstd/ukffreq(주력)과 spec_ridge/pll(옵션)은 서로 다른 관점에서 같은 목표(안정·해석·재현)를 충족한다.
 * 모션 5개는 “관측 채널 다양성”을 제공하고, 오실레이터 4개는 “생리적 의미의 복원”을 담당한다. 두 층을 분리해두면 **문제의 원인 분리가 쉬워지고**(관측 vs 모델링), 논문·코드 모두에서 설명 가능성이 높아진다.
 
 ---
 
-## 4. 오실레이터 헤드 4종(모델링 계층; y(t) → 위상·주파수·진폭 복원)
+## 4. 오실레이터 헤드(주력 2 + 옵션 2; y(t) → 위상·주파수·진폭 복원)
 
 이 계층은 관측 y(t)을 “공진자 상태공간” 관점에서 정제·해석한다. 헤드마다 주파수 추적 방식이 다르지만, 모든 단계에서 대역/평가 규칙을 통일한다(0.08–0.50 Hz, use_track=true면 track_hz 우선).
 
@@ -513,7 +513,7 @@ if clip is not None:
 아래 프롬프트를 그대로 전달하면 된다(굵은 글씨 사용 안 함).
 
 ```
-너는 내 resPyre 포크에서 ‘모션 기반 5개 방법 × 오실레이터 헤드 4개 = 20개’ 파이프라인을 기존 구조를 엄격히 지키며 구현/보완한다.
+너는 내 resPyre 포크에서 ‘모션 기반 5개 방법 × 오실레이터 헤드(주력 2개=kfstd/ukffreq, 옵션 2개=spec_ridge/pll)’ 파이프라인을 기존 구조를 엄격히 지키며 구현/보완한다. 기본 COHFACE 실험/탐색은 주력 2개만 사용한다.
 
 반드시 지킬 것:
 1) 디렉토리/이름: src/models 같은 새 디렉토리 만들지 말고, 기존 구조만 쓴다.
@@ -530,13 +530,13 @@ if clip is not None:
 
 4) 모션 5개는 ‘순수 관측’으로 유지(알고리즘 바꾸지 말 것). 단, 공통 대역/GT/윈도/평가 패치는 적용.
 
-5) 오실레이터 4종 구현 세부:
+5) 오실레이터 헤드 구현 세부(주력 2개 + 옵션 2개):
    - kfstd: 2차 공진자(ρ≈0.995) + RTS. 구간별 f0(coarse Welch) 고정 또는 천천히 변동.
    - ukffreq: 상태 [x1,x2,log f]. 시그마(alpha=1e-3, beta=2, kappa=0). qf는 5e-6~5e-4 범위 튜닝.
      P 갱신 후 대칭화, eps*I 더해 SPD 유지. log f를 [log 0.08, log 0.50] 범위에 포화.
-   - spec_ridge: STFT(Hann, 창≈10 s, 90% overlap, 분해능~0.01–0.02 Hz), 대역 제한 릿지 추적.
+   - spec_ridge(옵션): STFT(Hann, 창≈10 s, 90% overlap, 분해능~0.01–0.02 Hz), 대역 제한 릿지 추적.
      시간 스무딩(중앙값 1–3 s) 후 track_hz 산출.
-   - pll: PI-PLL. BW_hz≈0.02–0.04, ζ≈0.707, K0≈2π.
+   - pll(옵션): PI-PLL. BW_hz≈0.02–0.04, ζ≈0.707, K0≈2π.
      Kp=2ζωn/K0, Ki=ωn^2/K0, 이산화(Kp*dt, Ki*dt). 위상오차 랩(wrap), 반풍업 구현.
      f는 [0.08,0.50]로 포화. 잠금률/포화율을 aux에 로깅.
 
@@ -551,9 +551,9 @@ if clip is not None:
    - 예외/경고(mpeg4 slice, cholesky fail 등)는 무해화 로깅만 하고 진행
 
 목표:
-- 순수 5개 베이스라인을 교란하지 않으면서, 4개 오실레이터 헤드를 플러그인처럼 얹어 총 20개 비교
+- 순수 5개 베이스라인을 교란하지 않으면서, 주력 2개 오실레이터 헤드를 플러그인처럼 얹어 총 10개 기본 비교(옵션 spec_ridge/pll은 별도 실험 시 수동 추가)
 - 대역/GT/평가 일치로 재현 가능한 비교표 생성
-- 안정적 UKF/PLL 동작(수치 에러/락 실패 최소화)과 릿지 추적의 과적응 방지
+- 안정적 UKF/KFstd 동작(수치 에러/락 실패 최소화)과 옵션 헤드 사용 시 과적응 방지
 ```
 
 ---
@@ -660,29 +660,29 @@ Code and Data Availability
 * Welch: window 10 s, 90% overlap, band-limited peak
 * kfstd: ρ=0.995, qx=1e-4, R=MAD 기반+1e-6
 * ukffreq: alpha=1e-3, beta=2, kappa=0, P0=diag([1,1,0.1]), qx=1e-4, qf=5e-5, R≥1e-6
-* spec_ridge: Hann창 10 s, hop 0.5–1 s, ridge median 1–3 s
-* pll: BW=0.03 Hz(시작점), ζ=0.707, K0=2π, 반풍업 on, f∈[0.08,0.50] 포화
+* spec_ridge(옵션): Hann창 10 s, hop 0.5–1 s, ridge median 1–3 s
+* pll(옵션): BW=0.03 Hz(시작점), ζ=0.707, K0=2π, 반풍업 on, f∈[0.08,0.50] 포화
 
 ---
 
 ## 12. Optuna 튜닝/적용 요약
 
-1. **튜닝 실행 (20개 파생 메소드, 폴백 비활성)**  
+1. **튜닝 실행 (10개 파생 메소드, 폴백 비활성)**  
    ```bash
    python optuna_runner.py --config configs/cohface_motion_oscillator.json --output runs/optuna --n-trials 20
    ```  
-   - 베이스 5개는 자동 제외, `__ukffreq/__pll/__kfstd/__spec_ridge`만 대상  
+   - 베이스 5개는 자동 제외, `__ukffreq/__kfstd`만 대상  
    - trial당 `gating.debug.disable_gating=true`, `use_track=true`로 폴백 없이 평가  
   - 목적함수 = **MAE + RMSE** (기본 0.85/0.15). 상관계수(R)/edge/nan/jerk는 **분석용 로그**만  
    - 생리 기반으로 축소된 탐색 차원 덕분에 shard당 20 trials(TPE+MedianPruner)면 수렴
 
 2. **리더보드/번들 확인**  
    - 완료 시 `runs/optuna/dashboards/leaderboard.csv`에 objective/지표와 best.json 경로 기록  
-   - `_bundles/best20_<ts>/manifest.json` + `apply_all.sh` 자동 생성 (20개 메소드 스냅샷)
+   - `_bundles/best10_<ts>/manifest.json` + `apply_all.sh` 자동 생성 (10개 메소드 스냅샷)
 
 3. **최적 파라미터 일괄 적용 & 재평가**  
    ```bash
-   cd runs/optuna/_bundles/best20_<ts>
+   cd runs/optuna/_bundles/best10_<ts>
    ./apply_all.sh
    ```  
    - `apply_all.sh`는 각 메소드별 best.json을 `run_all.py`에 `--override-from`으로 주입하고  
@@ -693,9 +693,9 @@ Code and Data Availability
 
 ## Optuna 사용 요약
 
-1. `python optuna_runner.py -c configs/cohface_motion_oscillator.json --output runs/optuna --n-trials 20` → allowlist 20개 파생 메소드만 튜닝하며 trial마다 게이팅 폴백을 완전히 끈다.
-2. 종료 시 `runs/optuna/dashboards/leaderboard.csv` 정렬과 `_bundles/best20_<ts>` 생성 여부만 확인하면 objective/MAE/R/SNR 집계와 best.json 경로를 한 번에 검증할 수 있다.
-3. 번들 안의 `apply_all.sh`는 `python run_all.py -c <config> -s estimate evaluate metrics --auto_discover_methods=false --methods <method> --override-from <best.json> --override profile=paper -d results/paper_best/<method>` 명령을 20회 반복해 scoreboard 상위 파라미터를 재평가한다.
+1. `python optuna_runner.py -c configs/cohface_motion_oscillator.json --output runs/optuna --n-trials 20` → allowlist 10개 파생 메소드만 튜닝하며 trial마다 게이팅 폴백을 완전히 끈다.
+2. 종료 시 `runs/optuna/dashboards/leaderboard.csv` 정렬과 `_bundles/best10_<ts>` 생성 여부만 확인하면 objective/MAE/R/SNR 집계와 best.json 경로를 한 번에 검증할 수 있다.
+3. 번들 안의 `apply_all.sh`는 `python run_all.py -c <config> -s estimate evaluate metrics --auto_discover_methods=false --methods <method> --override-from <best.json> --override profile=paper -d results/paper_best/<method>` 명령을 10회 반복해 scoreboard 상위 파라미터를 재평가한다.
 4. **병렬 샤딩 튜닝**  
    ```bash
    # 터미널 5개를 열고 shard index 0-4를 각각 실행 (trials=20)
@@ -724,7 +724,7 @@ Code and Data Availability
      --num-shards 5 --shard-index 4 \
      --n-trials 20
    ```  
-   - `--num-shards 5 --shard-index k` 조합을 터미널 5개에서 동시에 실행하면, 각 shard가 서로 다른 베이스 모션(of_farneback/dof/…)을 맡아 4개 메소드를 탐색한다.  
+   - `--num-shards 5 --shard-index k` 조합을 터미널 5개에서 동시에 실행하면, 각 shard가 서로 다른 베이스 모션(of_farneback/dof/…)을 맡아 2개 메소드를 탐색한다.  
    - shard마다 runs/optuna_shard* 디렉터리를 둔 뒤, 필요 시 마지막에 한 번 더 `--n-trials 0` 실행으로 리더보드/번들을 합칠 수 있다.
 
 ---
