@@ -6,6 +6,7 @@ import shutil
 import copy
 import csv
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 from scipy import signal
 import pickle
@@ -1191,6 +1192,29 @@ def _percentile_summary(values):
 	}
 
 
+def _compute_meta_reliability(meta_for_stats: Dict, spectral_stats: Dict, track_meta: Dict) -> float:
+	scores = []
+	roi_snr_db = meta_for_stats.get('roi_intensity_snr_db') or track_meta.get('roi_intensity_snr_db')
+	if isinstance(roi_snr_db, (int, float, np.floating)) and np.isfinite(roi_snr_db):
+		scores.append(np.clip((roi_snr_db - 0.0) / 20.0, 0.0, 1.0))
+	signal_std = meta_for_stats.get('signal_std')
+	signal_abs_mean = meta_for_stats.get('signal_abs_mean')
+	if isinstance(signal_std, (int, float, np.floating)) and isinstance(signal_abs_mean, (int, float, np.floating)) and signal_abs_mean not in (None, 0):
+		try:
+			ratio = float(signal_std) / max(float(signal_abs_mean), 1e-6)
+			scores.append(np.clip(1.0 / max(1.0 + ratio, 1e-6), 0.0, 1.0))
+		except Exception:
+			pass
+	peak_ratio = spectral_stats.get('peak_ratio')
+	if peak_ratio is None:
+		peak_ratio = track_meta.get('welch_peak_ratio')
+	if isinstance(peak_ratio, (int, float, np.floating)) and np.isfinite(peak_ratio):
+		scores.append(np.clip(np.tanh(float(peak_ratio) / 4.0), 0.0, 1.0))
+	if not scores:
+		return float('nan')
+	return float(np.clip(np.median(scores), 0.0, 1.0))
+
+
 def _quality_row_from_record(method, record):
 	quality = record.get('quality') or {}
 	track_stats = record.get('track_stats') or {}
@@ -1228,7 +1252,8 @@ def _quality_row_from_record(method, record):
 		'flag_wide_fwhm': int(bool(flags.get('wide_fwhm'))),
 		'std_is_soft': int(bool(quality.get('std_is_soft'))),
 		'std_violation_soft': int(bool(quality.get('std_violation_soft'))),
-		'gating_trigger_reason': triggered_reason
+		'gating_trigger_reason': triggered_reason,
+		'reliability_meta': track_stats.get('reliability_meta')
 	}
 	return row
 
@@ -1247,7 +1272,8 @@ def _persist_quality_reports(method_metrics, results_dir):
 		'edge_saturation_fraction', 'snr_estimate', 'constant_track_promoted', 'spectral_peak_ratio',
 		'spectral_prominence_db', 'spectral_fwhm_hz', 'spectral_welch_df_hz',
 		'flag_std', 'flag_uniq', 'flag_sat', 'flag_low_ratio', 'flag_low_prom',
-		'flag_wide_fwhm', 'std_is_soft', 'std_violation_soft', 'gating_trigger_reason'
+		'flag_wide_fwhm', 'std_is_soft', 'std_violation_soft', 'gating_trigger_reason',
+		'reliability_meta'
 	]
 	rows = []
 	method_summaries = {}
@@ -1286,7 +1312,8 @@ def _persist_quality_reports(method_metrics, results_dir):
 			'spectral_stats': {
 				'peak_ratio': _percentile_summary(peak_vals),
 				'fwhm_hz': _percentile_summary(fwhm_vals)
-			}
+			},
+			'reliability_meta': _percentile_summary([row.get('reliability_meta') for row in rows if row.get('method') == method])
 		}
 		overall_total += total
 	quality_payload = {
@@ -1837,12 +1864,20 @@ def evaluate(
 						degenerate_reason = 'low_unique'
 			else:
 				if capability != 'tracker':
+					# Track evaluation: windowed spectral RR for time-domain comparison
 					sig_rpm_values, t_sig = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
 					spectral_stats = _spectral_stats_from_signal(filt_sig, fps, ws, min_hz, max_hz)
-					spec_rr_values = sig_rpm_values.copy()
-					spec_rr_times = np.asarray(t_sig).copy()
-					spec_stats_for_record = spectral_stats
 					track_used = True
+					# Spectral evaluation: full-signal Welch peak as a single RR sample
+					spectral_stats_full = _spectral_stats_from_signal(filt_sig, fps, max(len(filt_sig) / max(fps, 1e-6), ws), min_hz, max_hz)
+					peak_bpm = spectral_stats_full.get('peak_bpm')
+					if peak_bpm is not None and np.isfinite(peak_bpm):
+						spec_rr_values = np.asarray([peak_bpm], dtype=np.float64)
+						spec_rr_times = np.asarray([t_gt_full[0] if t_gt_full.size else 0.0], dtype=np.float64)
+					else:
+						spec_rr_values = np.asarray([], dtype=np.float64)
+						spec_rr_times = np.asarray([], dtype=np.float64)
+					spec_stats_for_record = spectral_stats_full
 				else:
 					spectral_stats = {}
 					spec_rr_values, spec_rr_times = _spectral_estimate_on_grid(filt_sig, fps, ws, t_gt_full)
@@ -1934,6 +1969,9 @@ def evaluate(
 			meta_for_stats['std_is_soft'] = bool(track_std_is_soft)
 			meta_for_stats['constant_track_promoted'] = bool(meta_for_stats.get('constant_track_promoted', False))
 			constant_promoted = False
+			# Meta-based reliability score (0–1) from base-stage hints
+			reliability_meta = _compute_meta_reliability(meta_for_stats, spectral_stats or {}, track_meta if isinstance(track_meta, dict) else {})
+			meta_for_stats['reliability_meta'] = reliability_meta
 	
 			if track_used and sig_rpm_values is not None:
 				finite_mask_rpm = np.isfinite(sig_rpm_values)
@@ -1983,6 +2021,7 @@ def evaluate(
 				'edge_saturation_fraction': meta_for_stats.get('edge_saturation_fraction'),
 				'snr_estimate': meta_for_stats.get('snr_estimate'),
 				'constant_track_promoted': meta_for_stats.get('constant_track_promoted'),
+				'reliability_meta': meta_for_stats.get('reliability_meta'),
 				'meta': meta_for_stats
 			}
 			gating_trigger_reason = None
@@ -2426,13 +2465,7 @@ def evaluate(
 	# Save human-readable table and plots (best-effort)
 	try:
 		annotation = f"# eval_band [{min_hz:.2f}, {max_hz:.2f}] Hz | use_track={use_track}"
-		track_summaries = _save_metrics_table(metrics_dir, method_metrics_track, metrics, win_size == 'video', annotation=annotation, summary_filename='metrics_summary.txt')
-		track_summary_path = os.path.join(metrics_dir, 'metrics_summary.txt')
-		track_alias_path = os.path.join(metrics_dir, 'metrics_track_summary.txt')
-		try:
-			shutil.copyfile(track_summary_path, track_alias_path)
-		except Exception:
-			pass
+		track_summaries = _save_metrics_table(metrics_dir, method_metrics_track, metrics, win_size == 'video', annotation=annotation, summary_filename='metrics_track_summary.txt')
 		_save_metrics_table(metrics_dir, method_metrics_spectral, metrics, win_size == 'video', annotation=f"{annotation}\n# mode: spectral", summary_filename='metrics_spectral_summary.txt')
 		if visualize:
 			_generate_plots(results_dir, track_summaries, metrics, win_size == 'video', stride=stride)
@@ -2518,7 +2551,7 @@ def print_metrics(results_dir, unique_window=False, mode='track'):
 		full_table = table_str
 
 	print(full_table)
-	summary_filename = 'metrics_summary.txt' if mode == 'track' else 'metrics_spectral_summary.txt'
+	summary_filename = 'metrics_track_summary.txt' if mode == 'track' else 'metrics_spectral_summary.txt'
 	try:
 		with open(os.path.join(metrics_dir, summary_filename), 'w') as fp:
 			fp.write(full_table + "\n")
