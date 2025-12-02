@@ -22,12 +22,12 @@
       "name": "of_farneback__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.0001,
-          "qf": 0.0001,
+          "qx": 0.00012,
+          "qf": 0.00012,
           "rv_floor": 0.03,
           "post_smooth_alpha": 0.9,
-          "spec_guidance_strength": 1.1,
-          "spec_guidance_offset": 0.05
+          "spec_guidance_strength": 1.0,
+          "spec_guidance_offset": 0.02
         }
       }
     },
@@ -35,38 +35,14 @@
       "name": "of_farneback__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.00012,
-          "qx": 0.00008,
+          "qf": 0.0003,
+          "qx": 0.0001,
           "rv_floor": 0.03,
-          "tau_env": 35,
-          "ukf_alpha": 0.05,
+          "tau_env": 28,
+          "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9,
-          "spec_guidance_strength": 1.1,
-          "spec_guidance_offset": 0.05
-        }
-      }
-    },
-    {
-      "name": "of_farneback__spec_ridge",
-      "preproc": {
-        "robust_zscore": {
-          "clip": null
-        }
-      }
-    },
-    {
-      "name": "of_farneback__pll",
-      "params": {
-        "oscillator": {
-          "pll_ttrack": 6.5,
-          "pll_zeta": 0.9,
-          "pll_kp_min": 0.0003,
-          "pll_ki_min": 1e-05,
-          "post_smooth_alpha": 0.92,
-          "spec_guidance_strength": 1.15,
-          "spec_guidance_offset": 0.05,
-          "qf": 0.0001,
-          "qx": 0.0001
+          "spec_guidance_strength": 1.0,
+          "spec_guidance_offset": 0.02
         }
       }
     },
@@ -75,11 +51,11 @@
       "params": {
         "oscillator": {
           "qx": 0.00012,
-          "qf": 0.0001,
-          "rv_floor": 0.05,
+          "qf": 0.00012,
+          "rv_floor": 0.04,
           "post_smooth_alpha": 0.9,
-          "spec_guidance_strength": 1.1,
-          "spec_guidance_offset": 0.05
+          "spec_guidance_strength": 1.0,
+          "spec_guidance_offset": 0.02
         }
       }
     },
@@ -87,36 +63,14 @@
       "name": "dof__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.00012,
+          "qf": 0.0003,
           "qx": 0.0001,
-          "rv_floor": 0.05,
-          "tau_env": 42,
-          "ukf_alpha": 0.06,
+          "rv_floor": 0.04,
+          "tau_env": 28,
+          "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9,
-          "spec_guidance_strength": 1.1,
-          "spec_guidance_offset": 0.05
-        }
-      }
-    },
-    {
-      "name": "dof__spec_ridge",
-      "preproc": {
-        "robust_zscore": {
-          "clip": null
-        }
-      }
-    },
-    {
-      "name": "dof__pll",
-      "params": {
-        "oscillator": {
-          "pll_ttrack": 8.5,
-          "pll_zeta": 0.8,
-          "pll_kp_min": 0.0004,
-          "pll_ki_min": 3e-05,
-          "post_smooth_alpha": 0.92,
-          "spec_guidance_strength": 1.15,
-          "spec_guidance_offset": 0.05
+          "spec_guidance_strength": 1.0,
+          "spec_guidance_offset": 0.02
         }
       }
     },
@@ -124,7 +78,7 @@
       "name": "profile1d_linear__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00025,
+          "qx": 0.00012,
           "rv_floor": 0.03,
           "post_smooth_alpha": 0.9
         }
@@ -136,31 +90,10 @@
         "oscillator": {
           "qf": 0.0003,
           "qx": 0.0001,
-          "rv_floor": 0.034,
-          "tau_env": 33,
-          "ukf_alpha": 0.09
-        }
-      }
-    },
-    {
-      "name": "profile1d_linear__spec_ridge",
-      "preproc": {
-        "robust_zscore": {
-          "clip": null
-        }
-      }
-    },
-    {
-      "name": "profile1d_linear__pll",
-      "params": {
-        "oscillator": {
-          "pll_ttrack": 5.5,
-          "pll_zeta": 0.9,
-          "pll_kp_min": 0.00025,
-          "pll_ki_min": 1.5e-05,
-          "post_smooth_alpha": 0.92,
-          "spec_guidance_strength": 1.15,
-          "spec_guidance_offset": 0.05
+          "rv_floor": 0.03,
+          "tau_env": 28,
+          "ukf_alpha": 0.08,
+          "post_smooth_alpha": 0.9
         }
       }
     },
@@ -168,7 +101,7 @@
       "name": "profile1d_quadratic__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00025,
+          "qx": 0.00012,
           "rv_floor": 0.03,
           "post_smooth_alpha": 0.9
         }
@@ -178,33 +111,12 @@
       "name": "profile1d_quadratic__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.00025,
-          "qx": 8e-05,
+          "qf": 0.0003,
+          "qx": 0.0001,
           "rv_floor": 0.03,
-          "tau_env": 30,
-          "ukf_alpha": 0.07
-        }
-      }
-    },
-    {
-      "name": "profile1d_quadratic__spec_ridge",
-      "preproc": {
-        "robust_zscore": {
-          "clip": null
-        }
-      }
-    },
-    {
-      "name": "profile1d_quadratic__pll",
-      "params": {
-        "oscillator": {
-          "pll_ttrack": 5.5,
-          "pll_zeta": 0.9,
-          "pll_kp_min": 0.00025,
-          "pll_ki_min": 1.5e-05,
-          "post_smooth_alpha": 0.92,
-          "spec_guidance_strength": 1.15,
-          "spec_guidance_offset": 0.05
+          "tau_env": 28,
+          "ukf_alpha": 0.08,
+          "post_smooth_alpha": 0.9
         }
       }
     },
@@ -212,7 +124,7 @@
       "name": "profile1d_cubic__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00025,
+          "qx": 0.00012,
           "rv_floor": 0.03,
           "post_smooth_alpha": 0.9
         }
@@ -222,33 +134,12 @@
       "name": "profile1d_cubic__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.00022,
-          "qx": 8e-05,
+          "qf": 0.0003,
+          "qx": 0.0001,
           "rv_floor": 0.03,
           "tau_env": 28,
-          "ukf_alpha": 0.07
-        }
-      }
-    },
-    {
-      "name": "profile1d_cubic__spec_ridge",
-      "preproc": {
-        "robust_zscore": {
-          "clip": null
-        }
-      }
-    },
-    {
-      "name": "profile1d_cubic__pll",
-      "params": {
-        "oscillator": {
-          "pll_ttrack": 5.5,
-          "pll_zeta": 0.9,
-          "pll_kp_min": 0.00025,
-          "pll_ki_min": 1.5e-05,
-          "post_smooth_alpha": 0.92,
-          "spec_guidance_strength": 1.15,
-          "spec_guidance_offset": 0.05
+          "ukf_alpha": 0.08,
+          "post_smooth_alpha": 0.9
         }
       }
     }
@@ -259,38 +150,44 @@
     "min_hz": 0.08,
     "max_hz": 0.5,
     "use_track": true,
-    "track_std_min_bpm": 0.3,
+    "track_std_min_bpm": 0.8,
     "track_unique_min": 0.05,
-    "track_saturation_max": 0.15
+    "track_saturation_max": 0.35
   },
   "oscillator": {
     "f_min": 0.08,
     "f_max": 0.5,
-    "qx": 0.0002
+    "qx": 0.00012,
+    "qf": 0.00012,
+    "rv_floor": 0.03,
+    "post_smooth_alpha": 0.9,
+    "spec_guidance_strength": 1.0,
+    "spec_guidance_offset": 0.02,
+    "tau_env": 32
   },
   "preproc": {
     "robust_zscore": {
       "enabled": true,
-      "eps": 1e-6,
-      "clip": 3.0
+      "eps": 1e-06,
+      "clip": 2.5
     }
   },
   "gating": {
     "profile": "paper",
     "tracker": {
-      "std_min_bpm": 0.0,
-      "unique_min": 0.0,
-      "saturation_max": 1.0,
+      "std_min_bpm": 0.8,
+      "unique_min": 0.05,
+      "saturation_max": 0.35,
       "std_is_soft": true
     },
     "spectral": {
-      "peak_ratio_min": 0.0,
-      "prominence_min_db": -5.0,
-      "fwhm_max_hz": 1.0,
-      "fwhm_df_guard": 0.0
+      "peak_ratio_min": 1.2,
+      "prominence_min_db": 3.0,
+      "fwhm_max_hz": 0.6,
+      "fwhm_df_guard": 0.05
     },
     "debug": {
-      "disable_gating": false
+      "disable_gating": true
     }
   },
   "report": {

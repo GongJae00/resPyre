@@ -5,8 +5,8 @@ Generate family-level respiration overlays for COHFACE results.
 Each figure shows:
   - GT vs baseline method (top/mid/bottom trials) on the upper-left axes.
   - GT vs all methods in the family (best/top trial) on the upper-right axes.
-  - GT vs each tracker head (KFstd, UKF-Freq, Spec-Ridge, PLL) across
-    best/middle/worst trials on the bottom four axes.
+  - GT vs each tracker head (KFstd, UKF-Freq) across
+    best/middle/worst trials on the bottom axes.
 
 Usage:
     python tools/plot_family_overlays.py \
@@ -31,47 +31,34 @@ FAMILIES = {
         "of_farneback",
         "of_farneback__kfstd",
         "of_farneback__ukffreq",
-        "of_farneback__spec_ridge",
-        "of_farneback__pll",
     ],
     "dof": [
         "dof",
         "dof__kfstd",
         "dof__ukffreq",
-        "dof__spec_ridge",
-        "dof__pll",
     ],
     "profile1d_linear": [
         "profile1d_linear",
         "profile1d_linear__kfstd",
         "profile1d_linear__ukffreq",
-        "profile1d_linear__spec_ridge",
-        "profile1d_linear__pll",
     ],
     "profile1d_quadratic": [
         "profile1d_quadratic",
         "profile1d_quadratic__kfstd",
         "profile1d_quadratic__ukffreq",
-        "profile1d_quadratic__spec_ridge",
-        "profile1d_quadratic__pll",
     ],
     "profile1d_cubic": [
         "profile1d_cubic",
         "profile1d_cubic__kfstd",
         "profile1d_cubic__ukffreq",
-        "profile1d_cubic__spec_ridge",
-        "profile1d_cubic__pll",
     ],
 }
 
-TRACKER_SUFFIXES = ["__kfstd", "__ukffreq", "__spec_ridge", "__pll"]
-CATEGORY_COLORS = {"top": "#1b9e77", "mid": "#d95f02"}
+TRACKER_SUFFIXES = ["__kfstd", "__ukffreq"]
 CATEGORY_COLORS = {"top": "#1b9e77"}
 METHOD_COLORS = {
     "__kfstd": "#1b9e77",
     "__ukffreq": "#2c7bb6",
-    "__spec_ridge": "#7570b3",
-    "__pll": "#d95f02",
 }
 
 
@@ -213,11 +200,11 @@ def plot_family(
     best_entry = picks["top"]
     trial_ids = {k: (Path(v["data_file"]).name, v.get("trial", "")) for k, v in picks.items()}
 
-    fig = plt.figure(figsize=(16, 12))
+    fig = plt.figure(figsize=(16, 9))
     gs = GridSpec(
-        3,
         2,
-        height_ratios=[1.2, 1.0, 1.0],
+        2,
+        height_ratios=[1.2, 1.0],
         figure=fig,
         hspace=0.35,
         wspace=0.25,
@@ -228,8 +215,6 @@ def plot_family(
     tracker_axes = [
         fig.add_subplot(gs[1, 0]),
         fig.add_subplot(gs[1, 1]),
-        fig.add_subplot(gs[2, 0]),
-        fig.add_subplot(gs[2, 1]),
     ]
 
     # Upper-left: baseline vs GT (top only)
@@ -277,7 +262,7 @@ def plot_family(
     ax_family.set_ylabel("Normalized amplitude")
     ax_family.legend(fontsize=8, loc="upper right")
 
-    # Tracker rows: KFSTD/UKFFREQ (row2), SPEC/PLL (row3)
+    # Tracker row: KFSTD/UKFFREQ
     for ax, suffix in zip(tracker_axes, TRACKER_SUFFIXES):
         method = f"{base_method}{suffix}"
         if method not in trial["methods"]:
