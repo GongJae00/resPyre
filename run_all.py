@@ -3691,6 +3691,22 @@ def main(argv=None):
 		_profiler_stage_start()
 		print("Executing metrics display step")
 		for run_dir in run_dirs:
+			# Resolve metrics directory and candidates up front
+			metrics_subdir = os.path.join(run_dir, 'metrics')
+			if os.path.isdir(metrics_subdir):
+				metrics_dir = metrics_subdir
+			else:
+				metrics_dir = run_dir
+			if win_size == 'video':
+				candidates = ['metrics_track_1w.pkl', 'metrics_1w.pkl', 'metrics_track.pkl', 'metrics.pkl']
+			else:
+				candidates = ['metrics_track.pkl', 'metrics.pkl', 'metrics_track_1w.pkl', 'metrics_1w.pkl']
+			metrics_path = None
+			for cand in candidates:
+				cand_path = os.path.join(metrics_dir, cand)
+				if os.path.exists(cand_path):
+					metrics_path = cand_path
+					break
 			if args.auto_discover_methods and run_dir not in discovered_methods_map:
 				discovered_methods_map[run_dir] = _discover_methods_from_aux(run_dir)
 			discovered = discovered_methods_map.get(run_dir)
@@ -3707,21 +3723,6 @@ def main(argv=None):
 							print(message)
 						else:
 							raise RuntimeError(message)
-				metrics_subdir = os.path.join(run_dir, 'metrics')
-				if os.path.isdir(metrics_subdir):
-					metrics_dir = metrics_subdir
-				else:
-					metrics_dir = run_dir
-				if win_size == 'video':
-					candidates = ['metrics_track_1w.pkl', 'metrics_1w.pkl', 'metrics_track.pkl', 'metrics.pkl']
-				else:
-					candidates = ['metrics_track.pkl', 'metrics.pkl', 'metrics_track_1w.pkl', 'metrics_1w.pkl']
-				metrics_path = None
-				for cand in candidates:
-					cand_path = os.path.join(metrics_dir, cand)
-					if os.path.exists(cand_path):
-						metrics_path = cand_path
-						break
 				if metrics_path is None:
 					print(f"> Metrics file missing for {run_dir}; running evaluate first.")
 					evaluate(
@@ -3746,10 +3747,10 @@ def main(argv=None):
 						if os.path.exists(cand_path):
 							metrics_path = cand_path
 							break
-				unique_window = (
-					os.path.exists(os.path.join(metrics_dir, 'metrics_track_1w.pkl'))
-					or os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
-				)
+			unique_window = (
+				os.path.exists(os.path.join(metrics_dir, 'metrics_track_1w.pkl'))
+				or os.path.exists(os.path.join(metrics_dir, 'metrics_1w.pkl'))
+			)
 			print(f"\n== Metrics for {run_dir} ==")
 			if not os.path.exists(metrics_path):
 				print(f"> Metrics still unavailable for {run_dir}. Please rerun evaluate step.")
