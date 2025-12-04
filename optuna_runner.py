@@ -45,8 +45,12 @@ SUFFIX_FAMILY = {
 ALLOWABLE_SUFFIXES = tuple(SUFFIX_FAMILY.keys())
 EXPECTED_METHODS = len(BASE_METHODS) * len(SUFFIX_FAMILY)
 DEFAULT_WEIGHTS = {
-    'mae': 0.85,
-    'rmse': 0.15
+    'mae_track': 0.35,
+    'mae_spec': 0.35,
+    'rmse_track': 0.1,
+    'rmse_spec': 0.1,
+    'r_track': 0.05,
+    'r_spec': 0.05,
 }
 TRIAL_CSV_FIELDS = [
     'trial', 'objective', 'MAE_bpm_med', 'RMSE_bpm_med', 'R_mean', 'SNR_med',
@@ -175,39 +179,39 @@ class ParamSpec:
     log: bool = False
 
 
-# WHY: Adult respiration (0.1–0.4 Hz) at 64 Hz → gentle drift, narrow noise floors; keep only tracker heads (KFstd/UKFFreq) and bias ranges toward stable COHFACE runs.
+# WHY: 20-trial budget → tighten around proven midpoints (COHFACE), keep only tracker heads.
 FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
     'ukffreq': [
-        ParamSpec('oscillator.qf', 'float', 5e-5, 3.5e-4, log=True),
-        ParamSpec('oscillator.qx', 'float', 5e-5, 1.6e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.06),
-        ParamSpec('oscillator.tau_env', 'float', 24.0, 40.0),
-        ParamSpec('oscillator.ukf_alpha', 'float', 0.04, 0.1),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.965),
+        ParamSpec('oscillator.qf', 'float', 8e-5, 2.0e-4, log=True),
+        ParamSpec('oscillator.qx', 'float', 7e-5, 1.3e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.024, 0.05),
+        ParamSpec('oscillator.tau_env', 'float', 28.0, 36.0),
+        ParamSpec('oscillator.ukf_alpha', 'float', 0.05, 0.08),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.94),
     ],
     'kfstd': [
-        ParamSpec('oscillator.qx', 'float', 6e-5, 1.6e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.02, 0.06, log=True),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.965),
+        ParamSpec('oscillator.qx', 'float', 8e-5, 1.2e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.025, 0.045, log=True),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.94),
     ],
 }
 
 # WHY: Seed each head near physiologic mid-points so Optuna explores narrow, safe bands.
 FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     'ukffreq': {
-        'oscillator.qf': 1.6e-4,
+        'oscillator.qf': 1.3e-4,
         'oscillator.qx': 9e-05,
         'oscillator.rv_floor': 0.032,
         'oscillator.tau_env': 32.0,
-        'oscillator.ukf_alpha': 0.07,
+        'oscillator.ukf_alpha': 0.065,
         'oscillator.ukf_beta': 2.0,
         'oscillator.ukf_kappa': 0.0,
-        'oscillator.post_smooth_alpha': 0.94,
+        'oscillator.post_smooth_alpha': 0.92,
     },
     'kfstd': {
         'oscillator.qx': 1e-4,
         'oscillator.rv_floor': 0.032,
-        'oscillator.post_smooth_alpha': 0.93,
+        'oscillator.post_smooth_alpha': 0.92,
     },
 }
 
@@ -254,6 +258,15 @@ def locate_metrics_file(results_root: Path) -> Optional[Path]:
         return path
     for path in results_root.rglob('metrics_1w.pkl'):
         return path
+    return None
+
+
+def locate_spectral_metrics_file(results_root: Path) -> Optional[Path]:
+    if not results_root.exists():
+        return None
+    for name in ('metrics_spectral.pkl',):
+        for path in results_root.rglob(name):
+            return path
     return None
 
 
@@ -420,18 +433,22 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
 def combine_objective(summary: Dict[str, float], weights: Dict[str, float]) -> Tuple[float, Dict[str, float]]:
     terms = {}
     objective = 0.0
-    def _add_term(key: str, value: float, transform=None):
+    def _add_term(weight_key: str, value: float, transform=None):
         nonlocal objective
-        weight = float(weights.get(key, 0.0))
+        weight = float(weights.get(weight_key, 0.0))
         if weight == 0.0 or not np.isfinite(value):
-            terms[key] = float('nan')
+            terms[weight_key] = float('nan')
             return
         term_val = transform(value) if transform else value
         objective += weight * term_val
-        terms[key] = term_val
+        terms[weight_key] = term_val
 
-    _add_term('mae', summary.get('MAE_bpm_med', float('nan')))
-    _add_term('rmse', summary.get('RMSE_bpm_med', float('nan')))
+    _add_term('mae_track', summary.get('MAE_track', float('nan')))
+    _add_term('mae_spec', summary.get('MAE_spec', float('nan')))
+    _add_term('rmse_track', summary.get('RMSE_track', float('nan')))
+    _add_term('rmse_spec', summary.get('RMSE_spec', float('nan')))
+    _add_term('r_track', summary.get('R_track', float('nan')), transform=lambda v: 1.0 - v)
+    _add_term('r_spec', summary.get('R_spec', float('nan')), transform=lambda v: 1.0 - v)
 
     if not np.isfinite(objective):
         objective = 1e6
@@ -507,13 +524,18 @@ class MethodStudy:
         return objective
 
     def _record_trial(self, trial_num: int, objective: float, summary: Dict[str, float], params: Dict[str, float], em_result: Optional[Dict]):
+        # Map track-focused fields into legacy CSV columns for quick inspection.
+        mae_val = summary.get('MAE_track') if 'MAE_track' in summary else summary.get('MAE_bpm_med')
+        rmse_val = summary.get('RMSE_track') if 'RMSE_track' in summary else summary.get('RMSE_bpm_med')
+        r_val = summary.get('R_track') if 'R_track' in summary else summary.get('R_mean')
+        snr_val = summary.get('SNR_track') if 'SNR_track' in summary else summary.get('SNR_med')
         row = {
             'trial': trial_num,
             'objective': objective,
-            'MAE_bpm_med': summary.get('MAE_bpm_med'),
-            'RMSE_bpm_med': summary.get('RMSE_bpm_med'),
-            'R_mean': summary.get('R_mean'),
-            'SNR_med': summary.get('SNR_med'),
+            'MAE_bpm_med': mae_val,
+            'RMSE_bpm_med': rmse_val,
+            'R_mean': r_val,
+            'SNR_med': snr_val,
             'edge_sat': summary.get('edge_sat'),
             'nan_rate': summary.get('nan_rate'),
             'jerk_hzps': summary.get('jerk_hzps'),
@@ -586,7 +608,27 @@ class MethodStudy:
             shutil.rmtree(trial_root, ignore_errors=True)
             raise optuna.TrialPruned('metrics file missing')
         metric_names, records = load_method_records(metrics_path, self.method)
-        summary = summarize_records(metric_names, records)
+        summary_track = summarize_records(metric_names, records)
+        # Spectral summary (if available)
+        spec_path = locate_spectral_metrics_file(Path(cfg['results_dir']))
+        summary_spec = {}
+        if spec_path and spec_path.exists():
+            try:
+                spec_metric_names, spec_records = load_method_records(spec_path, self.method)
+                summary_spec = summarize_records(spec_metric_names, spec_records)
+            except Exception:
+                summary_spec = {}
+        # Merge track/spec for objective
+        summary = {
+            'MAE_track': summary_track.get('MAE_bpm_med'),
+            'RMSE_track': summary_track.get('RMSE_bpm_med'),
+            'R_track': summary_track.get('R_mean'),
+            'SNR_track': summary_track.get('SNR_med'),
+            'MAE_spec': summary_spec.get('MAE_bpm_med'),
+            'RMSE_spec': summary_spec.get('RMSE_bpm_med'),
+            'R_spec': summary_spec.get('R_mean'),
+            'SNR_spec': summary_spec.get('SNR_med'),
+        }
         em_result = None
         if self.em_mode == 'trial':
             em_result = self._run_em_learning(Path(cfg['results_dir']))
