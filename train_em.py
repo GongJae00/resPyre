@@ -13,15 +13,8 @@ def _load_signals(results_dir: str, method: str):
 	aux_dir = os.path.join(results_dir, 'aux', sanitized)
 	signals = []
 	lmethod = method.lower()
-	# Tracker-style oscillator heads (KFstd/UKF/PLL/spec_ridge) should prefer
-	# their frequency track when learning Q/R, since EMKalmanTrainer is
-	# designed for 1D respiration tracks that have been z-scored.
-	is_tracker_like = (
-		'__kfstd' in lmethod
-		or '__ukffreq' in lmethod
-		or '__pll' in lmethod
-		or '__spec_ridge' in lmethod
-	)
+	# Tracker-style oscillator heads (KFstd/UKFfreq) should prefer their frequency track.
+	is_tracker_like = ('__kfstd' in lmethod) or ('__ukffreq' in lmethod)
 	if not os.path.isdir(aux_dir):
 		return signals
 	for fname in os.listdir(aux_dir):

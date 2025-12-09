@@ -1,8 +1,0 @@
-sphinx>=7.1.0,<8.0.0
-numpydoc
-matplotlib>=3.0.0
-recommonmark
-ipykernel
-ipywidgets
-nbsphinx
-jupyter_sphinx

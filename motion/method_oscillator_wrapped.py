@@ -7,7 +7,6 @@ from scipy import signal as sps
 
 import run_all  # type: ignore
 from riv.estimators.oscillator_heads import OscillatorParams, build_head
-from riv.estimators.head_ensemble import OscillatorEnsemble
 
 
 def _normalize_base(name: str) -> str:
@@ -26,16 +25,12 @@ def _normalize_base(name: str) -> str:
 
 
 def _normalize_head(name: str) -> str:
-    key = name.lower().replace("-", "")
-    if key in ("kfstd", "kf_std"):
-        return "kfstd"
-    if key in ("ukffreq", "ukf_freq"):
-        return "ukffreq"
-    if key in ("specridge", "spec_ridge"):
-        return "spec_ridge"
-    if key == "pll":
-        return "pll"
-    raise ValueError(f"Unknown oscillator head '{name}'")
+	key = name.lower().replace("-", "")
+	if key in ("kfstd", "kf_std"):
+		return "kfstd"
+	if key in ("ukffreq", "ukf_freq"):
+		return "ukffreq"
+	raise ValueError(f"Unknown oscillator head '{name}'")
 
 
 def _build_base(base_key: str):
@@ -69,27 +64,22 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
         self,
         base_key: str,
         head_key: str,
-        osc_params: Optional[OscillatorParams] = None,
-        save_payload: Optional[Dict[str, bool]] = None,
-        preproc_cfg: Optional[Dict] = None,
-        ensemble_cfg: Optional[Dict] = None
-    ):
-        super().__init__()
-        self.base_key = base_key
-        self.head_key = head_key
-        self.name = f"{base_key}__{head_key}"
-        self.data_type = "chest"
-        self.base_method = _build_base(base_key)
-        self.osc_head = build_head(head_key, params=osc_params)
-        self.ensemble_cfg = ensemble_cfg or {}
-        self.ensemble_runner = None
-        if self.ensemble_cfg.get("enabled"):
-            head_defs = self.ensemble_cfg.get("heads") or [{"name": "kfstd"}, {"name": "ukffreq"}, {"name": "spec_ridge"}, {"name": "pll"}]
-            self.ensemble_runner = OscillatorEnsemble(head_defs, self.preproc_cfg)
-        self.save_payload = save_payload or {"npz": True}
-        self._base_meta = {"base_method": base_key}
-        self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
-        setattr(self.osc_head, "preproc_cfg", copy.deepcopy(self.preproc_cfg))
+		osc_params: Optional[OscillatorParams] = None,
+		save_payload: Optional[Dict[str, bool]] = None,
+		preproc_cfg: Optional[Dict] = None,
+		ensemble_cfg: Optional[Dict] = None
+	):
+		super().__init__()
+		self.base_key = base_key
+		self.head_key = head_key
+		self.name = f"{base_key}__{head_key}"
+		self.data_type = "chest"
+		self.base_method = _build_base(base_key)
+		self.osc_head = build_head(head_key, params=osc_params)
+		self.save_payload = save_payload or {"npz": True}
+		self._base_meta = {"base_method": base_key}
+		self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
+		setattr(self.osc_head, "preproc_cfg", copy.deepcopy(self.preproc_cfg))
 
     def _roi_intensity_stats(self, rois: Optional[list]) -> Tuple[float, float, float]:
         """Compute coarse ROI intensity stats over time to proxy motion energy."""
@@ -208,10 +198,7 @@ class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
             "roi_intensity_std": roi_std,
             "roi_intensity_snr_db": roi_snr_db
         })
-        if self.ensemble_runner:
-            result = self.ensemble_runner.run(base_signal, fs, meta)
-        else:
-            result = self.osc_head.run(base_signal, fs, meta)
+        result = self.osc_head.run(base_signal, fs, meta)
         if self.save_payload.get("npz", True):
             self._store_npz(data, result)
         return np.asarray(result["signal_hat"], dtype=np.float64)
