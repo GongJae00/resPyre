@@ -2966,6 +2966,294 @@ def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
 
 	aggregate_payload = []
 
+	# Helper: best-sample overlay (min-max normalized, lag-corrected) per method
+	def _save_best_overlays():
+		import pickle
+		metrics_pkl = os.path.join(results_dir, 'metrics', 'metrics_track.pkl')
+		if not os.path.exists(metrics_pkl):
+			return
+		try:
+			with open(metrics_pkl, 'rb') as fp:
+				headers, records = pickle.load(fp)
+		except Exception as exc:
+			print(f"> Warning: failed to load {metrics_pkl} for best-overlay generation ({exc})")
+			return
+
+		def _minmax(x):
+			lo, hi = np.nanmin(x), np.nanmax(x)
+			if not np.isfinite(lo) or not np.isfinite(hi) or hi - lo < 1e-9:
+				return np.zeros_like(x)
+			return (x - lo) / (hi - lo) * 2 - 1
+
+		def _plot_overlay(rec, out_path):
+			import matplotlib.pyplot as plt
+
+			pair = rec.get('pair') or []
+			if len(pair) < 2:
+				return
+			est = np.atleast_1d(np.squeeze(pair[0])).astype(float)
+			gt = np.atleast_1d(np.squeeze(pair[1])).astype(float)
+			n = min(est.size, gt.size)
+			if n < 2:
+				return
+			est = est[:n]
+			gt = gt[:n]
+
+			t_est = rec.get('times_est')
+			stride_local = rec.get('stride', stride) or 1.0
+			if t_est is not None and len(t_est) == n:
+				t = np.asarray(t_est, dtype=float)
+				dt = float(np.median(np.diff(t))) if n > 1 else float(stride_local)
+			else:
+				t = np.arange(n, dtype=float) * float(stride_local)
+				dt = float(stride_local)
+
+			# Lag estimation via cross-correlation (z-score first)
+			with np.errstate(invalid='ignore'):
+				est_n = (est - np.nanmean(est)) / (np.nanstd(est) + 1e-9)
+				gt_n = (gt - np.nanmean(gt)) / (np.nanstd(gt) + 1e-9)
+			corr = np.correlate(est_n, gt_n, mode='full')
+			lag_samples = int(corr.argmax() - (len(gt_n) - 1))
+			lag_sec = lag_samples * dt
+
+			if lag_samples > 0:
+				est_al = est[lag_samples:]
+				gt_al = gt[:len(est_al)]
+				t_al = t[lag_samples:]
+			elif lag_samples < 0:
+				est_al = est[:lag_samples]
+				gt_al = gt[-lag_samples:]
+				t_al = t[:lag_samples]
+			else:
+				est_al, gt_al, t_al = est, gt, t
+
+			if est_al.size < 2 or gt_al.size < 2:
+				return
+
+			est_mm = _minmax(est_al)
+			gt_mm = _minmax(gt_al)
+
+			plt.figure(figsize=(10, 4))
+			plt.plot(t_al, gt_mm, label='GT (min-max)', linewidth=1.2)
+			plt.plot(t_al, est_mm, label=f'Estimate (min-max, lag {lag_sec:.3f}s)', linewidth=1.0, alpha=0.85)
+			plt.xlim(t_al[0], t_al[-1])
+			plt.ylim(-1.1, 1.1)
+			plt.xlabel('Time (s)')
+			plt.ylabel('Normalized Amplitude')
+			plt.title(f'{rec.get(\"method\", \"method\")}: best overlay (min-max, lag-corrected)')
+			plt.legend()
+			plt.tight_layout()
+			plt.savefig(out_path, dpi=150)
+			plt.close()
+
+		for method, recs in records.items():
+			if not recs:
+				continue
+			try:
+				best = min(recs, key=lambda r: r.get('metrics', [float('inf')])[0])
+			except Exception:
+				continue
+			out_path = os.path.join(plots_dir, f'overlay_best_minmax_aligned_{method}.png')
+			try:
+				_plot_overlay(best, out_path)
+				print(f"> saved best overlay for {method} -> {out_path}")
+			except Exception as exc:
+				print(f"> Warning: failed to save best overlay for {method} ({exc})")
+
+	# Helper: family overlays (replicates tools/plot_family_overlays.py) auto-generated with other plots
+	def _save_family_overlays():
+		import pickle
+		from pathlib import Path
+		from matplotlib.gridspec import GridSpec
+
+		FAMILIES = {
+			"of_farneback": ["of_farneback", "of_farneback__kfstd", "of_farneback__ukffreq"],
+			"dof": ["dof", "dof__kfstd", "dof__ukffreq"],
+			"profile1d_linear": ["profile1d_linear", "profile1d_linear__kfstd", "profile1d_linear__ukffreq"],
+			"profile1d_quadratic": ["profile1d_quadratic", "profile1d_quadratic__kfstd", "profile1d_quadratic__ukffreq"],
+			"profile1d_cubic": ["profile1d_cubic", "profile1d_cubic__kfstd", "profile1d_cubic__ukffreq"],
+		}
+		TRACKER_SUFFIXES = ["__kfstd", "__ukffreq"]
+		CATEGORY_COLORS = {"top": "#1b9e77"}
+		METHOD_COLORS = {"__kfstd": "#1b9e77", "__ukffreq": "#2c7bb6"}
+		METRIC_NAME = "MAE"
+
+		metrics_pkl = os.path.join(results_dir, 'metrics', 'metrics.pkl')
+		if not os.path.exists(metrics_pkl):
+			return
+
+		def _load_metric_entries(metrics_path: Path, metric: str):
+			with metrics_path.open('rb') as fp:
+				metric_names, method_metrics = pickle.load(fp)
+			if metric not in metric_names:
+				return {}
+			idx = metric_names.index(metric)
+			entries = {}
+			for method, records in method_metrics.items():
+				method_entries = []
+				for rec in records:
+					data_file = rec.get('data_file')
+					if not data_file:
+						continue
+					metrics_list = rec.get('metrics') or []
+					if idx >= len(metrics_list):
+						continue
+					try:
+						score = float(metrics_list[idx])
+					except (TypeError, ValueError):
+						continue
+					if not np.isfinite(score):
+						continue
+					method_entries.append({'score': score, 'data_file': data_file, 'trial': rec.get('trial_key', '')})
+				if method_entries:
+					entries[method] = method_entries
+			return entries
+
+		_trial_cache = {}
+
+		def _load_trial(results_root: Path, rel_path: str):
+			key = rel_path.replace("\\", "/")
+			if key in _trial_cache:
+				return _trial_cache[key]
+			full = results_root / rel_path
+			if not full.exists():
+				return None
+			with full.open('rb') as fp:
+				payload = pickle.load(fp)
+			trial = {
+				'fps': float(payload.get('fps') or 1.0),
+				'gt': np.asarray(payload.get('gt'), dtype=np.float64).reshape(-1),
+				'methods': {},
+			}
+			for est in payload.get('estimates', []):
+				name = est.get('method')
+				if name is None:
+					continue
+				trial['methods'][name] = np.asarray(est.get('estimate'), dtype=np.float64).reshape(-1)
+			_trial_cache[key] = trial
+			return trial
+
+		def _normalize_to_unit(arr: np.ndarray) -> np.ndarray:
+			if arr.size == 0:
+				return arr
+			mn = np.nanmin(arr)
+			mx = np.nanmax(arr)
+			if not np.isfinite(mn) or not np.isfinite(mx) or mx - mn < 1e-9:
+				return np.zeros_like(arr)
+			return 2.0 * (arr - mn) / (mx - mn) - 1.0
+
+		def _extract_pair(trial: dict, method: str):
+			gt = trial['gt']
+			wave = trial['methods'].get(method)
+			if wave is None or gt.size == 0:
+				return None
+			n = min(len(gt), len(wave))
+			limit = int(round(30.0 * max(trial['fps'], 1e-6)))
+			if limit > 1:
+				n = min(n, limit)
+			if n < 2:
+				return None
+			t = np.arange(n, dtype=np.float64) / max(trial['fps'], 1e-6)
+			gt_norm = _normalize_to_unit(gt[:n])
+			wave_norm = _normalize_to_unit(wave[:n])
+			return t, gt_norm, wave_norm
+
+		def _plot_family(family: str, methods: list, picks: dict, results_root: Path, output_dir: Path):
+			if not picks:
+				return
+			base_method = methods[0]
+			best_entry = picks['top']
+			trial_ids = {k: (Path(v['data_file']).name, v.get('trial', '')) for k, v in picks.items()}
+
+			fig = plt.figure(figsize=(16, 9))
+			gs = GridSpec(2, 2, height_ratios=[1.2, 1.0], figure=fig, hspace=0.35, wspace=0.25)
+			ax_base = fig.add_subplot(gs[0, 0])
+			ax_family = fig.add_subplot(gs[0, 1])
+			tracker_axes = [fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])]
+
+			for label, entry in picks.items():
+				trial = _load_trial(results_root, entry['data_file'])
+				if trial is None:
+					continue
+				pair = _extract_pair(trial, base_method)
+				if pair is None:
+					continue
+				t, gt_norm, base_norm = pair
+				ax_base.plot(t, gt_norm, color="#111111", linestyle="--", linewidth=2.0, alpha=0.85)
+				ax_base.plot(t, base_norm, color=CATEGORY_COLORS[label], label=f"{label} ({trial_ids[label][0]})", linewidth=1.4)
+			ax_base.set_title(f"{base_method} vs GT (min/max normalized)")
+			ax_base.set_xlabel("Time (s)")
+			ax_base.set_ylabel("Normalized amplitude")
+			ax_base.legend(loc="upper right", fontsize=9)
+
+			trial = _load_trial(results_root, best_entry['data_file'])
+			if trial is not None:
+				pair_gt = _extract_pair(trial, base_method)
+				if pair_gt is not None:
+					t_ref, gt_norm, _ = pair_gt
+					ax_family.plot(t_ref, gt_norm, color="#000000", linestyle="--", linewidth=2.0, label="GT")
+				for method in methods:
+					pair = _extract_pair(trial, method)
+					if pair is None:
+						continue
+					t, _, wave_norm = pair
+					color = METHOD_COLORS.get(method.replace(base_method, ""), None)
+					ax_family.plot(t, wave_norm, label=method, linewidth=1.2, color=color)
+			ax_family.set_title(f"{family} methods (best trial: {trial_ids['top'][0]})")
+			ax_family.set_xlabel("Time (s)")
+			ax_family.set_ylabel("Normalized amplitude")
+			ax_family.legend(fontsize=8, loc="upper right")
+
+			for ax, suffix in zip(tracker_axes, TRACKER_SUFFIXES):
+				method = f"{base_method}{suffix}"
+				if trial is None or method not in trial.get('methods', {}):
+					ax.set_visible(False)
+					continue
+				for label, entry in picks.items():
+					trial_t = _load_trial(results_root, entry['data_file'])
+					if trial_t is None:
+						continue
+					pair = _extract_pair(trial_t, method)
+					if pair is None:
+						continue
+					t, gt_norm, wave_norm = pair
+					ax.plot(t, gt_norm, color="#111111", linestyle="--", linewidth=1.2, alpha=0.6)
+					ax.plot(t, wave_norm, color=CATEGORY_COLORS[label], linewidth=1.3)
+				label_suffix = method.replace(base_method + "__", "").upper()
+				ax.set_title(label_suffix)
+				ax.set_xlabel("Time (s)")
+				ax.set_ylabel("Norm amp")
+				if method == f"{base_method}{TRACKER_SUFFIXES[0]}":
+					ax.legend([f\"{k} ({trial_ids[k][0]})\" for k in picks], fontsize=8, loc="upper right")
+
+			trial_summary = ", ".join(f\"{k}:{trial_ids[k][0]}\" for k in trial_ids)
+			fig.suptitle(f\"{family} overlay (top trial: {trial_summary})\", fontsize=14)
+
+			output_dir.mkdir(parents=True, exist_ok=True)
+			out_path = output_dir / f\"{family}.png\"
+			fig.savefig(out_path, dpi=200)
+			plt.close(fig)
+			print(f\"> saved family overlay {out_path}\")
+
+		results_root = Path(results_dir).resolve()
+		output_dir = results_root / 'plots' / 'family_overlays'
+		try:
+			metric_map = _load_metric_entries(Path(metrics_pkl), METRIC_NAME)
+		except Exception as exc:
+			print(f\"> Warning: failed to load family overlays from {metrics_pkl} ({exc})")
+			return
+
+		for family, methods in FAMILIES.items():
+			base = methods[0]
+			records = metric_map.get(base)
+			if not records:
+				continue
+			picks = {'top': sorted(records, key=lambda item: item['score'])[0]}
+			try:
+				_plot_family(family, methods, picks, results_root, output_dir)
+			except Exception as exc:
+				print(f\"> Warning: failed to plot family overlay {family} ({exc})\")
+
 	for method, summary in summaries.items():
 		sample = summary.get('sample', {})
 		record = summary.get('record')
@@ -3258,6 +3546,11 @@ def _generate_plots(results_dir, summaries, metrics, unique_window, stride=1):
 				'bland_altman': os.path.join(base, method, 'bland_altman.png')
 			}
 		})
+
+	# Generate best-overlays once per call (if metrics_track.pkl exists)
+	_save_best_overlays()
+	# Generate family overlays (mirrors tools/plot_family_overlays.py)
+	_save_family_overlays()
 
 	if aggregate_payload:
 		root_summary = {
