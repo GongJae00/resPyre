@@ -1109,9 +1109,6 @@ HEAD_REGISTRY = {
     "kf_std": oscillator_KFstd,
     "ukffreq": oscillator_UKF_freq,
     "ukf_freq": oscillator_UKF_freq,
-    "spec_ridge": oscillator_Spec_ridge,
-    "specridge": oscillator_Spec_ridge,
-    "pll": oscillator_PLL,
 }
 
 

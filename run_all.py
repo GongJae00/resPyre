@@ -87,7 +87,6 @@ class BP4D(DatasetBase):
 					d['trial'] = trial
 					d['chest_rois'] = []
 					d['face_rois'] = []
-					d['rppg_obj'] = []
 					d['gt'] = self.load_gt(trial_path)
 					self.data.append(d)
 
@@ -110,13 +109,6 @@ class BP4D(DatasetBase):
 		else:
 			rois = []
 		return rois
-
-	def extract_rppg(self, video_path, method='cpu_CHROM'):
-		from riv.resp_from_rPPG import RR_from_rPPG
-
-		rppg_obj = RR_from_rPPG(video_path, method=method)
-		rppg_obj.get_rPPG()
-		return rppg_obj
 
 class COHFACE(DatasetBase):
 	def __init__(self):
@@ -155,7 +147,6 @@ class COHFACE(DatasetBase):
 					d['trial'] = trial
 					d['chest_rois'] = []
 					d['face_rois'] = []
-					d['rppg_obj'] = []
 					d['gt'] = self.load_gt(trial_path)
 					self.data.append(d)
 
@@ -202,13 +193,6 @@ class COHFACE(DatasetBase):
 			rois = []
 		return rois
 
-	def extract_rppg(self, video_path, method='cpu_CHROM'):
-		from riv.resp_from_rPPG import RR_from_rPPG
-
-		rppg_obj =  RR_from_rPPG(video_path, method=method)
-		rppg_obj.get_rPPG()
-		return rppg_obj
-
 class MAHNOB(DatasetBase):
 	def __init__(self):
 		super().__init__()
@@ -250,7 +234,6 @@ class MAHNOB(DatasetBase):
 				d['subject'] = sub
 				d['chest_rois'] = []
 				d['face_rois'] = []
-				d['rppg_obj'] = []
 				d['gt'] = self.load_gt(sub_path)
 				self.data.append(d)
 
@@ -269,13 +252,6 @@ class MAHNOB(DatasetBase):
 			rois = []
 		return rois
 
-	def extract_rppg(self, video_path, method='cpu_CHROM'):
-		from riv.resp_from_rPPG import RR_from_rPPG
-
-		rppg_obj =  RR_from_rPPG(video_path, method=method)
-		rppg_obj.get_rPPG()
-		return rppg_obj
-
 # Methods class definitions
 
 class MethodBase:
@@ -287,110 +263,6 @@ class MethodBase:
 	def process(self, data):
 		# This class can be used to process either videos or ROIs
 		raise NotImplementedError("Subclasses must implement process method")
-
-# Deep models
-
-class MTTS_CAN(MethodBase):
-	def __init__(self):
-		super().__init__()
-		self.name = 'MTTS_CAN'
-		self.batch_size = 100
-		self.data_type = 'face'
-
-	def process(self, data):
-		from deep.MTTS_CAN.my_predict_vitals import predict_vitals
-
-		resp = predict_vitals(frames=data['face_rois'], batch_size=self.batch_size)
-		return resp
-
-class BigSmall(MethodBase):
-	def __init__(self):
-		super().__init__()
-		self.name = 'BigSmall'
-		self.data_type = 'face'
-
-	def process(self, data):
-		from deep.BigSmall.predict_vitals import predict_vitals
-
-		resp = predict_vitals(data['face_rois'])
-		return resp
-
-# Motion based
-
-class OF_Deep(MethodBase):
-
-	def __init__(self, model, batch_size=64):
-		super().__init__()
-		self.name = 'OF_Deep' + ' ' + model
-		self.data_type = 'chest'
-		self.model = model
-		self.ckpt = 'things'
-		self.batch_size = batch_size
-
-	def forward(self, inputs):
-		import torch
-		predictions = self.OFmodel(inputs)
-		predictions = self.io_adapter.unpad_and_unscale(predictions)
-		flows = torch.squeeze(predictions['flows'])[:,1,:,:]
-		vert = flows.reshape(flows.shape[0],-1).cpu().detach().numpy()
-		return vert
-	
-	def process(self, data, cuda=None):
-		import ptlflow
-		import torch
-		from PIL import Image
-		from ptlflow.utils import flow_utils
-		from ptlflow.utils.io_adapter import IOAdapter
-		import warnings
-		warnings.filterwarnings("ignore") 
-		if cuda is None:
-			cuda = _use_cuda()
-		if not cuda:
-			torch.cuda.is_available = lambda : False
-			device = torch.device('cpu')
-		else:
-			device = torch.device(_torch_device())
-		self.OFmodel = ptlflow.get_model(self.model, pretrained_ckpt=self.ckpt)
-		self.OFmodel.to(device)
-		s = []
-		newsize = (224, 144)
-		video = [np.array(r.resize(newsize)) for r in data['chest_rois']]
-		nframes = len(video)
-		print("\n> Computing Optical Flow...")
-
-		while True:
-			try:
-				print("\n> Attempting with batch size: " + str(self.batch_size))
-				for i in tqdm(range(0, nframes, self.batch_size)):
-					if i == 0:
-						start = i
-					else:
-						start = i-1
-					end = min(i+self.batch_size, nframes-1)
-					batch = video[start:end]
-					if len(batch) <= 2:
-						continue
-					if i == 0:
-						self.io_adapter = IOAdapter(self.OFmodel, batch[0].shape[:2], cuda=cuda)
-					inputs = self.io_adapter.prepare_inputs(batch)
-					input_images = inputs["images"][0]
-					video1 = input_images[:-1]
-					video2 = input_images[1:]
-					input_images = torch.stack((video1, video2), dim=1)
-					if cuda:
-						input_images = input_images.cuda()
-					inputs["images"] = input_images
-					vert = self.forward(inputs)
-					s.append(np.median(vert, axis=1))
-				break
-			except RuntimeError:
-				self.batch_size = self.batch_size // 2
-				if self.batch_size < 4:
-					raise ValueError("Batch size is too tiny, maybe need more GPU memory.")
-		del self.OFmodel
-		torch.cuda.empty_cache()
-		sig = np.concatenate(s)
-		return sig
 
 class OF_Model(MethodBase):
 
@@ -446,50 +318,6 @@ class profile1D(MethodBase):
 		# estimate profile1D
 		profile, _ = profile1D(g_rois, data['fps'], self.interp_type)
 		return profile
-
-# RIV based
-
-class peak(MethodBase):
-
-	def __init__(self):
-		super().__init__()
-		self.name = 'fiedler'
-		self.data_type = 'rppg'
-
-	def process(self, data):
-		return data['rppg_obj'].extract_RIVs_from_peaks()
-
-class morph(MethodBase):
-
-	def __init__(self):
-		super().__init__()
-		self.name = 'ims'
-		self.data_type = 'rppg'
-
-	def process(self, data):
-		return data['rppg_obj'].extract_RIVs_from_IMS()
-
-class bss_ssa(MethodBase):
-
-	def __init__(self):
-		super().__init__()
-		self.name = 'bss_ssa'
-		self.data_type = 'rppg'
-		self.nGroups = None
-
-	def process(self, data):
-		return data['rppg_obj'].extract_RIVs_from_SSA(self.nGroups)
-
-class bss_emd(MethodBase):
-
-	def __init__(self):
-		super().__init__()
-		self.name = 'bss_emd'
-		self.data_type = 'rppg'
-		self.nIMF = 4
-
-	def process(self, data):
-		return data['rppg_obj'].extract_RIVs_from_EMD(self.nIMF)
 
 PROFILE1D_INTERPS = ('linear', 'quadratic', 'cubic')
 
@@ -833,10 +661,7 @@ def _discover_methods_from_aux(run_dir):
 	return methods
 
 
-_TRACKER_SUFFIXES = {'pll', 'kfstd', 'ukffreq'}
-# Suffix-based spectral classification is currently unused for oscillator heads:
-# spec_ridge-wrapped methods produce their own track_hz and should therefore be
-# treated as tracker-like in the evaluation pipeline.
+_TRACKER_SUFFIXES = {'kfstd', 'ukffreq'}
 _SPECTRAL_SUFFIXES = set()
 _DEFAULT_GATING_CFG = {
 	'common': {
@@ -1508,8 +1333,6 @@ def evaluate(
 						# store relative path from results_dir
 						rel = os.path.relpath(os.path.join(root, fn), results_dir)
 						files.append(rel)
-	ofdeep_models = ['_raft', '_raft_small', '_gma', '_irr_pwc', '_lcv_raft', '_craft']
-
 	# Ensure logs directory exists early for debugging
 	try:
 		logs_dir = os.path.join(results_dir, 'logs')
@@ -1825,9 +1648,7 @@ def evaluate(
 			spec_rr_times = np.asarray([], dtype=np.float64)
 			spec_stats_for_record = {}
 			is_trustworthy = True
-			if cur_method == 'OF_Deep':
-				cur_method += ofdeep_models[i]
-			elif cur_method == 'OF_Model':
+			if cur_method == 'OF_Model':
 				cur_method = 'OF_Farneback'
 
 			# >>> BEGIN per-method record scope (must stay inside the for-loop)
@@ -1851,9 +1672,6 @@ def evaluate(
 					filt_sig.append(utils.filter_RW(sig[d,:], fps, lo=min_hz, hi=max_hz))
 
 				filt_sig = np.vstack(filt_sig)
-
-				if cur_method in ['bss_emd', 'bss_ssa']:
-					filt_sig = utils.select_component(filt_sig, fps, int(ws/1.5), min_hz, max_hz)
 
 				sanitized_method = method_storage_name.replace(' ', '_')
 				sig_rpm_values = None
@@ -2730,10 +2548,6 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
 					if not d['face_rois']:
 						tqdm.write(f"> Skipping method {m.name} (no valid face ROIs)")
 						skip_method = True
-				elif m.data_type == 'rppg':
-					if not d['rppg_obj']:
-						d['rppg_obj'] = dataset.extract_rppg(d['video_path'])
-
 				if skip_method:
 					continue
 
@@ -2745,7 +2559,6 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
 			d.pop('trial_key', None)
 			d['chest_rois'] = []
 			d['face_rois'] = []
-			d['rppg_obj'] = None
 
 			_merge_results_payload(outfilename, results_payload, method_order=method_order)
 			tqdm.write('> Results updated!\n')
@@ -3705,22 +3518,6 @@ def _build_methods(cfg_list, global_cfg=None):
 				for key, value in osc_defaults.items():
 					local_params['oscillator'].setdefault(key, value)
 			methods.append(create_wrapped_method(lname, local_params, preproc_defaults))
-		elif name == 'OF_Deep':
-			model = params.get('model', 'raft_small')
-			bs = int(params.get('batch_size', 64))
-			methods.append(OF_Deep(model=model, batch_size=bs))
-		elif name == 'MTTS_CAN':
-			methods.append(MTTS_CAN())
-		elif name == 'BigSmall':
-			methods.append(BigSmall())
-		elif name == 'peak':
-			methods.append(peak())
-		elif name == 'morph':
-			methods.append(morph())
-		elif name == 'bss_ssa':
-			methods.append(bss_ssa())
-		elif name == 'bss_emd':
-			methods.append(bss_emd())
 		else:
 			raise ValueError(f"Unknown method in config: {name}")
 	return methods
