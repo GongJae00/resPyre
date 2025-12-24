@@ -4,15 +4,20 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from .oscillator_heads import OscillatorParams, build_head
+from ..core.base import OscillatorParams, _BaseOscillatorHead
+# build_head is injected or imported carefully to avoid circular dependency
+# We will defer build_head import to runtime or expect it passed.
+# Actually, let's see how it's used.
 
 
-class OscillatorEnsemble:
+class OscillatorHeadEnsemble:
     """Runs multiple oscillator heads and combines their outputs."""
 
     def __init__(self, head_defs: List[Dict], preproc_cfg: Dict):
         if not head_defs:
             raise ValueError("Ensemble configuration requires at least one head")
+        # Deferred import to avoid circular dependency
+        from ..components.models import build_head
         self.components = []
         for entry in head_defs:
             if isinstance(entry, str):

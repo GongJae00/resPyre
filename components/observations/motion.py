@@ -3,7 +3,13 @@ import numpy as np
 import mediapipe as mp
 from scipy import signal
 from scipy.signal import butter, filtfilt
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    class tqdm:
+        def __init__(self, x): self.x = x
+        def __iter__(self): return iter(self.x)
+        format_dict = {"elapsed": 0.0}
 from PIL import Image
 import time
 
