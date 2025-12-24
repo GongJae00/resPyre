@@ -200,6 +200,8 @@
   "steps": [
     "estimate",
     "evaluate",
-    "metrics"
+    "metrics",
+    "visualize",
+    "metadata"
   ]
 }

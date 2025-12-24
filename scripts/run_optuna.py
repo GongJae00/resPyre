@@ -20,8 +20,8 @@ import numpy as np
 import optuna
 import pickle
 
-from config_loader import load_config
-from riv.optim.em_kalman import EMKalmanTrainer, save_em_params, log_em_result
+from core.utils.config import load_config
+from core.optimization.em_kalman import EMKalmanTrainer, save_em_params, log_em_result
 
 try:
 	import mlflow  # type: ignore

@@ -1,10 +1,6 @@
+
 import numpy as np
 import warnings
-
-try:
-    import plotly.graph_objects as go
-except ModuleNotFoundError:
-    go = None  # Optional dependency used only for interactive plots
 
 def getErrors(bpmES, bpmGT, timesES, timesGT, metrics):
     """ Computes various error/quality measures (multiple time windows case)"""
@@ -166,69 +162,6 @@ def printErrors(RMSE, MAE, MAX, R, CCC=None):
     else:
         print("\n    * Errors: RMSE = %.2f, MAE = %.2f, MAX = %.2f, R = %.2f, CCC = %.2f" %
               (RMSE, MAE, MAX, R, CCC))
-
-
-def displayErrors(bpmES, bpmGT, timesES=None, timesGT=None):
-    """"Plots errors"""
-    if go is None:
-        raise ImportError(
-            "Plotly is required for displayErrors(), but the 'plotly' package is not installed."
-        )
-    if type(bpmES) == list:
-        bpmES = np.expand_dims(bpmES, axis=0)
-    if type(bpmES) == np.ndarray:
-        if len(bpmES.shape) == 1:
-            bpmES = np.expand_dims(bpmES, axis=0)
-
-
-    if (timesES is None) or (timesGT is None):
-        timesES = np.arange(m)
-        timesGT = timesES
-
-    diff = bpm_diff(bpmES, bpmGT, timesES, timesGT)
-    n, m = diff.shape  # n = num channels, m = bpm length
-    df = np.abs(diff)
-    dfMean = np.around(np.mean(df, axis=1), 1)
-
-    # -- plot errors
-    fig = go.Figure()
-    name = 'Ch 1 (µ = ' + str(dfMean[0]) + ' )'
-    fig.add_trace(go.Scatter(
-        x=timesES, y=df[0, :], name=name, mode='lines+markers'))
-    if n > 1:
-        name = 'Ch 2 (µ = ' + str(dfMean[1]) + ' )'
-        fig.add_trace(go.Scatter(
-            x=timesES, y=df[1, :], name=name, mode='lines+markers'))
-        name = 'Ch 3 (µ = ' + str(dfMean[2]) + ' )'
-        fig.add_trace(go.Scatter(
-            x=timesES, y=df[2, :], name=name, mode='lines+markers'))
-    fig.update_layout(xaxis_title='Times (sec)',
-                      yaxis_title='MAE', showlegend=True)
-    fig.show()
-
-    # -- plot bpm Gt and ES
-    fig = go.Figure()
-    GTmean = np.around(np.mean(bpmGT), 1)
-    name = 'GT (µ = ' + str(GTmean) + ' )'
-    fig.add_trace(go.Scatter(x=timesGT, y=bpmGT,
-                             name=name, mode='lines+markers'))
-    ESmean = np.around(np.mean(bpmES[0, :]), 1)
-    name = 'ES1 (µ = ' + str(ESmean) + ' )'
-    fig.add_trace(go.Scatter(
-        x=timesES, y=bpmES[0, :], name=name, mode='lines+markers'))
-    if n > 1:
-        ESmean = np.around(np.mean(bpmES[1, :]), 1)
-        name = 'ES2 (µ = ' + str(ESmean) + ' )'
-        fig.add_trace(go.Scatter(
-            x=timesES, y=bpmES[1, :], name=name, mode='lines+markers'))
-        ESmean = np.around(np.mean(bpmES[2, :]), 1)
-        name = 'E3 (µ = ' + str(ESmean) + ' )'
-        fig.add_trace(go.Scatter(
-            x=timesES, y=bpmES[2, :], name=name, mode='lines+markers'))
-
-    fig.update_layout(xaxis_title='Times (sec)',
-                      yaxis_title='BPM', showlegend=True)
-    fig.show()
 
 
 def bpm_diff(bpmES, bpmGT, timesES=None, timesGT=None, normalize=False):

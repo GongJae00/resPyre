@@ -4,10 +4,10 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 from scipy import signal as sps
+from .common import _deep_merge_dict
 
-import run_all  # type: ignore
-from riv.estimators.oscillator_heads import OscillatorParams, build_head
-
+from components.observations.methods import OF_Model, DoF_Model, profile1D_Model
+from components.models import OscillatorParams, build_head
 
 def _normalize_base(name: str) -> str:
     key = name.lower()
@@ -35,51 +35,53 @@ def _normalize_head(name: str) -> str:
 
 def _build_base(base_key: str):
     if base_key == "of_farneback":
-        base = run_all.OF_Model()
+        base = OF_Model()
         base.name = "of_farneback"
         return base
     if base_key == "dof":
-        base = run_all.DoF()
+        base = DoF_Model()
         base.name = "dof"
         return base
     if base_key == "profile1d_linear":
-        base = run_all.profile1D("linear")
+        base = profile1D_Model("linear")
         base.name = "profile1d_linear"
         return base
     if base_key == "profile1d_quadratic":
-        base = run_all.profile1D("quadratic")
+        base = profile1D_Model("quadratic")
         base.name = "profile1d_quadratic"
         return base
     if base_key == "profile1d_cubic":
-        base = run_all.profile1D("cubic")
+        base = profile1D_Model("cubic")
         base.name = "profile1d_cubic"
         return base
     raise ValueError(f"Unsupported base key '{base_key}'")
 
 
-class OscillatorWrappedMethod(run_all.MethodBase):  # type: ignore
+from components.observations.methods import MethodBase
+
+class OscillatorWrappedMethod(MethodBase):
     """Wraps an existing chest-based method with an oscillator head."""
 
     def __init__(
         self,
         base_key: str,
         head_key: str,
-		osc_params: Optional[OscillatorParams] = None,
-		save_payload: Optional[Dict[str, bool]] = None,
-		preproc_cfg: Optional[Dict] = None,
-		ensemble_cfg: Optional[Dict] = None
-	):
-		super().__init__()
-		self.base_key = base_key
-		self.head_key = head_key
-		self.name = f"{base_key}__{head_key}"
-		self.data_type = "chest"
-		self.base_method = _build_base(base_key)
-		self.osc_head = build_head(head_key, params=osc_params)
-		self.save_payload = save_payload or {"npz": True}
-		self._base_meta = {"base_method": base_key}
-		self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
-		setattr(self.osc_head, "preproc_cfg", copy.deepcopy(self.preproc_cfg))
+        osc_params: Optional[OscillatorParams] = None,
+        save_payload: Optional[Dict[str, bool]] = None,
+        preproc_cfg: Optional[Dict] = None,
+        ensemble_cfg: Optional[Dict] = None
+    ):
+        super().__init__()
+        self.base_key = base_key
+        self.head_key = head_key
+        self.name = f"{base_key}__{head_key}"
+        self.data_type = "chest"
+        self.base_method = _build_base(base_key)
+        self.osc_head = build_head(head_key, params=osc_params)
+        self.save_payload = save_payload or {"npz": True}
+        self._base_meta = {"base_method": base_key}
+        self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
+        setattr(self.osc_head, "preproc_cfg", copy.deepcopy(self.preproc_cfg))
 
     def _roi_intensity_stats(self, rois: Optional[list]) -> Tuple[float, float, float]:
         """Compute coarse ROI intensity stats over time to proxy motion energy."""
@@ -215,7 +217,7 @@ def create_wrapped_method(method_name: str, params: Optional[Dict] = None, prepr
     preproc_cfg = copy.deepcopy(preproc_defaults) if isinstance(preproc_defaults, dict) else {}
     if isinstance(params.get("preproc"), dict):
         if preproc_cfg:
-            preproc_cfg = run_all._deep_merge_dict(preproc_cfg, params["preproc"])
+            preproc_cfg = _deep_merge_dict(preproc_cfg, params["preproc"])
         else:
             preproc_cfg = copy.deepcopy(params["preproc"])
     # Flatten nested parameter dictionaries.

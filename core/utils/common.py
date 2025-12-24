@@ -6,9 +6,21 @@ from matplotlib import pyplot as plt
 from scipy.signal._arraytools import even_ext
 from numpy.fft import rfft, irfft
 from numpy import argmax, sqrt, mean, absolute, linspace, log10, logical_and, average, diff, correlate
-from scipy.signal import blackmanharris, fftconvolve
+from scipy.signal.windows import blackmanharris
+from scipy.signal import fftconvolve
 import sys
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    class tqdm:
+        def __init__(self, iterable=None, *args, **kwargs):
+            self.iterable = iterable or []
+            self.format_dict = {'elapsed': 0.0}
+        def __iter__(self):
+            return iter(self.iterable)
+        @staticmethod
+        def write(msg):
+            print(msg)
 from PIL import Image
 import cv2 as cv
 import re 
