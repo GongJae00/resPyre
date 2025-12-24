@@ -20,6 +20,11 @@ import numpy as np
 import optuna
 import pickle
 
+# Setup path to allow importing core modules
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+DEFAULT_CONFIG = REPO_ROOT / "configs" / "cohface_motion_oscillator.json"
+
 from core.utils.config import load_config
 from core.optimization.em_kalman import EMKalmanTrainer, save_em_params, log_em_result
 
@@ -28,8 +33,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency
 	mlflow = None
 
-REPO_ROOT = Path(__file__).resolve().parent
-DEFAULT_CONFIG = REPO_ROOT / "configs" / "cohface_motion_oscillator.json"
+
 
 BASE_METHODS = {
     'of_farneback',
@@ -591,10 +595,14 @@ class MethodStudy:
         for path, value in params.items():
             _set_nested(cfg, path, value)
         tmp_dir = Path(tempfile.mkdtemp(prefix=f"optuna_{self.method}_"))
+        # Optimization: Disable visualization and metadata for speed
+        cfg['steps'] = []
+
         cfg_path = tmp_dir / 'config.json'
         with open(cfg_path, 'w', encoding='utf-8') as fp:
             json.dump(cfg, fp, ensure_ascii=False, indent=2)
-        cmd = [sys.executable, str(REPO_ROOT / 'run_all.py'), '-c', str(cfg_path), '-s', 'estimate', 'evaluate', 'metrics', '--no-profile-steps']
+        # main.py does not support -s or --no-profile-steps, and always runs estimation+evaluation
+        cmd = [sys.executable, str(REPO_ROOT / 'main.py'), '-c', str(cfg_path)]
         trial_root = Path(cfg['results_dir']).parent
         try:
             subprocess.run(cmd, check=True, cwd=str(REPO_ROOT))
