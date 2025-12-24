@@ -1,0 +1,114 @@
+{
+    "name": "cohface_robust_ossm",
+    "results_dir": "results",
+    "datasets": [
+      {
+        "name": "COHFACE",
+        "roi": {
+          "chest": {
+            "mp_complexity": 1,
+            "skip_rate": 10
+          }
+        }
+      }
+    ],
+    "methods": [
+      "of_farneback",
+      "profile1d_quadratic",
+      "profile1d_cubic",
+      {
+        "name": "of_farneback__kfstd",
+        "params": {
+          "oscillator": {
+            "qx": 0.00012,
+            "qf": 0.00012,
+            "rv_floor": 0.03,
+            "post_smooth_alpha": 0.9,
+            "spec_guidance_strength": 1.0,
+            "spec_guidance_offset": 0.02
+          }
+        }
+      },
+      {
+        "name": "profile1d_quadratic__kfstd",
+        "params": {
+          "oscillator": {
+            "qx": 0.00012,
+            "rv_floor": 0.03,
+            "post_smooth_alpha": 0.9
+          }
+        }
+      },
+      {
+        "name": "profile1d_cubic__kfstd",
+        "params": {
+          "oscillator": {
+            "qx": 0.00012,
+            "rv_floor": 0.03,
+            "post_smooth_alpha": 0.9
+          }
+        }
+      }
+    ],
+    "eval": {
+      "win_size": 30,
+      "stride": 1,
+      "min_hz": 0.08,
+      "max_hz": 0.5,
+      "use_track": true,
+      "track_std_min_bpm": 0.8,
+      "track_unique_min": 0.05,
+      "track_saturation_max": 0.35
+    },
+    "oscillator": {
+      "f_min": 0.08,
+      "f_max": 0.5,
+      "qx": 0.00012,
+      "qf": 0.00012,
+      "rv_floor": 0.03,
+      "post_smooth_alpha": 0.9,
+      "spec_guidance_strength": 1.0,
+      "spec_guidance_offset": 0.02,
+      "tau_env": 32
+    },
+    "preproc": {
+      "robust_zscore": {
+        "enabled": true,
+        "eps": 1e-06,
+        "clip": 2.5
+      }
+    },
+    "gating": {
+      "profile": "paper",
+      "tracker": {
+        "std_min_bpm": 0.8,
+        "unique_min": 0.05,
+        "saturation_max": 0.35,
+        "std_is_soft": true
+      },
+      "spectral": {
+        "peak_ratio_min": 1.2,
+        "prominence_min_db": 3.0,
+        "fwhm_max_hz": 0.6,
+        "fwhm_df_guard": 0.05
+      },
+      "debug": {
+        "disable_gating": true
+      }
+    },
+    "report": {
+      "output": "reports/cohface_robust_ossm",
+      "unique_window": false
+    },
+    "runtime": {
+      "device": "cpu"
+    },
+    "steps": [
+      "estimate",
+      "evaluate",
+      "metrics",
+      "visualize",
+      "metadata"
+    ]
+  }
+  

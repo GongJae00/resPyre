@@ -7,3 +7,5 @@ mediapipe==0.10.10
 scikit-image==0.21.0
 prettytable==3.8.0
 plotly==5.3.1
+seaborn
+optuna
