@@ -29,10 +29,11 @@ We analyzed 160 video samples using 5 different motion extraction methods. The r
 *   **Cause**: Linear interpolation in 1D profiles introduces "aliasing steps" when the sub-pixel motion is smaller than the spatial grid. This results in impulsive "jumps" in the observation signal that are not biological.
 *   **Scientific Insight**: Lightweight models (often required for mobile rPPG) usually rely on cheaper interpolation (Linear). **Therefore, a robust filter is mandatory** to handle the resulting non-Gaussian noise.
 
-### B. The Harmonic Distortion of Differential Methods (THD = 0.95)
-*   **Observation**: `DoF` (Difference of Frames) is almost purely dominated by non-linear harmonics (THD $\approx$ 1.0).
-*   **Cause**: Pixel intensity changes non-linearly with motion. A linear difference operation ($I_{t} - I_{t-1}$) rectifies the signal, shifting energy to $2f_r$ and $3f_r$.
-*   **Scientific Insight**: Standard frequency trackers will often "lock" onto the 2nd harmonic (double breathing rate) because the energy there is comparable to the fundamental.
+### B. Harmonic Non-Linearity in Physiological Signals (THD ~ 0.3-0.4)
+*   **Observation**: Even robust methods like `OF_Farneback` and `Profile1D_Linear` exhibit significant Total Harmonic Distortion (THD $\approx$ 0.31 - 0.40).
+*   **Cause**: Respiratory motion is not a perfect sinusoid. Ideally, it is separate from gross body motion, but in rPPG, the chest wall expansion projects non-linearly onto the 2D image plane. This creates structural 2nd and 3rd harmonics in the measured signal.
+*   **Scientific Insight**: We must treat these harmonics as "Signal," not just noise. The filter must track the fundamental frequency while actively disentangling it from these induced harmonics to prevent frequency doubling errors.
+*   **Excluded Metric (DoF)**: While `DoF` (Difference of Frames) showed extreme non-linearity (THD 0.95), it is excluded from this modeling. Our prior research demonstrated that DoF captures pixel intensity flux rather than the geometric displacement required for respiratory mechanics. Thus, its high distortion is an artifact of the method, not the physiology.
 
 ---
 
