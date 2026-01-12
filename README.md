@@ -32,7 +32,7 @@
 ## 2. 실행 흐름 (Execution Flow)
 
 ```bash
-python main.py --config configs cohface_motion_oscillator.json
+python main.py --config configs/cohface_motion_oscillator.json
 ```
 실행 시, 아래 순서로 내부 동작이 진행됩니다.
 
@@ -118,10 +118,16 @@ results/experiment_name/
 2.  작성: `DatasetBase` 상속 후 `load_dataset`, `load_gt` 구현.
 3.  등록: `components/datasets/__init__.py` (선택 사항이나 권장).
 
-### Q. **Optuna 최적화**는 어떻게 하나요?
-`setup/run_optuna.py`를 사용합니다. 루트 디렉토리에서 실행하세요.
+### Q. **자동 파라미터 튜닝(EM Algorithm)**은 무엇인가요?
+모든 Kalman Filter 기반 모델(KFStd, UKFFreq)은 기본적으로 **Online EM Learning** 모드가 켜져 있습니다(`em_mode="online"`).
+- **작동 원리**: 실험 시작 전, 입력 신호(Observation) 전체를 스캔하여 EM 알고리즘으로 해당 비디오에 가장 적합한 **Process Noise (Q)**와 **Measurement Noise (R)** 값을 수학적으로 계산합니다.
+- **장점**: 수동 튜닝 없이도 항상 최적(Optimal)에 가까운 필터 성능을 보장합니다.
+
+### Q. **Optuna 최적화**는 어떻게 하나요? (고급 사용자용)
+EM으로 찾은 값 외에 모델의 구조적 파라미터(예: 윈도우 크기 등)를 튜닝하고 싶을 때 사용합니다.
+`core/optimization/run_optuna.py`를 사용합니다. 루트 디렉토리에서 실행하세요.
 ```bash
-python setup/run_optuna.py --study-name my_study --n-trials 100
+python core/optimization/run_optuna.py --config configs/cohface_p1d_cubic_tuning.json --n-trials 50
 ```
 
 ---

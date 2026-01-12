@@ -1,8 +1,8 @@
-# Empirical Justification for Attention-Guided Adaptive Kalman Filter (AG-AKF)
+# Empirical Analysis of rPPG Signal Properties and Noise Characteristics
 
 **Date:** 2025-12-24
 **Dataset:** COHFACE (N=160, Full Dataset)
-**Objective:** To provide quantitative evidence that standard linear filtering (KF, UKF) is theoretically insufficient for remote physiological sensing due to Non-Gaussian noise and Non-linear distortions.
+**Objective:** To provide quantitative evidence that standard linear filtering assumptions are theoretically insufficient for remote physiological sensing due to non-Gaussian noise and non-linear distortions.
 
 ---
 
@@ -37,29 +37,7 @@ We analyzed 160 video samples using 5 different motion extraction methods. The r
 
 ---
 
-## 3. Translation to State-Space Model (SSM) Design
-
-To overcome the identified limitations, the filter design must not be static. Instead, it should explicitly utilize the analysis metadata to dynamically configure the **State-Space Equations**.
-
-### Meta-Adaptive Mapping Strategy
-
-We propose mapping the four key analysis metrics directly to the Kalman Filter's structural parameters:
-
-| Metadata Source | Analyzed Value (Example) | Target SSM Parameter | Adaptation Logic (Mechanism) |
-| :--- | :--- | :--- | :--- |
-| **FPS (Temporal)** | N/A (Variable) | **State Transition ($F_t$)** | **Exact Time-Step Scaling**: <br> $\Delta t = 1/\text{FPS}$ is injected into the rotation matrix. This ensures frequency states ($f$) remain physically accurate (Hz) regardless of camera speed. |
-| **Raw Kurtosis** | High (> 3.0), e.g., 11.53 | **Obs. Noise Covariance ($R_t$)** | **Regime Switching**: <br> - If Kurtosis $< 3$: Use standard static $R$. <br> - If Kurtosis $> 3$: Activate **Robust Mode** (e.g., Huber/Tukey loss) to exponentially penalize large residuals. |
-| **THD (Spectrum)** | High (> 0.5), e.g., 0.95 | **Observation Matrix ($H$)** | **Harmonic Expansion**: <br> - Instead of $H=[1, 0]$, expand to $H=[1, 0, 1, 0, \dots]$ to explicitly model and subtract harmonics ($2f, 3f$), preventing frequency locking to artifacts. |
-| **Impulse Rate** | High (> 1.0%) | **Process Noise Covariance ($Q_t$)** | **Inertia Modulation**: <br> - In high-impulse regimes, reduce $Q$ for the frequency state to increase "momentum" and resist sudden, physically impossible jumps in breathing rate. |
-
-### Implication for Filter Architecture
-The resulting model is not just a "Kalman Filter with Attention," but a **Meta-Analytic Filter Framework**.
-1.  **Initialization Phase**: Read `obs_meta.json` (Kurtosis, THD) to select the optimal model structure ($H$) and loss function type.
-2.  **Update Phase**: Use real-time residuals ($y_t - \hat{y}_t$) to dynamically adjust trust levels ($R_t$) based on the pre-determined noise regime.
-
----
-
-## 4. Conclusion for Scientific Reports
-The analysis proves that **rPPG noise is inherently Non-Gaussian and Time-Varying**.
-*   **Standard Filters (KF-std)** fail because they penalize outliers quadratically (assuming Gaussianity), leading to tracking instability during noise bursts.
-*   **AG-AKF** is theoretically justified as it dynamically modulates the "trust" ($R_t^{-1}$) placed in observations based on the instantaneous statistics of the signal residuals.
+## 3. Conclusion for Empirical Analysis
+The analysis proves that **rPPG noise is inherently non-Gaussian and time-varying**.
+*   **Standard Linear Filters** fail because they penalize outliers quadratically (assuming Gaussianity), leading to tracking instability during noise bursts.
+*   **Robust Framework Requirements**: Future model designs must incorporate mechanisms to dynamically modulate the "trust" placed in observations based on the instantaneous statistics of the signal residuals and the identified noise regimes (Leptokurtic/Harmonic).

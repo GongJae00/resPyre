@@ -19,10 +19,10 @@
       {
         "name": "of_farneback__kfstd",
         "params": {
-          "oscillator": {
-            "qx": 0.00012,
-            "qf": 0.00012,
-            "rv_floor": 0.03,
+            "em_mode": "online",
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05,
             "post_smooth_alpha": 0.9,
             "spec_guidance_strength": 1.0,
             "spec_guidance_offset": 0.02
@@ -33,9 +33,13 @@
         "name": "profile1d_quadratic__kfstd",
         "params": {
           "oscillator": {
-            "qx": 0.00012,
-            "rv_floor": 0.03,
-            "post_smooth_alpha": 0.9
+            "em_mode": "online",
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05,
+            "post_smooth_alpha": 0.9,
+            "spec_guidance_strength": 1.0,
+            "spec_guidance_offset": 0.02
           }
         }
       },
@@ -43,9 +47,13 @@
         "name": "profile1d_cubic__kfstd",
         "params": {
           "oscillator": {
-            "qx": 0.00012,
-            "rv_floor": 0.03,
-            "post_smooth_alpha": 0.9
+            "em_mode": "online",
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05,
+            "post_smooth_alpha": 0.9,
+            "spec_guidance_strength": 1.0,
+            "spec_guidance_offset": 0.02
           }
         }
       }
@@ -63,9 +71,10 @@
     "oscillator": {
       "f_min": 0.08,
       "f_max": 0.5,
-      "qx": 0.00012,
-      "qf": 0.00012,
-      "rv_floor": 0.03,
+      "em_mode": "online",
+      "qx": 0.005,
+      "qf": 0.005,
+      "rv_floor": 0.05,
       "post_smooth_alpha": 0.9,
       "spec_guidance_strength": 1.0,
       "spec_guidance_offset": 0.02,

@@ -30,6 +30,8 @@ def _normalize_head(name: str) -> str:
 		return "kfstd"
 	if key in ("ukffreq", "ukf_freq"):
 		return "ukffreq"
+	if key in ("agakf", "ag_akf"):
+		return "agakf"
 	raise ValueError(f"Unknown oscillator head '{name}'")
 
 
@@ -78,6 +80,7 @@ class OscillatorWrappedMethod(MethodBase):
         self.data_type = "chest"
         self.base_method = _build_base(base_key)
         self.osc_head = build_head(head_key, params=osc_params)
+        print(f"> Initialized {self.name} with head_params: {self.osc_head.params.__dict__}")
         self.save_payload = save_payload or {"npz": True}
         self._base_meta = {"base_method": base_key}
         self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
@@ -200,10 +203,62 @@ class OscillatorWrappedMethod(MethodBase):
             "roi_intensity_std": roi_std,
             "roi_intensity_snr_db": roi_snr_db
         })
+        # Integrate Automatic EM Tuning (Online Learning)
+        # Check if 'em_mode' is enabled in params or config.
+        # This allows on-the-fly optimization of Q/R parameters per trial.
+        em_mode = getattr(self.osc_head.params, "em_mode", None)
+        if hasattr(self, "params") and isinstance(self.params, dict):
+             em_mode = em_mode or self.params.get("em_mode")
+
+        if em_mode in ("trial", "learn", "online") and base_signal.size > 0:
+            try:
+                from core.optimization.em_kalman import EMKalmanTrainer, EMConfig
+                
+                # Configure EM Trainer
+                # Use current params as initial guesses if available
+                init_q = getattr(self.osc_head.params, "qx", None) or getattr(self.osc_head.params, "qf", 1e-4) # qx for kfstd, qf for ukffreq
+                init_r = getattr(self.osc_head.params, "rv_floor", 0.01)
+                
+                em_cfg = EMConfig(
+                    init_q=float(init_q),
+                    init_r=float(init_r),
+                    max_iters=15 # Balanced for online performance
+                )
+                trainer = EMKalmanTrainer(em_cfg)
+                
+                # Run EM on the current base signal (observation) to find optimal parameters
+                em_result = trainer.fit([base_signal])
+                opt_q = em_result.get("q")
+                opt_r = em_result.get("r")
+                
+                if opt_q is not None and opt_r is not None:
+                    # Log the optimization (optional, print to stdout for verification)
+                    # print(f"  [EM-Auto] Optimized {self.head_key}: Q={init_q:.2e}->{opt_q:.2e}, R={init_r:.2e}->{opt_r:.2e}")
+                    
+                    # Apply optimized parameters to the oscillator head dynamically
+                    # Note: different heads use different parameter names for Process Noise Q
+                    if self.head_key == "ukffreq":
+                        self.osc_head.params.qf = opt_q
+                    else:
+                        self.osc_head.params.qx = opt_q
+                        
+                    self.osc_head.params.rv_floor = opt_r
+                    
+                    # Store optimization result in meta for analysis
+                    meta.update({
+                        "em_opt_q": opt_q,
+                        "em_opt_r": opt_r,
+                        "em_opt_ll": em_result.get("ll")
+                    })
+            except ImportError:
+                print("  [Warning] EMKalmanTrainer not found. Skipping online optimization.")
+            except Exception as e:
+                print(f"  [Warning] EM Optimization failed: {e}")
+
         result = self.osc_head.run(base_signal, fs, meta)
         if self.save_payload.get("npz", True):
             self._store_npz(data, result)
-        return np.asarray(result["signal_hat"], dtype=np.float64)
+        return result
 
 
 def create_wrapped_method(method_name: str, params: Optional[Dict] = None, preproc_defaults: Optional[Dict] = None) -> OscillatorWrappedMethod:
@@ -221,17 +276,29 @@ def create_wrapped_method(method_name: str, params: Optional[Dict] = None, prepr
         else:
             preproc_cfg = copy.deepcopy(params["preproc"])
     # Flatten nested parameter dictionaries.
-    merged_params: Dict[str, float] = {}
+    merged_params: Dict[str, Any] = {}
+    
+    # 1. Primary parameter blocks
     for key in ("params", "head_params", "oscillator", "oscillator_params"):
-        if isinstance(params.get(key), dict):
-            merged_params.update(params[key])
+        val = params.get(key)
+        if isinstance(val, dict):
+            # Special case: if it contains an 'oscillator' block itself (common in main config)
+            if "oscillator" in val and isinstance(val["oscillator"], dict):
+                merged_params.update(val["oscillator"])
+            else:
+                merged_params.update(val)
+                
+    # 2. Top-level overrides
     merged_params.update({k: v for k, v in params.items() if k not in ("name", "params", "head_params", "oscillator", "oscillator_params", "preproc")})
 
     ensemble_cfg = params.get("ensemble")
+    # 3. Extract valid OscillatorParams fields
     osc_kwargs = {}
-    for field in OscillatorParams().__dict__.keys():
-        if field in merged_params:
-            osc_kwargs[field] = merged_params[field]
+    valid_fields = set(OscillatorParams().__dict__.keys())
+    for field, value in merged_params.items():
+        if field in valid_fields:
+            osc_kwargs[field] = value
+            
     osc_params = OscillatorParams(**osc_kwargs) if osc_kwargs else None
     save_payload = params.get("save_payload")
     return OscillatorWrappedMethod(base_key, head_key, osc_params=osc_params, save_payload=save_payload, preproc_cfg=preproc_cfg, ensemble_cfg=ensemble_cfg)

@@ -38,7 +38,7 @@ def _default_artifacts(run_dir: Path) -> Dict[str, str]:
     plots_dir = run_dir / 'plots'
     
     if metrics_dir.exists():
-        summary = metrics_dir / 'metrics_track_summary.txt'
+        summary = metrics_dir / 'metrics_time_domain_summary.txt'
         if summary.exists():
             artifacts['metrics_summary'] = str(summary.resolve())
         pkl = metrics_dir / 'metrics.pkl'

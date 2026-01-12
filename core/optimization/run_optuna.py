@@ -183,20 +183,22 @@ class ParamSpec:
     log: bool = False
 
 
-# WHY: 20-trial budget → tighten around proven midpoints (COHFACE), keep only tracker heads.
+# WHY: 100-trial budget -> widen ranges to find global optima across diverse noise regimes.
 FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
     'ukffreq': [
-        ParamSpec('oscillator.qf', 'float', 8e-5, 2.0e-4, log=True),
-        ParamSpec('oscillator.qx', 'float', 7e-5, 1.3e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.024, 0.05),
-        ParamSpec('oscillator.tau_env', 'float', 28.0, 36.0),
-        ParamSpec('oscillator.ukf_alpha', 'float', 0.05, 0.08),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.94),
+        ParamSpec('oscillator.qf', 'float', 1e-5, 8e-4, log=True),
+        ParamSpec('oscillator.qx', 'float', 1e-5, 5e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.01, 0.1, log=True),
+        ParamSpec('oscillator.tau_env', 'float', 5.0, 60.0),
+        ParamSpec('oscillator.ukf_alpha', 'float', 0.001, 0.2, log=True),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.8, 0.98),
+        ParamSpec('oscillator.spec_guidance_strength', 'float', 0.0, 1.0),
     ],
     'kfstd': [
-        ParamSpec('oscillator.qx', 'float', 8e-5, 1.2e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.025, 0.045, log=True),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.9, 0.94),
+        ParamSpec('oscillator.qx', 'float', 1e-5, 5e-4, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.01, 0.1, log=True),
+        ParamSpec('oscillator.tau_env', 'float', 5.0, 60.0),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.8, 0.98),
     ],
 }
 
@@ -258,17 +260,16 @@ def _stringify_percentile(arr: List[float], fn=np.nanmedian) -> float:
 def locate_metrics_file(results_root: Path) -> Optional[Path]:
     if not results_root.exists():
         return None
-    for path in results_root.rglob('metrics.pkl'):
-        return path
-    for path in results_root.rglob('metrics_1w.pkl'):
-        return path
+    for name in ('metrics.pkl', 'metrics_time_domain.pkl', 'metrics_1w.pkl'):
+        for path in results_root.rglob(name):
+            return path
     return None
 
 
 def locate_spectral_metrics_file(results_root: Path) -> Optional[Path]:
     if not results_root.exists():
         return None
-    for name in ('metrics_spectral.pkl',):
+    for name in ('metrics_freq_domain.pkl', 'metrics_spectral.pkl'):
         for path in results_root.rglob(name):
             return path
     return None
@@ -298,6 +299,7 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
     nan_vals: List[float] = []
     jerk_vals: List[float] = []
     idx_mae = name_to_idx.get('MAE')
+    idx_rmse = name_to_idx.get('RMSE')
     idx_r = name_to_idx.get('R') or name_to_idx.get('PCC') or name_to_idx.get('PearsonR')
     idx_snr = name_to_idx.get('SNR')
 
@@ -309,6 +311,15 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
             arr = record.get('ae_hz')
             if arr is not None:
                 arr = np.asarray(arr, dtype=np.float64).reshape(-1) * 60.0
+            else:
+                # Fallback: compute AE from pair
+                pair = record.get('pair')
+                if pair and len(pair) >= 2 and pair[0] is not None and pair[1] is not None:
+                    p0 = np.atleast_1d(np.squeeze(pair[0])).astype(float)
+                    p1 = np.atleast_1d(np.squeeze(pair[1])).astype(float)
+                    n = min(p0.size, p1.size)
+                    if n > 0:
+                        arr = np.abs(p0[:n] - p1[:n])
         if arr is None:
             return None
         arr = arr[np.isfinite(arr)]
@@ -323,13 +334,14 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
             return float(metrics[idx_mae])
         return None
 
-    def _rmse_error(samples):
-        if samples is None:
-            return None
-        rmse = float(np.sqrt(np.mean(np.square(samples))))
-        if not np.isfinite(rmse):
-            return None
-        return rmse
+    def _rmse_error(samples, metrics):
+        if samples is not None:
+            rmse = float(np.sqrt(np.mean(np.square(samples))))
+            if np.isfinite(rmse):
+                return rmse
+        if idx_rmse is not None and len(metrics) > idx_rmse:
+            return float(metrics[idx_rmse])
+        return None
 
     def _corr_value(record, metrics, idx, keys):
         for key in keys:
@@ -394,7 +406,7 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
         mae_stat = _median_abs_error(ae_samples, metrics)
         if mae_stat is not None:
             mae_vals.append(mae_stat)
-        rmse_stat = _rmse_error(ae_samples)
+        rmse_stat = _rmse_error(ae_samples, metrics)
         if rmse_stat is not None:
             rmse_vals.append(rmse_stat)
         r_stat = _corr_value(record, metrics, idx_r, ('r', 'pcc', 'pearson'))
@@ -585,18 +597,24 @@ class MethodStudy:
 
     def _run_trial(self, trial_number: int, params: Dict[str, float]):
         cfg = json.loads(json.dumps(self.args.base_cfg))
-        cfg['methods'] = [self.method]
+        # Ensure method is a dict for parameter injection
+        cfg['methods'] = [{'name': self.method, 'params': {}}]
+        _set_nested(cfg['methods'][0], 'params.oscillator.no_autotune', True)
+        
         results_dir = self.artifacts_dir / f"trial_{trial_number:04d}" / 'results'
         results_dir.mkdir(parents=True, exist_ok=True)
         cfg['results_dir'] = str(results_dir)
         cfg.setdefault('name', f"optuna_{self.method}")
+        
         self._apply_family_defaults(cfg)
         self._apply_track_enforcement(cfg)
-        for path, value in params.items():
-            _set_nested(cfg, path, value)
+        
+        for path, val in params.items():
+            _set_nested(cfg['methods'][0], f"params.{path}", float(val))
+            
         tmp_dir = Path(tempfile.mkdtemp(prefix=f"optuna_{self.method}_"))
         # Optimization: Disable visualization and metadata for speed
-        cfg['steps'] = []
+        cfg['steps'] = ["estimate", "evaluate"]
 
         cfg_path = tmp_dir / 'config.json'
         with open(cfg_path, 'w', encoding='utf-8') as fp:
@@ -628,14 +646,14 @@ class MethodStudy:
                 summary_spec = {}
         # Merge track/spec for objective
         summary = {
-            'MAE_track': summary_track.get('MAE_bpm_med'),
-            'RMSE_track': summary_track.get('RMSE_bpm_med'),
-            'R_track': summary_track.get('R_mean'),
-            'SNR_track': summary_track.get('SNR_med'),
-            'MAE_spec': summary_spec.get('MAE_bpm_med'),
-            'RMSE_spec': summary_spec.get('RMSE_bpm_med'),
-            'R_spec': summary_spec.get('R_mean'),
-            'SNR_spec': summary_spec.get('SNR_med'),
+            'MAE_track': summary_track.get('MAE_bpm_med', float('nan')),
+            'RMSE_track': summary_track.get('RMSE_bpm_med', float('nan')),
+            'R_track': summary_track.get('R_mean', float('nan')),
+            'SNR_track': summary_track.get('SNR_med', float('nan')),
+            'MAE_spec': summary_spec.get('MAE_bpm_med', float('nan')),
+            'RMSE_spec': summary_spec.get('RMSE_bpm_med', float('nan')),
+            'R_spec': summary_spec.get('R_mean', float('nan')),
+            'SNR_spec': summary_spec.get('SNR_med', float('nan')),
         }
         em_result = None
         if self.em_mode == 'trial':

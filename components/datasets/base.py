@@ -7,7 +7,7 @@ from core.utils.common import sort_nicely, get_chest_ROI, get_face_ROI
 
 class DatasetBase:
 	def __init__(self):
-		repo_root = Path(__file__).resolve().parent.parent.parent.parent # src/respyre/datasets -> ... -> root
+		repo_root = Path(__file__).resolve().parent.parent.parent # src/respyre/datasets -> ... -> root
 		custom_root = os.environ.get('RESPIRE_DATA_DIR')
 		if custom_root:
 			base = Path(custom_root).expanduser()

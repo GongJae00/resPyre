@@ -22,6 +22,15 @@ class OF_Model(MethodBase):
 
 	def process(self, data):
 		import cv2 as cv
+		import os
+
+		# Try loading cached observation
+		if 'video_path' in data:
+			trial_dir = os.path.dirname(data['video_path'])
+			cache_path = os.path.join(trial_dir, "obs_of.npy")
+			if os.path.exists(cache_path):
+				# print(f"Loading cached OF: {cache_path}")
+				return np.load(cache_path)
 
 		# convert rois to grayscale
 		g_rois = [cv.cvtColor(np.asarray(x), cv.COLOR_RGB2GRAY) for x in data['chest_rois']];
@@ -39,6 +48,14 @@ class DoF_Model(MethodBase):
 
 	def process(self, data):
 		import cv2 as cv
+		import os
+
+		# Try loading cached observation
+		if 'video_path' in data:
+			trial_dir = os.path.dirname(data['video_path'])
+			cache_path = os.path.join(trial_dir, "obs_dof.npy")
+			if os.path.exists(cache_path):
+				return np.load(cache_path)
 
 		# convert rois to grayscale
 		g_rois = [cv.cvtColor(np.asarray(x), cv.COLOR_RGB2GRAY) for x in data['chest_rois']];
@@ -57,6 +74,17 @@ class profile1D_Model(MethodBase):
 
 	def process(self, data):
 		import cv2 as cv
+		import os
+
+		# Try loading cached observation
+		if 'video_path' in data:
+			trial_dir = os.path.dirname(data['video_path'])
+			# Map interp_type to suffix: linear/quadratic/cubic -> p1d_linear/p1d_quad/p1d_cubic
+			suffix = self.interp_type
+			if suffix == 'quadratic': suffix = 'quad'
+			cache_path = os.path.join(trial_dir, f"obs_p1d_{suffix}.npy")
+			if os.path.exists(cache_path):
+				return np.load(cache_path)
 
 		# convert rois to grayscale
 		g_rois = [cv.cvtColor(np.asarray(x), cv.COLOR_RGB2GRAY) for x in data['chest_rois']];

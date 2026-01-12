@@ -40,8 +40,12 @@ def _build_methods(method_configs, global_cfg=None):
             name = entry['name']
             params = entry
 
+        if '__' in name:
+            preproc = global_cfg.get('oscillator', {}) if global_cfg else {}
+            # Merge method-specific overrides
+            methods.append(create_wrapped_method(name, params=params, preproc_defaults=preproc))
         # Base methods
-        if name.lower() in ('of_model', 'of_farneback'):
+        elif name.lower() in ('of_model', 'of_farneback', 'of'):
             methods.append(OF_Model())
         elif name.lower() == 'dof':
             methods.append(DoF_Model())
@@ -53,11 +57,6 @@ def _build_methods(method_configs, global_cfg=None):
             else:
                 interp = 'quadratic'
             methods.append(profile1D_Model(interp))
-        # Oscillator wrapped methods
-        elif '__' in name:
-            preproc = global_cfg.get('oscillator', {}) if global_cfg else {}
-            # Merge method-specific overrides
-            methods.append(create_wrapped_method(name, params=params, preproc_defaults=preproc))
         else:
             print(f"Warning: Unknown method {name}")
     return methods
@@ -92,12 +91,20 @@ def main():
         run_label=cfg.get('name')
     )
     
+    eval_cfg = cfg.get('eval', {})
+    eval_params = {
+        'win_size': eval_cfg.get('win_size', 30.0),
+        'stride': eval_cfg.get('stride', 1.0),
+        'min_hz': eval_cfg.get('min_hz', 0.08),
+        'max_hz': eval_cfg.get('max_hz', 0.5)
+    }
+
     from core.pipeline.evaluation_step import run_evaluation
-    run_evaluation(results_dir, cfg.get('name'))
+    run_evaluation(results_dir, cfg.get('name'), **eval_params)
 
     if 'visualize' in cfg.get('steps', []):
         from core.pipeline.visualize_step import run_visualization
-        run_visualization(results_dir, cfg.get('name'))
+        run_visualization(results_dir, cfg.get('name'), **eval_params)
 
     if 'metadata' in cfg.get('steps', []):
         from core.pipeline.metadata_step import run_metadata_generation

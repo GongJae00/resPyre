@@ -3,7 +3,9 @@ from .core.base import OscillatorParams, _BaseOscillatorHead, PLLAdaptiveControl
 from .heads.kf_std import oscillator_KFstd
 from .heads.ukf_freq import oscillator_UKF_freq
 from .heads.robust_attention import oscillator_Robust_Attention
+from .heads.robust_attention import oscillator_Robust_Attention
 from .heads.head_ensemble import OscillatorHeadEnsemble
+from .heads.ag_akf import oscillator_AGAKF
 
 HEAD_REGISTRY = {
     "kfstd": oscillator_KFstd,
@@ -12,7 +14,10 @@ HEAD_REGISTRY = {
     "ukf_freq": oscillator_UKF_freq,
     "robust_attention": oscillator_Robust_Attention,
     "robust": oscillator_Robust_Attention,
+    "robust": oscillator_Robust_Attention,
     "ensemble": OscillatorHeadEnsemble,
+    "agakf": oscillator_AGAKF,
+    "ag_akf": oscillator_AGAKF,
 }
 
 def build_head(head_key: str, params: Optional[OscillatorParams] = None):

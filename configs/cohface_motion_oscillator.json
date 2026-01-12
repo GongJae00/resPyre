@@ -22,9 +22,10 @@
       "name": "of_farneback__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00012,
-          "qf": 0.00012,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qx": 0.005,
+          "qf": 0.005,
+          "rv_floor": 0.05,
           "post_smooth_alpha": 0.9,
           "spec_guidance_strength": 1.0,
           "spec_guidance_offset": 0.02
@@ -35,9 +36,10 @@
       "name": "of_farneback__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.0003,
-          "qx": 0.0001,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qf": 0.005,
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "tau_env": 28,
           "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9,
@@ -50,9 +52,10 @@
       "name": "dof__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00012,
-          "qf": 0.00012,
-          "rv_floor": 0.04,
+          "em_mode": "online",
+          "qx": 0.005,
+          "qf": 0.005,
+          "rv_floor": 0.05,
           "post_smooth_alpha": 0.9,
           "spec_guidance_strength": 1.0,
           "spec_guidance_offset": 0.02
@@ -63,9 +66,10 @@
       "name": "dof__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.0003,
-          "qx": 0.0001,
-          "rv_floor": 0.04,
+          "em_mode": "online",
+          "qf": 0.005,
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "tau_env": 28,
           "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9,
@@ -78,8 +82,9 @@
       "name": "profile1d_linear__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00012,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "post_smooth_alpha": 0.9
         }
       }
@@ -88,9 +93,10 @@
       "name": "profile1d_linear__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.0003,
-          "qx": 0.0001,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qf": 0.005,
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "tau_env": 28,
           "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9
@@ -101,8 +107,9 @@
       "name": "profile1d_quadratic__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00012,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "post_smooth_alpha": 0.9
         }
       }
@@ -111,9 +118,10 @@
       "name": "profile1d_quadratic__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.0003,
-          "qx": 0.0001,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qf": 0.005,
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "tau_env": 28,
           "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9
@@ -124,8 +132,9 @@
       "name": "profile1d_cubic__kfstd",
       "params": {
         "oscillator": {
-          "qx": 0.00012,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "post_smooth_alpha": 0.9
         }
       }
@@ -134,9 +143,10 @@
       "name": "profile1d_cubic__ukffreq",
       "params": {
         "oscillator": {
-          "qf": 0.0003,
-          "qx": 0.0001,
-          "rv_floor": 0.03,
+          "em_mode": "online",
+          "qf": 0.005,
+          "qx": 0.005,
+          "rv_floor": 0.05,
           "tau_env": 28,
           "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9
@@ -157,9 +167,9 @@
   "oscillator": {
     "f_min": 0.08,
     "f_max": 0.5,
-    "qx": 0.00012,
-    "qf": 0.00012,
-    "rv_floor": 0.03,
+    "qx": 0.005,
+    "qf": 0.005,
+    "rv_floor": 0.05,
     "post_smooth_alpha": 0.9,
     "spec_guidance_strength": 1.0,
     "spec_guidance_offset": 0.02,

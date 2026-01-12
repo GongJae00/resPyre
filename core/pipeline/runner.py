@@ -51,7 +51,8 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
         except Exception as exc:
             print(f"> Warning: failed to write methods manifest ({exc})")
 
-        dataset.load_dataset()
+        if not getattr(dataset, 'data', None):
+            dataset.load_dataset()
         # Loop over the dataset
         for d in tqdm(dataset.data, desc="Processing files"):
             dataset_label = str(getattr(dataset, 'name', '') or '').strip().lower() or 'unknown'
@@ -94,25 +95,63 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
                 d['aux_save_dir'] = aux_dir
 
                 if m.data_type == 'chest':
+                    # Lazy loading: Try processing first (in case of cache hit)
+                    success_lazy = False
                     if not d['chest_rois']:
-                        d['chest_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
-                    else:
-                        d['chest_rois'] = _filter_valid_rois(d['chest_rois'])
-                    if not d['chest_rois']:
-                        tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
-                        skip_method = True
+                        try:
+                            # Attempt process with empty ROIs. 
+                            # If cache exists, methods.py returns result.
+                            # If cache missing, methods.py might crash or return invalid, triggering except.
+                            # Note: We rely on methods throwing error on empty ROIs if cache missed.
+                            estimate = m.process(d)
+                            # If we get here, it worked (cache hit)!
+                            success_lazy = True
+                            # tqdm.write(f"> Loaded cached result for {m.name}")
+                        except Exception as e:
+                            # Cache miss or other error. Proceed to load ROIs.
+                            # tqdm.write(f"> Lazy load failed for {m.name}: {e}")
+                            pass
+
+                    if not success_lazy:
+                        if not d['chest_rois']:
+                            d['chest_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
+                        else:
+                            d['chest_rois'] = _filter_valid_rois(d['chest_rois'])
+                        
+                        if not d['chest_rois']:
+                            tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
+                            skip_method = True
+                        else:
+                            # Retry processing with loaded ROIs
+                            estimate = m.process(d)
+
                 elif m.data_type == 'face':
-                    if not d['face_rois']:
+                     if not d['face_rois']:
                         d['face_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
-                    else:
+                     else:
                         d['face_rois'] = _filter_valid_rois(d['face_rois'])
-                    if not d['face_rois']:
+                     if not d['face_rois']:
                         tqdm.write(f"> Skipping method {m.name} (no valid face ROIs)")
                         skip_method = True
+                     else:
+                        estimate = m.process(d)
+
                 if skip_method:
                     continue
+                
+                # If we successfully lazy-loaded (success_lazy=True), 'estimate' is already set.
+                # If we re-ran (else block), 'estimate' is set there.
+                
+                # Normalize estimate to dictionary format if it's a raw numpy array (Base Models)
+                if isinstance(estimate, np.ndarray):
+                    # For base models, we don't have time-tracking, so we wrap it simply
+                    estimate = {
+                        "signal_hat": estimate.reshape(-1),
+                        "track_hz": np.array([]), # Base models don't provide frequency tracking
+                        "times_hz": np.array([]),
+                        "meta": "{}"
+                    }
 
-                estimate = m.process(d)
                 results_payload['estimates'].append({'method': m.name, 'estimate': estimate})
 
             # release some memory between videos

@@ -78,6 +78,7 @@ class OscillatorParams:
     detrend: bool = True
     bandpass: bool = True
     zscore: bool = True
+    em_mode: Optional[str] = None
 
     def to_dict(self) -> Dict[str, float]:
         return asdict(self)
@@ -225,6 +226,8 @@ class _BaseOscillatorHead:
         return f"{base}__{self.head_key}"
 
     def _maybe_apply_autotune(self, meta: Optional[Dict]):
+        if getattr(self.params, 'no_autotune', False):
+            return
         dataset = self._dataset_from_meta(meta)
         method_id = self._method_identifier(meta)
         cache_key = (dataset, method_id)
