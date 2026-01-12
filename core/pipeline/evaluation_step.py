@@ -196,7 +196,7 @@ def run_evaluation(results_dir: str, run_label: str = None, win_size: float = 30
                 # Block 1: Time Domain (Waveform Fidelity & Dynamics)
                 # =========================================================
                 # 1. Cross-Correlation Alignment
-                est_aligned, gt_aligned_t, lag = calculate_cross_corr_alignment(est_norm, gt_norm)
+                est_aligned, gt_aligned_t, lag_sec = calculate_cross_corr_alignment(est_norm, gt_norm, fs_est=fps, fs_gt=fs_gt)
                 
                 if len(est_aligned) > 10: # Ensure valid length
                     # Compute Waveform Metrics
@@ -213,11 +213,8 @@ def run_evaluation(results_dir: str, run_label: str = None, win_size: float = 30
                     snr_time = 10 * np.log10(p_sig / (p_res + 1e-9))
                     
                     # New Critical Metrics: Latency & DTW
-                    # Latency in ms. Lag > 0 means Est is delayed (starts after GT).
-                    # Actually check calculate_cross_corr_alignment logic:
-                    # if lag > 0: aligned_est = sig_est[lag:]. Result is Est shifted LEFT by lag.
-                    # This implies Est was BEHIND GT by lag samples. So Lag > 0 = Delay.
-                    latency_ms = (lag / fps) * 1000.0
+                    # Latency in ms. lag_sec > 0 means Est is delayed (starts after GT).
+                    latency_ms = lag_sec * 1000.0
                     
                     # DTW Distance (Non-linear robustness)
                     dtw_dist = metrics_lib.calculate_dtw_distance(est_aligned, gt_aligned_t)
@@ -375,7 +372,8 @@ def run_evaluation(results_dir: str, run_label: str = None, win_size: float = 30
                 entry = {
                     'video': rec['video'],
                     'metrics': [rec[k] for k in metric_keys],
-                    'source_label': label
+                    'source_label': label,
+                    'data_file': rec.get('data_file')
                 }
                 if label == 'time_domain':
                     entry['pair'] = rec.get('_sig_aligned_pair')

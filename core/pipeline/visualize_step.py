@@ -205,8 +205,9 @@ def _save_best_overlays_aligned(run_dir, metrics_pkl, stride):
 
         for method, recs in method_metrics.items():
             if not recs: continue
-            # Find trial with lowest MAE
-            best_rec = min(recs, key=lambda r: r['metrics'][0])
+            # Find trial with HIGHEST CCC (best waveform correlation)
+            # rec['metrics'][0] is CCC
+            best_rec = max(recs, key=lambda r: r['metrics'][0])
             fname = best_rec['video']
             pkl_path = os.path.join(data_dir, f"{fname}.pkl")
             
@@ -234,47 +235,22 @@ def _save_best_overlays_aligned(run_dir, metrics_pkl, stride):
             est_wave = np.atleast_1d(np.squeeze(est_wave)).astype(np.float64)
             gt_raw = np.atleast_1d(np.squeeze(gt_raw)).astype(np.float64)
                 
-            # Filter GT to respiratory band for fair waveform comparison
-            # Extract band from eval_settings or defaults
+            # Filter GT to respiratory band using correct GT sampling rate
             f_lo, f_hi = 0.08, 0.5
-            gt_filt = np.squeeze(filter_RW(gt_raw, fps, lo=f_lo, hi=f_hi))
+            fs_gt = data.get('fs_gt', fps)
+            gt_filt = np.squeeze(filter_RW(gt_raw, fs_gt, lo=f_lo, hi=f_hi))
             
-            # Align lengths
-            n = min(len(est_wave), len(gt_filt))
-            est_sig = est_wave[:n]
-            gt_sig = gt_filt[:n]
-            t = np.arange(n) / fps
-            
-            # Cross-correlation based alignment
-            est_n = np.squeeze(est_sig)
-            gt_n = np.squeeze(gt_sig)
-            
-            # Normalize for correlation
-            est_n = (est_n - np.nanmean(est_n)) / (np.nanstd(est_n) + 1e-9)
-            gt_n = (gt_n - np.nanmean(gt_n)) / (np.nanstd(gt_n) + 1e-9)
-            
-            corr = np.correlate(est_n, gt_n, mode='full')
-            lag_samples = int(corr.argmax() - (n - 1))
-            lag_sec = lag_samples / fps
+            # Filter estimate signal similarly before alignment to remove broadband noise
+            est_filt = np.squeeze(filter_RW(est_wave, fps, lo=f_lo, hi=f_hi))
 
-            # Apply lag to estimated signal
-            if lag_samples > 0:
-                # Est leads GT, shift Est back (or GT forward)
-                plot_est = est_sig[lag_samples:]
-                plot_gt = gt_sig[:-lag_samples]
-                plot_t = t[:-lag_samples]
-            elif lag_samples < 0:
-                # Est lags GT, shift Est forward
-                # n = 100, lag = -10 -> plot_est[: -10] (90), plot_gt[10:] (90)
-                plot_est = est_sig[:lag_samples]
-                plot_gt = gt_sig[-lag_samples:]
-                plot_t = t[:-abs(lag_samples)]
-            else:
-                plot_est = est_sig
-                plot_gt = gt_sig
-                plot_t = t
-
+            # Cross-correlation based alignment with frequency-aware resampling
+            from core.evaluation.metrics import calculate_cross_corr_alignment
+            plot_est, plot_gt, lag_sec = calculate_cross_corr_alignment(est_filt, gt_filt, fs_est=fps, fs_gt=fs_gt)
+            
             if plot_est.size < 10: continue # Too short to plot
+            
+            # Time axis based on fs_gt (since signals are aligned/resampled to fs_gt)
+            plot_t = np.arange(len(plot_est)) / fs_gt
 
             plt.figure(figsize=(12, 5))
             plt.plot(plot_t, _minmax(plot_gt), label='Ground Truth (filtered)', color='gray', linestyle='--', alpha=0.6)

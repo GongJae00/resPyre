@@ -214,46 +214,55 @@ def concordance_correlation_coefficient(series_a, series_b):
         return np.nan
     return numerator / denominator
 
-def calculate_cross_corr_alignment(sig_est, sig_gt):
+def calculate_cross_corr_alignment(sig_est, sig_gt, fs_est=None, fs_gt=None):
     """
     Computes the optimal lag to align sig_est to sig_gt using cross-correlation.
-    Returns aligned_est, aligned_gt (trimmed to matching length), and the lag.
+    If fs_est and fs_gt are provided and different, sig_est is resampled to fs_gt.
+    Returns aligned_est, aligned_gt (trimmed to matching length), and the lag in seconds.
     """
     if len(sig_est) == 0 or len(sig_gt) == 0:
-        return np.array([]), np.array([]), 0
+        return np.array([]), np.array([]), 0.0
         
+    # Handle resampling if frequencies are different
+    if fs_est is not None and fs_gt is not None and abs(fs_est - fs_gt) > 1e-6:
+        # Resample sig_est to fs_gt using linear interpolation to avoid edge artifacts (ringing)
+        t_orig = np.arange(len(sig_est)) / fs_est
+        num_samples_target = int(round(len(sig_est) * fs_gt / fs_est))
+        t_new = np.arange(num_samples_target) / fs_gt
+        s1_raw = np.interp(t_new, t_orig, sig_est.flatten())
+        effective_fs = fs_gt
+    else:
+        s1_raw = sig_est.flatten()
+        effective_fs = fs_gt or fs_est or 1.0 # Fallback
+
+    s2_raw = sig_gt.flatten()
+    
     # Standardize inputs to prevent amplitude bias in correlation
-    s1 = (sig_est - np.mean(sig_est)) / (np.std(sig_est) + 1e-9)
-    s2 = (sig_gt - np.mean(sig_gt)) / (np.std(sig_gt) + 1e-9)
+    s1 = (s1_raw - np.mean(s1_raw)) / (np.std(s1_raw) + 1e-9)
+    s2 = (s2_raw - np.mean(s2_raw)) / (np.std(s2_raw) + 1e-9)
     
     correlation = signal.correlate(s1, s2, mode="full")
     lags = signal.correlation_lags(s1.size, s2.size, mode="full")
-    lag = lags[np.argmax(correlation)]
+    lag_idx = lags[np.argmax(correlation)]
     
     # Apply shift
-    # If lag > 0: sig_est is 'ahead' (starts later in time relative to overlap? No.)
-    # scipi.signal.correlate(in1, in2): 
-    #   if lag is positive, it means in1 shifted by lag matches in2.
-    #   So we need to shift in1 by -lag to align? 
-    #   Let's use the standard "shift and trim" approach.
-    
-    if lag > 0:
-        # sig_est starts 'lag' samples after sig_gt's start in the best match window
-        # We slice sig_est from lag to end, and sig_gt from 0 to matching len
-        aligned_est = sig_est[lag:]
-        aligned_gt = sig_gt[:len(aligned_est)]
-    elif lag < 0:
-        # sig_est starts 'lag' samples before. (lag is negative)
-        # We slice sig_gt from -lag to end, and sig_est from 0 to matching len
-        aligned_gt = sig_gt[-lag:]
-        aligned_est = sig_est[:len(aligned_gt)]
+    if lag_idx > 0:
+        # s1 starts 'lag_idx' samples after s2's start in the best match window
+        aligned_est = s1_raw[lag_idx:]
+        aligned_gt = s2_raw[:len(aligned_est)]
+    elif lag_idx < 0:
+        # s1 starts 'lag_idx' samples before. (lag is negative)
+        aligned_gt = s2_raw[-lag_idx:]
+        aligned_est = s1_raw[:len(aligned_gt)]
     else:
-        aligned_est = sig_est
-        aligned_gt = sig_gt
+        aligned_est = s1_raw
+        aligned_gt = s2_raw
         
-    # Ensure equal length (sometimes off by 1 due to slicing)
+    # Ensure equal length
     common_len = min(len(aligned_est), len(aligned_gt))
-    return aligned_est[:common_len], aligned_gt[:common_len], lag
+    lag_sec = lag_idx / effective_fs
+    
+    return aligned_est[:common_len], aligned_gt[:common_len], lag_sec
 
 def bland_altman_stats(est, gt):
     """
