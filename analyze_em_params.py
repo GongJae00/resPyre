@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import json
 
-RESULTS_DIR = "results/cohface_motion_oscillator/data"
+RESULTS_DIR = "results/p1d_cubic_tuning/cohface_p1d_cubic_tuning/data"
 
 def analyze_em_params():
     pkl_files = glob.glob(os.path.join(RESULTS_DIR, "*.pkl"))

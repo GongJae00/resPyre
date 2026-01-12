@@ -34,13 +34,13 @@
       "params": {
         "oscillator": {
           "em_mode": "online",
-          "qf": 0.005,
+          "qf": 0.00005,
           "qx": 0.005,
           "rv_floor": 0.05,
           "tau_env": 28,
           "ukf_alpha": 0.08,
           "post_smooth_alpha": 0.9,
-          "spec_guidance_strength": 1.0,
+          "spec_guidance_strength": 0.5,
           "spec_guidance_offset": 0.02
         }
       }
