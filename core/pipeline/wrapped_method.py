@@ -34,6 +34,10 @@ def _normalize_head(name: str) -> str:
         return "agakf"
     if key in ("robust_ossm", "robust_bayesian", "robustossm"):
         return "robust_ossm"
+    if key in ("robust_ossm_ekf", "robustossmekf"):
+        return "robust_ossm_ekf"
+    if key in ("robust_ossm_ukf", "robustossmukf"):
+        return "robust_ossm_ukf"
     raise ValueError(f"Unknown oscillator head '{name}'")
 
 

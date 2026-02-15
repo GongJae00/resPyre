@@ -89,6 +89,86 @@
         }
       },
       {
+        "name": "profile1d_linear"
+      },
+      {
+        "name": "profile1d_quadratic"
+      },
+      {
+        "name": "profile1d_linear__kfstd",
+        "params": {
+          "oscillator": {
+            "em_mode": "online",
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05
+          }
+        }
+      },
+      {
+        "name": "profile1d_quadratic__kfstd",
+        "params": {
+          "oscillator": {
+            "em_mode": "online",
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05
+          }
+        }
+      },
+      {
+        "name": "profile1d_linear__robust_ossm_ekf",
+        "params": {
+          "oscillator": {
+            "predict_method": "ekf",
+            "student_t_nu": 15.0,
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05,
+            "tau_env": 32
+          }
+        }
+      },
+      {
+        "name": "profile1d_linear__robust_ossm_ukf",
+        "params": {
+          "oscillator": {
+            "predict_method": "ukf",
+            "student_t_nu": 15.0,
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05,
+            "tau_env": 32
+          }
+        }
+      },
+      {
+        "name": "profile1d_quadratic__robust_ossm_ekf",
+        "params": {
+          "oscillator": {
+            "predict_method": "ekf",
+            "student_t_nu": 15.0,
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05,
+            "tau_env": 32
+          }
+        }
+      },
+      {
+        "name": "profile1d_quadratic__robust_ossm_ukf",
+        "params": {
+          "oscillator": {
+            "predict_method": "ukf",
+            "student_t_nu": 15.0,
+            "qx": 0.005,
+            "qf": 0.005,
+            "rv_floor": 0.05,
+            "tau_env": 32
+          }
+        }
+      },
+      {
         "name": "profile1d_cubic__robust_ossm_ekf",
         "params": {
           "oscillator": {
