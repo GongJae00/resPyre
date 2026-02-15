@@ -79,7 +79,7 @@ def run_metadata_generation(results_dir: str, run_label: str = None, command: st
     if run_label:
         from core.pipeline.common import _sanitize_run_label
         label = _sanitize_run_label(run_label)
-        search_pattern = os.path.join(results_dir, f"{label}_*")
+        search_pattern = os.path.join(results_dir, f"{label}*")
 
     import glob
     candidate_dirs = glob.glob(search_pattern)

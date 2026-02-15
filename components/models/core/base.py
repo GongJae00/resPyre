@@ -75,6 +75,11 @@ class OscillatorParams:
     student_t_nu: float = 4.0  # Degrees of freedom for Student-t (lower = heavier tails)
     attention_win: int = 5     # Window size for attention/reliability calculation
     attention_alpha: float = 0.1 # Learning rate for attention weights
+    # Robust OSSM specific
+    predict_method: str = "ekf"    # "ekf" or "ukf" for prediction step
+    vb_iters: int = 1              # VB E-step iterations for λ
+    trace_cap: float = 100.0       # Maximum trace(P) before scaling
+    eda_baseline: bool = False     # Phase-0 EDA mode: no trust, Gaussian update (ν→∞)
     detrend: bool = True
     bandpass: bool = True
     zscore: bool = True

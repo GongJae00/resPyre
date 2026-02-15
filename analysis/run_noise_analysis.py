@@ -73,11 +73,85 @@ def analyze_step3_preproc(y_clean):
     return {'impulse_rate': impulse_rate}
 
 def analyze_step4_residual(y_clean):
-    """Step 4: Residual/Noise Analysis (Gaussianity, Phase Portrait)"""
+    """Step 4: Residual/Noise Analysis — Extended EDA (Phase 0c).
+
+    Returns:
+        kurtosis: excess kurtosis (0 = Gaussian)
+        innovation: normalized innovation sequence
+        t_aic_delta: ΔAIC = AIC_gauss - AIC_t  (negative → Student-t better)
+        t_fit_nu: fitted Student-t ν  (lower = heavier tails)
+        hill_alpha: Hill tail-index estimator  (< 4 → heavy tail confirmed)
+        arch_lm_pval: ARCH-LM p-value  (< 0.05 → heteroscedastic)
+        ljung_box_pval: Ljung-Box p-value on v²  (< 0.05 → serial correlation)
+        shapiro_pval: Shapiro-Wilk p-value  (< 0.05 → reject Gaussian)
+    """
     innovation = np.diff(y_clean)
     innovation_norm = (innovation - np.mean(innovation)) / (np.std(innovation) + 1e-9)
     kurt = sps.kurtosis(innovation_norm)
-    return {'kurtosis': kurt, 'innovation': innovation_norm}
+    n = len(innovation_norm)
+
+    result = {'kurtosis': kurt, 'innovation': innovation_norm}
+
+    # ── 1. Student-t vs Gaussian AIC ──
+    try:
+        from scipy.stats import t as t_dist, norm as norm_dist
+        # Fit Student-t (3 params: ν, loc, scale)
+        t_params = t_dist.fit(innovation_norm)
+        t_ll = np.sum(t_dist.logpdf(innovation_norm, *t_params))
+        t_aic = 2 * 3 - 2 * t_ll  # k=3 params
+        # Fit Gaussian (2 params: loc, scale)
+        g_params = norm_dist.fit(innovation_norm)
+        g_ll = np.sum(norm_dist.logpdf(innovation_norm, *g_params))
+        g_aic = 2 * 2 - 2 * g_ll  # k=2 params
+        result['t_aic_delta'] = float(g_aic - t_aic)  # positive → t is better
+        result['t_fit_nu'] = float(t_params[0])
+    except Exception:
+        result['t_aic_delta'] = 0.0
+        result['t_fit_nu'] = float('inf')
+
+    # ── 2. Hill estimator (tail index) ──
+    try:
+        abs_sorted = np.sort(np.abs(innovation_norm))[::-1]
+        # Use top 10% of data for tail estimation
+        k = max(10, int(0.1 * n))
+        k = min(k, n - 1)
+        if k > 1 and abs_sorted[k] > 0:
+            log_ratios = np.log(abs_sorted[:k] / abs_sorted[k])
+            alpha = float(k / np.sum(log_ratios)) if np.sum(log_ratios) > 0 else float('inf')
+        else:
+            alpha = float('inf')
+        result['hill_alpha'] = alpha
+    except Exception:
+        result['hill_alpha'] = float('inf')
+
+    # ── 3. ARCH-LM test (heteroscedasticity in innovations) ──
+    try:
+        from statsmodels.stats.diagnostic import het_arch
+        v_sq = innovation_norm ** 2
+        lm_stat, lm_pval, _, _ = het_arch(v_sq, nlags=min(10, n // 5))
+        result['arch_lm_pval'] = float(lm_pval)
+    except Exception:
+        result['arch_lm_pval'] = float('nan')
+
+    # ── 4. Ljung-Box on v² (serial correlation in variance) ──
+    try:
+        from statsmodels.stats.diagnostic import acorr_ljungbox
+        v_sq = innovation_norm ** 2
+        lb_result = acorr_ljungbox(v_sq, lags=[min(10, n // 5)], return_df=True)
+        result['ljung_box_pval'] = float(lb_result['lb_pvalue'].iloc[-1])
+    except Exception:
+        result['ljung_box_pval'] = float('nan')
+
+    # ── 5. Shapiro-Wilk (subsample for large n) ──
+    try:
+        from scipy.stats import shapiro
+        sub = innovation_norm[:min(5000, n)]  # Shapiro limit
+        _, sw_pval = shapiro(sub)
+        result['shapiro_pval'] = float(sw_pval)
+    except Exception:
+        result['shapiro_pval'] = float('nan')
+
+    return result
 
 def analyze_residuals(signal_val, fs):
     detrended = signal.detrend(signal_val)
@@ -105,7 +179,12 @@ def main():
         ('Profile1D_Cubic', profile1D_Model('cubic'))
     ]
     results_summary = {m[0]: {
-        'raw_kurt': [], 'thd': [], 'imp_rate': [], 'noise_kurt': [], 'all_innovations': [], 'all_spectra': []
+        'raw_kurt': [], 'thd': [], 'imp_rate': [], 'noise_kurt': [],
+        'all_innovations': [], 'all_spectra': [],
+        # Phase 0c extended EDA
+        't_aic_delta': [], 't_fit_nu': [],
+        'hill_alpha': [], 'arch_lm_pval': [],
+        'ljung_box_pval': [], 'shapiro_pval': [],
     } for m in methods}
     
     method_to_cache = {
@@ -164,6 +243,13 @@ def main():
                 results_summary[name]['imp_rate'].append(res3['impulse_rate'])
                 results_summary[name]['noise_kurt'].append(res4['kurtosis'])
                 results_summary[name]['all_innovations'].append(res4['innovation'])
+                # Phase 0c extended diagnostics
+                results_summary[name]['t_aic_delta'].append(res4.get('t_aic_delta', 0.0))
+                results_summary[name]['t_fit_nu'].append(res4.get('t_fit_nu', float('inf')))
+                results_summary[name]['hill_alpha'].append(res4.get('hill_alpha', float('inf')))
+                results_summary[name]['arch_lm_pval'].append(res4.get('arch_lm_pval', float('nan')))
+                results_summary[name]['ljung_box_pval'].append(res4.get('ljung_box_pval', float('nan')))
+                results_summary[name]['shapiro_pval'].append(res4.get('shapiro_pval', float('nan')))
 
     # Global Aggregated Plots
     for name, s in results_summary.items():
@@ -217,6 +303,11 @@ def main():
     import json
     import csv
 
+    # Helper: safe mean that handles inf/nan
+    def _safe_mean(lst):
+        clean = [x for x in lst if np.isfinite(x)]
+        return float(np.mean(clean)) if clean else float('nan')
+
     # Prepare stats for saving
     final_stats = []
     for name, s in results_summary.items():
@@ -226,8 +317,19 @@ def main():
             'Raw_Kurt': float(np.mean(s['raw_kurt'])),
             'THD': float(np.mean(s['thd'])),
             'Impulse_Rate': float(np.mean(s['imp_rate'])),
-            'Noise_Kurt': float(np.mean(s['noise_kurt']))
+            'Noise_Kurt': float(np.mean(s['noise_kurt'])),
+            # Phase 0c extended diagnostics
+            't_AIC_delta': _safe_mean(s['t_aic_delta']),
+            't_fit_nu': _safe_mean(s['t_fit_nu']),
+            'Hill_alpha': _safe_mean(s['hill_alpha']),
+            'ARCH_LM_pval': _safe_mean(s['arch_lm_pval']),
+            'LjungBox_pval': _safe_mean(s['ljung_box_pval']),
+            'Shapiro_pval': _safe_mean(s['shapiro_pval']),
         }
+        # Verdict: Student-t justified if ΔAIC > 10 AND κ > 3
+        row['Student_t_justified'] = (
+            row['t_AIC_delta'] > 10 and row['Noise_Kurt'] > 3
+        ) if np.isfinite(row['t_AIC_delta']) else False
         final_stats.append(row)
 
     # 1. Save JSON
@@ -240,12 +342,19 @@ def main():
         writer.writeheader()
         writer.writerows(final_stats)
 
-    print("\n" + "="*85)
-    print(f"{'Method':<20} | {'Raw Kurt':<10} | {'THD':<10} | {'Impulse%':<10} | {'Noise Kurt':<10}")
-    print("-" * 85)
+    # 3. Console output
+    print("\n" + "=" * 130)
+    hdr = (f"{'Method':<20} | {'Kurt':>6} | {'THD':>7} | {'Imp%':>5} "
+           f"| {'ΔAIC':>8} | {'ν_fit':>6} | {'Hill':>6} "
+           f"| {'ARCH-p':>7} | {'LB-p':>7} | {'SW-p':>7} | {'Student-t?':>10}")
+    print(hdr)
+    print("-" * 130)
     for row in final_stats:
-        print(f"{row['Method']:<20} | {row['Raw_Kurt']:10.2f} | {row['THD']:10.4f} | {row['Impulse_Rate']*100:9.2f}% | {row['Noise_Kurt']:10.2f}")
-    print("="*85)
+        verdict = "✅ YES" if row['Student_t_justified'] else "  no"
+        print(f"{row['Method']:<20} | {row['Noise_Kurt']:6.2f} | {row['THD']:7.4f} | {row['Impulse_Rate']*100:4.1f}% "
+              f"| {row['t_AIC_delta']:8.1f} | {row['t_fit_nu']:6.2f} | {row['Hill_alpha']:6.2f} "
+              f"| {row['ARCH_LM_pval']:7.4f} | {row['LjungBox_pval']:7.4f} | {row['Shapiro_pval']:7.4f} | {verdict:>10}")
+    print("=" * 130)
     print(f"Results, Plots, JSON, and CSV saved to: {args.output}")
 
 if __name__ == '__main__': main()

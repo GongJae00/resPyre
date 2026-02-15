@@ -1,37 +1,72 @@
 [
     {
         "Method": "OF_Farneback",
-        "Raw_Kurt": 0.3831062907643409,
-        "THD": 0.3107456793014998,
-        "Impulse_Rate": 0.013113621258792951,
-        "Noise_Kurt": 6.5253632990893635
+        "Raw_Kurt": -0.6255165782579768,
+        "THD": 0.15357150223937754,
+        "Impulse_Rate": 0.01215592992039853,
+        "Noise_Kurt": 7.138358598888644,
+        "t_AIC_delta": 236.28455550352814,
+        "t_fit_nu": 3.355448722146885,
+        "Hill_alpha": 2.8368700111270857,
+        "ARCH_LM_pval": 1.5396845990394338e-250,
+        "LjungBox_pval": 0.0,
+        "Shapiro_pval": 5.524513153522112e-14,
+        "Student_t_justified": true
     },
     {
         "Method": "DoF",
-        "Raw_Kurt": 0.3831062907643409,
-        "THD": 0.9468032071266222,
-        "Impulse_Rate": 0.022212833257599367,
-        "Noise_Kurt": 9.134491485267779
+        "Raw_Kurt": -0.6255165782579768,
+        "THD": 4.263895464591175,
+        "Impulse_Rate": 0.02568788612156207,
+        "Noise_Kurt": 7.301311743769254,
+        "t_AIC_delta": 207.29025325805847,
+        "t_fit_nu": 4.6604112785306935,
+        "Hill_alpha": 2.785634690464436,
+        "ARCH_LM_pval": 1.5263150897747524e-250,
+        "LjungBox_pval": 0.0,
+        "Shapiro_pval": 1.047681448184432e-23,
+        "Student_t_justified": true
     },
     {
         "Method": "Profile1D_Linear",
-        "Raw_Kurt": 0.3831062907643409,
-        "THD": 0.4037436686344352,
-        "Impulse_Rate": 0.013719654894077865,
-        "Noise_Kurt": 11.530747193063531
+        "Raw_Kurt": -0.6255165782579768,
+        "THD": 0.479443981607883,
+        "Impulse_Rate": 0.014905463164652112,
+        "Noise_Kurt": 26.60580548162949,
+        "t_AIC_delta": 1491.3154951773388,
+        "t_fit_nu": 9531263608810.348,
+        "Hill_alpha": 3.946901502794548,
+        "ARCH_LM_pval": 1.527195362066508e-250,
+        "LjungBox_pval": 0.0,
+        "Shapiro_pval": 8.128728878180536e-21,
+        "Student_t_justified": true
     },
     {
         "Method": "Profile1D_Quad",
-        "Raw_Kurt": 0.3831062907643409,
-        "THD": 0.21097045001622766,
-        "Impulse_Rate": 0.007094191925376034,
-        "Noise_Kurt": 2.0126893324965414
+        "Raw_Kurt": -0.6255165782579768,
+        "THD": 0.06149669989248121,
+        "Impulse_Rate": 0.0022093344380005524,
+        "Noise_Kurt": -0.04015358002639428,
+        "t_AIC_delta": 2.3214912840348916,
+        "t_fit_nu": 451211137329.5324,
+        "Hill_alpha": 6.17263645845818,
+        "ARCH_LM_pval": 1.5167463903971613e-250,
+        "LjungBox_pval": 0.0,
+        "Shapiro_pval": 1.4847339872692418e-18,
+        "Student_t_justified": false
     },
     {
         "Method": "Profile1D_Cubic",
-        "Raw_Kurt": 0.3831062907643409,
-        "THD": 0.2172578001383138,
-        "Impulse_Rate": 0.007294216991410074,
-        "Noise_Kurt": 2.0962622547836647
+        "Raw_Kurt": -0.6255165782579768,
+        "THD": 0.06324257205332696,
+        "Impulse_Rate": 0.0022093344380005524,
+        "Noise_Kurt": -0.09820721359467528,
+        "t_AIC_delta": 1.4966235340237592,
+        "t_fit_nu": 877577680908.1732,
+        "Hill_alpha": 6.268783988938502,
+        "ARCH_LM_pval": 1.5170135431342543e-250,
+        "LjungBox_pval": 0.0,
+        "Shapiro_pval": 1.5278953080405408e-18,
+        "Student_t_justified": false
     }
 ]

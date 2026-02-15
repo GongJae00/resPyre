@@ -25,14 +25,16 @@ def _normalize_base(name: str) -> str:
 
 
 def _normalize_head(name: str) -> str:
-	key = name.lower().replace("-", "")
-	if key in ("kfstd", "kf_std"):
-		return "kfstd"
-	if key in ("ukffreq", "ukf_freq"):
-		return "ukffreq"
-	if key in ("agakf", "ag_akf"):
-		return "agakf"
-	raise ValueError(f"Unknown oscillator head '{name}'")
+    key = name.lower().replace("-", "")
+    if key in ("kfstd", "kf_std"):
+        return "kfstd"
+    if key in ("ukffreq", "ukf_freq"):
+        return "ukffreq"
+    if key in ("agakf", "ag_akf"):
+        return "agakf"
+    if key in ("robust_ossm", "robust_bayesian", "robustossm"):
+        return "robust_ossm"
+    raise ValueError(f"Unknown oscillator head '{name}'")
 
 
 def _build_base(base_key: str):
@@ -182,7 +184,8 @@ class OscillatorWrappedMethod(MethodBase):
             "dataset_slug": dataset_label,
             "trial_key": trial_key,
             "method_name": self.name,
-            "data_file": data.get("video_path")
+            "data_file": data.get("video_path"),
+            "aux_save_dir": data.get("aux_save_dir")
         })
         # Base-signal diagnostics passed to oscillator heads
         if base_signal.size:

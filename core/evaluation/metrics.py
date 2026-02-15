@@ -468,3 +468,172 @@ def calculate_dtw_distance(s1, s2):
         distance = dtw_matrix[n, m]
         # Normalize approximated path length (max(N, M))
         return distance / max(n, m)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Bayesian Filter Calibration Metrics (Phase 7)
+# ──────────────────────────────────────────────────────────────────────
+
+def nis_calibration_chi2(nis_sequence, dof=1, alpha=0.05):
+    """
+    NIS calibration test (Spec §11.2).
+
+    Tests whether the Normalized Innovation Squared (NIS) sequence is
+    consistent with a χ²(dof) distribution. A well-calibrated filter
+    should produce NIS ~ χ²(1) for scalar observations.
+
+    Parameters
+    ----------
+    nis_sequence : array-like
+        NIS values from the filter (one per frame).
+    dof : int
+        Observation dimension (default 1 for scalar).
+    alpha : float
+        Significance level for the two-sided test.
+
+    Returns
+    -------
+    dict with:
+        mean_nis : float — should be close to `dof`
+        pass_chi2 : bool — True if mean NIS is within the acceptance band
+        pval : float — p-value from scipy.stats.chi2 test
+        ci_lower, ci_upper : float — 95% acceptance bounds
+    """
+    nis = np.asarray(nis_sequence, dtype=np.float64)
+    nis = nis[np.isfinite(nis)]
+    n = len(nis)
+    if n < 10:
+        return {'mean_nis': float('nan'), 'pass_chi2': False,
+                'pval': float('nan'), 'ci_lower': float('nan'),
+                'ci_upper': float('nan'), 'n_valid': 0}
+
+    from scipy.stats import chi2
+    mean_nis = float(np.mean(nis))
+    # Under H0: n * mean_nis ~ χ²(n * dof)
+    # Acceptance interval: [χ²_{α/2}(n·dof)/n, χ²_{1-α/2}(n·dof)/n]
+    df = n * dof
+    ci_lower = float(chi2.ppf(alpha / 2, df) / n)
+    ci_upper = float(chi2.ppf(1 - alpha / 2, df) / n)
+    pass_chi2 = ci_lower <= mean_nis <= ci_upper
+
+    # Also compute p-value: P(χ²(n·dof) ≤ n·mean_nis)
+    cdf_val = chi2.cdf(n * mean_nis, df)
+    pval = float(2 * min(cdf_val, 1 - cdf_val))  # two-sided
+
+    return {
+        'mean_nis': mean_nis,
+        'pass_chi2': pass_chi2,
+        'pval': pval,
+        'ci_lower': ci_lower,
+        'ci_upper': ci_upper,
+        'n_valid': n,
+    }
+
+
+def coverage_percentage(freq_track, freq_gt, sigma_freq, k=2.0):
+    """
+    Coverage percentage (Spec §11.3).
+
+    Percentage of ground truth values falling within the filter's
+    k·σ credible interval around the estimated frequency.
+
+    Parameters
+    ----------
+    freq_track : array-like
+        Estimated frequencies (Hz) from filter.
+    freq_gt : array-like
+        Ground truth frequencies (Hz).
+    sigma_freq : array-like
+        Standard deviation of frequency estimate (Hz).
+    k : float
+        Number of standard deviations for the interval (default 2 = ~95%).
+
+    Returns
+    -------
+    dict with:
+        coverage : float — percentage [0, 100]
+        n_inside : int — number of GT frames within the interval
+        n_total : int — total valid frames
+    """
+    ft = np.asarray(freq_track, dtype=np.float64)
+    fg = np.asarray(freq_gt, dtype=np.float64)
+    sf = np.asarray(sigma_freq, dtype=np.float64)
+
+    # Align lengths
+    n = min(len(ft), len(fg), len(sf))
+    ft, fg, sf = ft[:n], fg[:n], sf[:n]
+
+    # Filter to valid entries
+    valid = np.isfinite(ft) & np.isfinite(fg) & np.isfinite(sf) & (sf > 0)
+    ft_v, fg_v, sf_v = ft[valid], fg[valid], sf[valid]
+    n_total = int(np.sum(valid))
+
+    if n_total == 0:
+        return {'coverage': 0.0, 'n_inside': 0, 'n_total': 0}
+
+    inside = np.abs(fg_v - ft_v) <= k * sf_v
+    n_inside = int(np.sum(inside))
+    coverage = 100.0 * n_inside / n_total
+
+    return {
+        'coverage': float(coverage),
+        'n_inside': n_inside,
+        'n_total': n_total,
+    }
+
+
+def stability_duration(freq_track, fs, eps_hz=0.02):
+    """
+    Stability duration (Spec §11.4).
+
+    Longest contiguous window where |Δf| < ε_hz (frame-to-frame frequency
+    change is below threshold). Reported in seconds.
+
+    Parameters
+    ----------
+    freq_track : array-like
+        Estimated frequencies (Hz) from filter.
+    fs : float
+        Sampling rate (frames per second).
+    eps_hz : float
+        Frequency stability threshold in Hz.
+
+    Returns
+    -------
+    dict with:
+        max_stable_sec : float — longest stable window in seconds
+        max_stable_frames : int — longest stable window in frames
+        total_stable_pct : float — percentage of stable frames
+    """
+    ft = np.asarray(freq_track, dtype=np.float64)
+    ft = ft[np.isfinite(ft)]
+    n = len(ft)
+
+    if n < 2:
+        return {'max_stable_sec': 0.0, 'max_stable_frames': 0,
+                'total_stable_pct': 0.0}
+
+    diffs = np.abs(np.diff(ft))
+    stable = diffs < eps_hz
+
+    # Find longest run of True
+    max_run = 0
+    current_run = 0
+    for s in stable:
+        if s:
+            current_run += 1
+            max_run = max(max_run, current_run)
+        else:
+            current_run = 0
+
+    # +1 because diff reduces length by 1
+    max_frames = max_run + 1 if max_run > 0 else 0
+    total_stable = int(np.sum(stable))
+    total_pct = 100.0 * total_stable / len(stable) if len(stable) > 0 else 0.0
+
+    return {
+        'max_stable_sec': float(max_frames / fs),
+        'max_stable_frames': max_frames,
+        'total_stable_pct': float(total_pct),
+    }
+

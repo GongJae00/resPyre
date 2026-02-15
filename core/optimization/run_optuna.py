@@ -49,16 +49,16 @@ SUFFIX_FAMILY = {
 ALLOWABLE_SUFFIXES = tuple(SUFFIX_FAMILY.keys())
 EXPECTED_METHODS = len(BASE_METHODS) * len(SUFFIX_FAMILY)
 DEFAULT_WEIGHTS = {
-    'mae_track': 0.35,
-    'mae_spec': 0.35,
-    'rmse_track': 0.1,
-    'rmse_spec': 0.1,
-    'r_track': 0.05,
-    'r_spec': 0.05,
+    'ccc_track': 0.30,      # Shape & Amplitude (Waveform Fidelity)
+    'mae_spec': 0.20,       # Core Frequency (Rate Accuracy)
+    'ppi_mae_track': 0.15,  # Breath-to-breath rhythm (Timing)
+    'ie_err_track': 0.15,   # Inhale/Exhale ratio (Physiological fidelity)
+    'snr_spec': 0.10,       # Spectral peak clarity (Signal Strength)
+    'dtw_track': 0.10,      # Structural alignment (Geometry)
 }
 TRIAL_CSV_FIELDS = [
-    'trial', 'objective', 'MAE_bpm_med', 'RMSE_bpm_med', 'R_mean', 'SNR_med',
-    'edge_sat', 'nan_rate', 'jerk_hzps', 'em_q', 'em_r', 'em_ll', 'params'
+    'trial', 'objective', 'CCC_med', 'MAE_spec', 'PPI_MAE_med', 'IE_Err_med',
+    'SNR_Spec_med', 'DTW_med', 'MAE_track', 'RMSE_spec', 'nan_rate', 'params'
 ]
 
 
@@ -186,19 +186,21 @@ class ParamSpec:
 # WHY: 100-trial budget -> widen ranges to find global optima across diverse noise regimes.
 FAMILY_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
     'ukffreq': [
-        ParamSpec('oscillator.qf', 'float', 1e-5, 8e-4, log=True),
-        ParamSpec('oscillator.qx', 'float', 1e-5, 5e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.01, 0.1, log=True),
-        ParamSpec('oscillator.tau_env', 'float', 5.0, 60.0),
-        ParamSpec('oscillator.ukf_alpha', 'float', 0.001, 0.2, log=True),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.8, 0.98),
-        ParamSpec('oscillator.spec_guidance_strength', 'float', 0.0, 1.0),
+        ParamSpec('oscillator.qf', 'float', 1e-6, 2e-3, log=True),          # Freq drift: tighter/looser
+        ParamSpec('oscillator.qx', 'float', 1e-6, 1e-3, log=True),          # State noise
+        ParamSpec('oscillator.rv_floor', 'float', 0.005, 0.2, log=True),    # Obs noise floor
+        ParamSpec('oscillator.tau_env', 'float', 2.0, 100.0),                # Adaptation time
+        ParamSpec('oscillator.ukf_alpha', 'float', 1e-4, 0.5, log=True),    # Sigma-point spread
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.0, 0.99),      # Final smoothing
+        ParamSpec('oscillator.spec_guidance_strength', 'float', 0.0, 1.0),  # Spectral guidance
+        ParamSpec('oscillator.init_margin_hz', 'float', 0.0, 0.05),         # Band edge margin
     ],
     'kfstd': [
-        ParamSpec('oscillator.qx', 'float', 1e-5, 5e-4, log=True),
-        ParamSpec('oscillator.rv_floor', 'float', 0.01, 0.1, log=True),
-        ParamSpec('oscillator.tau_env', 'float', 5.0, 60.0),
-        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.8, 0.98),
+        ParamSpec('oscillator.qx', 'float', 1e-6, 1e-3, log=True),
+        ParamSpec('oscillator.rv_floor', 'float', 0.005, 0.2, log=True),
+        ParamSpec('oscillator.tau_env', 'float', 2.0, 100.0),
+        ParamSpec('oscillator.post_smooth_alpha', 'float', 0.0, 0.99),
+        ParamSpec('oscillator.init_margin_hz', 'float', 0.0, 0.05),
     ],
 }
 
@@ -290,18 +292,22 @@ def _extract_metric(values: List[float], agg=np.nanmedian) -> float:
 
 
 def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> Dict[str, float]:
-    name_to_idx = {name: idx for idx, name in enumerate(metric_names)}
-    mae_vals: List[float] = []
-    rmse_vals: List[float] = []
-    r_vals: List[float] = []
-    snr_vals: List[float] = []
-    edge_vals: List[float] = []
-    nan_vals: List[float] = []
-    jerk_vals: List[float] = []
+    name_to_idx = {name.upper(): idx for idx, name in enumerate(metric_names)}
+    
+    mae_vals, rmse_vals, r_vals, snr_vals = [], [], [], []
+    ccc_vals, ppi_mae_vals, dtw_vals, ie_err_vals = [], [], [], []
+    snr_spec_vals = []
+    edge_vals, nan_vals, jerk_vals = [], [], []
+
+    idx_ccc = name_to_idx.get('CCC')
     idx_mae = name_to_idx.get('MAE')
     idx_rmse = name_to_idx.get('RMSE')
-    idx_r = name_to_idx.get('R') or name_to_idx.get('PCC') or name_to_idx.get('PearsonR')
-    idx_snr = name_to_idx.get('SNR')
+    idx_r = name_to_idx.get('R') or name_to_idx.get('PCC') or name_to_idx.get('PEARSONR')
+    idx_snr = name_to_idx.get('SNR') or name_to_idx.get('SNR_TIME')
+    idx_snr_spec = name_to_idx.get('SNR_SPEC')
+    idx_ppi = name_to_idx.get('PPI_MAE')
+    idx_dtw = name_to_idx.get('DTW_DIST')
+    idx_ie = name_to_idx.get('IE_ERR')
 
     def _ae_samples_bpm(record):
         arr = record.get('ae_bpm')
@@ -419,6 +425,17 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
                 snr_stat = None
             if snr_stat is not None and np.isfinite(snr_stat):
                 snr_vals.append(snr_stat)
+        if idx_ccc is not None and len(metrics) > idx_ccc:
+            ccc_vals.append(float(metrics[idx_ccc]))
+        if idx_ppi is not None and len(metrics) > idx_ppi:
+            ppi_mae_vals.append(float(metrics[idx_ppi]))
+        if idx_dtw is not None and len(metrics) > idx_dtw:
+            dtw_vals.append(float(metrics[idx_dtw]))
+        if idx_ie is not None and len(metrics) > idx_ie:
+            ie_err_vals.append(float(metrics[idx_ie]))
+        if idx_snr_spec is not None and len(metrics) > idx_snr_spec:
+            snr_spec_vals.append(float(metrics[idx_snr_spec]))
+
         edge_stat = _edge_fraction(record)
         if edge_stat is not None:
             edge_vals.append(edge_stat)
@@ -439,7 +456,12 @@ def summarize_records(metric_names: Sequence[str], records: Sequence[Dict]) -> D
         'MAE_bpm_med': _extract_metric(mae_vals, np.nanmedian),
         'RMSE_bpm_med': _extract_metric(rmse_vals, np.nanmedian),
         'R_mean': _extract_metric(r_vals, np.nanmean),
+        'CCC_med': _extract_metric(ccc_vals, np.nanmedian),
+        'PPI_MAE_med': _extract_metric(ppi_mae_vals, np.nanmedian),
+        'DTW_med': _extract_metric(dtw_vals, np.nanmedian),
+        'IE_Err_med': _extract_metric(ie_err_vals, np.nanmedian),
         'SNR_med': _extract_metric(snr_vals, np.nanmedian),
+        'SNR_Spec_med': _extract_metric(snr_spec_vals, np.nanmedian),
         'edge_sat': _extract_metric(edge_vals, np.nanmean),
         'nan_rate': _extract_metric(nan_vals, np.nanmean),
         'jerk_hzps': _extract_metric(jerk_vals, np.nanmedian),
@@ -459,12 +481,33 @@ def combine_objective(summary: Dict[str, float], weights: Dict[str, float]) -> T
         objective += weight * term_val
         terms[weight_key] = term_val
 
-    _add_term('mae_track', summary.get('MAE_track', float('nan')))
+    # --- [ResPyre Experts Objective: The 6 Pillars] ---
+    # 1. CCC (track): Shape & Amplitude fidelity (30%)
+    _add_term('ccc_track', summary.get('CCC_track', float('nan')), transform=lambda v: 1.0 - v)
+    
+    # 2. MAE (spec): Fundamental Rate accuracy (20%)
     _add_term('mae_spec', summary.get('MAE_spec', float('nan')))
-    _add_term('rmse_track', summary.get('RMSE_track', float('nan')))
-    _add_term('rmse_spec', summary.get('RMSE_spec', float('nan')))
-    _add_term('r_track', summary.get('R_track', float('nan')), transform=lambda v: 1.0 - v)
-    _add_term('r_spec', summary.get('R_spec', float('nan')), transform=lambda v: 1.0 - v)
+    
+    # 3. PPI_MAE (track): Breath-to-breath rhythm stability (15%)
+    _add_term('ppi_mae_track', summary.get('PPI_MAE_track', float('nan')))
+    
+    # 4. IE_Err (track): Physiological I:E ratio distortion (15%)
+    _add_term('ie_err_track', summary.get('IE_Err_track', float('nan')))
+    
+    # 5. SNR (spec): Peak clarity and noise suppression (10%)
+    # Map high SNR to low cost. transform: 1/(SNR + 1). Focus on 0 to 20dB range.
+    _add_term('snr_spec', summary.get('SNR_spec', float('nan')), transform=lambda v: 1.0 / (max(v, 1e-3) + 1.0))
+    
+    # 6. DTW (track): Geometrical / structural alignment (10%)
+    _add_term('dtw_track', summary.get('DTW_track', float('nan')))
+
+    # Optional/Fallback terms (kept for flexibility but weight usually 0)
+    if weights.get('mae_track', 0.0) > 0:
+        _add_term('mae_track', summary.get('MAE_track', float('nan')))
+    if weights.get('rmse_track', 0.0) > 0:
+        _add_term('rmse_track', summary.get('RMSE_track', float('nan')))
+    if weights.get('rmse_spec', 0.0) > 0:
+        _add_term('rmse_spec', summary.get('RMSE_spec', float('nan')))
 
     if not np.isfinite(objective):
         objective = 1e6
@@ -548,16 +591,15 @@ class MethodStudy:
         row = {
             'trial': trial_num,
             'objective': objective,
-            'MAE_bpm_med': mae_val,
-            'RMSE_bpm_med': rmse_val,
-            'R_mean': r_val,
-            'SNR_med': snr_val,
-            'edge_sat': summary.get('edge_sat'),
+            'CCC_med': summary.get('CCC_track'),
+            'MAE_spec': summary.get('MAE_spec'),
+            'PPI_MAE_med': summary.get('PPI_MAE_track'),
+            'IE_Err_med': summary.get('IE_Err_track'),
+            'SNR_Spec_med': summary.get('SNR_spec'),
+            'DTW_med': summary.get('DTW_track'),
+            'MAE_track': summary.get('MAE_track'),
+            'RMSE_spec': summary.get('RMSE_spec'),
             'nan_rate': summary.get('nan_rate'),
-            'jerk_hzps': summary.get('jerk_hzps'),
-            'em_q': em_result.get('q') if em_result else None,
-            'em_r': em_result.get('r') if em_result else None,
-            'em_ll': em_result.get('ll') if em_result else None,
             'params': json.dumps(params, sort_keys=True)
         }
         write_header = not self.trials_csv.exists()
@@ -649,11 +691,15 @@ class MethodStudy:
             'MAE_track': summary_track.get('MAE_bpm_med', float('nan')),
             'RMSE_track': summary_track.get('RMSE_bpm_med', float('nan')),
             'R_track': summary_track.get('R_mean', float('nan')),
+            'CCC_track': summary_track.get('CCC_med', float('nan')),
+            'PPI_MAE_track': summary_track.get('PPI_MAE_med', float('nan')),
+            'DTW_track': summary_track.get('DTW_med', float('nan')),
+            'IE_Err_track': summary_track.get('IE_Err_med', float('nan')),
             'SNR_track': summary_track.get('SNR_med', float('nan')),
             'MAE_spec': summary_spec.get('MAE_bpm_med', float('nan')),
             'RMSE_spec': summary_spec.get('RMSE_bpm_med', float('nan')),
             'R_spec': summary_spec.get('R_mean', float('nan')),
-            'SNR_spec': summary_spec.get('SNR_med', float('nan')),
+            'SNR_spec': summary_spec.get('SNR_Spec_med', float('nan')),
         }
         em_result = None
         if self.em_mode == 'trial':
