@@ -1,6 +1,6 @@
 import copy
 import os
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 import numpy as np
 from scipy import signal as sps
@@ -92,29 +92,96 @@ class OscillatorWrappedMethod(MethodBase):
         self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
         setattr(self.osc_head, "preproc_cfg", copy.deepcopy(self.preproc_cfg))
 
-    def _roi_intensity_stats(self, rois: Optional[list]) -> Tuple[float, float, float]:
-        """Compute coarse ROI intensity stats over time to proxy motion energy."""
+    def _roi_stats_time_series(self, rois: Optional[list]) -> Tuple[List[Dict[str, float]], float, float, float]:
+        """
+        Compute per-frame ROI statistics for quality estimation and legacy scalars.
+        
+        Returns:
+            roi_stats_t: List of dicts with keys (roi_mean, roi_std, roi_snr_db, roi_cx, roi_cy, valid_ratio)
+            mean_intensity: global average mean
+            std_intensity: global average std
+            snr_db: global SNR
+        """
         if not rois:
-            return float("nan"), float("nan"), float("nan")
+            return [], float("nan"), float("nan"), float("nan")
+
+        stats_t = []
+        all_means = []
+        all_stds = []
+
         try:
-            frame_means = []
-            frame_stds = []
             for roi in rois:
+                # Default "invalid" frame stats
+                frame_stats = {
+                    "roi_mean": 0.0, "roi_std": 0.0, "roi_snr_db": 0.0,
+                    "roi_cx": 0.5, "roi_cy": 0.5, "valid_ratio": 0.0
+                }
+                
+                if roi is None:
+                    stats_t.append(frame_stats)
+                    continue
+
                 arr = np.asarray(roi, dtype=np.float32)
                 if arr.size == 0:
+                    stats_t.append(frame_stats)
                     continue
-                frame_means.append(float(np.mean(arr)))
-                frame_stds.append(float(np.std(arr)))
-            if not frame_means:
-                return float("nan"), float("nan"), float("nan")
-            means = np.asarray(frame_means, dtype=np.float64)
-            stds = np.asarray(frame_stds, dtype=np.float64)
+                
+                # Check validity (non-NaN, non-inf)
+                valid_mask = np.isfinite(arr)
+                if not np.any(valid_mask):
+                    stats_t.append(frame_stats)
+                    continue
+
+                # Compute basic intensity stats
+                f_mean = float(np.mean(arr)) # robust to nan if we didn't check? masking handles it
+                f_std = float(np.std(arr))
+                # Avoid div-by-zero
+                f_snr = float(20.0 * np.log10(abs(f_mean) / max(f_std, 1e-6))) if f_mean > 1e-9 else 0.0
+                
+                # Compute spatial center (simple center of mass if 2D/3D image, else 0.5)
+                # If ROI is just list of pixel values (1D), no center. 
+                # Assuming ROI might be HxW or HxWxC
+                h, w = 0, 0
+                cy, cx = 0.5, 0.5
+                if arr.ndim >= 2:
+                    h, w = arr.shape[:2]
+                    cy, cx = 0.5, 0.5 # default center
+                    # Refinement: could compute intensity centroids, but for now fixed center is better than random
+                
+                frame_stats.update({
+                    "roi_mean": f_mean,
+                    "roi_std": f_std,
+                    "roi_snr_db": f_snr,
+                    "roi_cx": cx,
+                    "roi_cy": cy,
+                    "valid_ratio": float(np.sum(valid_mask) / arr.size)
+                })
+                
+                stats_t.append(frame_stats)
+                all_means.append(f_mean)
+                all_stds.append(f_std)
+
+            # Aggregate for legacy scalars
+            if not all_means:
+                return stats_t, float("nan"), float("nan"), float("nan")
+
+            means = np.asarray(all_means, dtype=np.float64)
+            stds = np.asarray(all_stds, dtype=np.float64)
             mean_intensity = float(np.nanmean(means))
             std_intensity = float(np.nanmean(stds))
             snr_db = float(20.0 * np.log10(mean_intensity / max(std_intensity, 1e-6))) if std_intensity > 0 else float("nan")
-            return mean_intensity, std_intensity, snr_db
+            
+            return stats_t, mean_intensity, std_intensity, snr_db
+
         except Exception:
-            return float("nan"), float("nan"), float("nan")
+            # Fallback
+            return [], float("nan"), float("nan"), float("nan")
+
+    def _roi_intensity_stats(self, rois: Optional[list]) -> Tuple[float, float, float]:
+        # Backwards compatibility wrapper
+        _, m, s, snr = self._roi_stats_time_series(rois)
+        return m, s, snr
+
 
     def _signal_spectral_meta(self, signal_arr: np.ndarray, fs: float, f_min: float, f_max: float) -> Dict[str, float]:
         meta: Dict[str, float] = {}
@@ -204,8 +271,9 @@ class OscillatorWrappedMethod(MethodBase):
                 "signal_pos_fraction": float(np.mean(base_signal >= 0.0)),
             })
             meta.update(self._signal_spectral_meta(base_signal, fs, getattr(self.osc_head.params, "f_min", 0.08), getattr(self.osc_head.params, "f_max", 0.5)))
-        roi_mean, roi_std, roi_snr_db = self._roi_intensity_stats(data.get("chest_rois"))
+        roi_stats_t, roi_mean, roi_std, roi_snr_db = self._roi_stats_time_series(data.get("chest_rois"))
         meta.update({
+            "roi_stats_t": roi_stats_t,
             "roi_intensity_mean": roi_mean,
             "roi_intensity_std": roi_std,
             "roi_intensity_snr_db": roi_snr_db

@@ -110,12 +110,30 @@ class QualityEstimator:
         self._y_buf.append(float(y_t))
         roi = roi_stats or {}
 
-        # ── q_vis: ROI brightness ratio ──
+        # ── q_vis: ROI brightness ratio + SNR + Validity ──
         roi_mean = roi.get('roi_mean', 1.0)
         global_mean = roi.get('global_mean', 1.0)
-        q_vis = float(np.clip(
+        
+        # 1. Contrast-based visibility (Legacy)
+        q_contrast = float(np.clip(
             roi_mean / (global_mean + self.cfg.vis_eps), 0.0, 1.0
         ))
+        
+        q_score = q_contrast
+        
+        # 2. SNR-based visibility (New)
+        # Map 0dB -> 0.0, 15dB -> 1.0 (conservative)
+        if 'roi_snr_db' in roi:
+            snr = roi.get('roi_snr_db', 0.0)
+            q_snr = float(np.clip(snr / 15.0, 0.0, 1.0))
+            q_score = min(q_score, q_snr)
+            
+        # 3. Validity ratio (New)
+        if 'valid_ratio' in roi:
+            valid = roi.get('valid_ratio', 1.0)
+            q_score = min(q_score, float(valid))
+            
+        q_vis = q_score
 
         # ── q_drift: ROI center displacement rate ──
         cx = roi.get('roi_cx', 0.0)

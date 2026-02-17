@@ -1,13 +1,13 @@
-
 import pandas as pd
 import numpy as np
 import sys
 
 # Load metrics
-df = pd.read_csv("results/cohface_robust_ossm/metrics/metrics_freq_domain_raw.csv")
+RESULTS_DIR = "results/cohface_robust_ossm"
+df = pd.read_csv(f"{RESULTS_DIR}/metrics/metrics_freq_domain_raw.csv")
 
 # Filter relevant methods
-robust = df[df['method'] == 'profile1d_cubic__robust_ossm']
+robust = df[df['method'] == 'profile1d_cubic__robust_ossm_ekf']
 kfstd = df[df['method'] == 'profile1d_cubic__kfstd']
 
 print(f"Robust Count: {len(robust)}")

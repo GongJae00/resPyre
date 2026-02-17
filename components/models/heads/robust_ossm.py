@@ -144,6 +144,11 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
 
         # Phase 1: Quality estimator (uses live signal + ROI metadata)
         qe = QualityEstimator(fs=fs, f_min=p.f_min, f_max=p.f_max)
+        
+        # Retrieve per-frame ROI stats if available (P1)
+        roi_stats_seq = (meta or {}).get('roi_stats_t', [])
+        if not isinstance(roi_stats_seq, (list, tuple)):
+            roi_stats_seq = []
 
         # ── Initialize state ──
         x, P = predictor.init_state(freq0)
@@ -166,8 +171,10 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
 
             # 2. Trust allocate
             # Phase 1: use real quality estimator when possible
-            roi_stats = (meta or {}).get('roi_stats_t', None)
-            quality = qe.update(t, y[t], roi_stats=roi_stats)
+            # Extract per-frame ROI statistics safely
+            frame_roi_stats = roi_stats_seq[t] if t < len(roi_stats_seq) else {}
+            quality = qe.update(t, y[t], roi_stats=frame_roi_stats)
+            
             current_freq = float(np.exp(x_pred[2]))  # safe: z already clamped
             if self.eda_baseline:
                 # P1-5: bypass trust → neutral params
@@ -275,6 +282,9 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
 
         # ── Package output ──
         meta_payload = dict(meta or {})
+        # Remove large time-series from payload to avoid bloating logs
+        meta_payload.pop('roi_stats_t', None)
+        
         meta_payload.update({
             'f0': freq0,
             'head': self.head_key,
