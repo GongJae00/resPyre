@@ -42,18 +42,73 @@ def plot_summary_mae_boxplot(df: pd.DataFrame, save_path: str, title: str = "MAE
 
 def plot_summary_scatter_gt(df: pd.DataFrame, save_path: str, title: str = "Est BPM vs Ground Truth"):
     """Generates a professional scatter plot of Est BPM vs GT BPM."""
+    work = df.copy()
+    work["gt_bpm"] = pd.to_numeric(work["gt_bpm"], errors="coerce")
+    work["est_bpm"] = pd.to_numeric(work["est_bpm"], errors="coerce")
+    work = work.dropna(subset=["gt_bpm", "est_bpm", "method"]).reset_index(drop=True)
+
     plt.figure(figsize=(10, 8))
     set_paper_style()
-    
-    hue_order = sorted(df['method'].unique(), key=_method_sort_key)
-    sns.scatterplot(data=df, x='gt_bpm', y='est_bpm', hue='method', hue_order=hue_order, alpha=0.7, s=50)
-    
+
+    if work.empty:
+        plt.title(f"{title}\n(no valid points)")
+        plt.xlabel("Ground Truth BPM")
+        plt.ylabel("Estimated BPM")
+        plt.grid(alpha=0.3)
+        plt.savefig(save_path)
+        plt.close()
+        return
+
+    hue_order = sorted(work['method'].unique(), key=_method_sort_key)
+
+    # When points collapse (common in debug mode with one trial), add tiny deterministic
+    # jitter so markers/labels remain readable while preserving trend.
+    gt = work["gt_bpm"].to_numpy(dtype=np.float64)
+    est = work["est_bpm"].to_numpy(dtype=np.float64)
+    gt_span = float(np.nanmax(gt) - np.nanmin(gt)) if gt.size else 0.0
+    est_span = float(np.nanmax(est) - np.nanmin(est)) if est.size else 0.0
+    dup_ratio = 1.0 - (work[["gt_bpm", "est_bpm"]].drop_duplicates().shape[0] / max(len(work), 1))
+    use_jitter = dup_ratio > 0.0 or gt_span < 1e-6 or est_span < 1e-6
+    if use_jitter:
+        x_j = max(gt_span * 0.02, 0.03)
+        y_j = max(est_span * 0.02, 0.03)
+        method_codes = pd.Categorical(work["method"], categories=hue_order).codes
+        phase = method_codes * 1.61803398875 + np.arange(len(work), dtype=np.float64) * 0.73
+        work["gt_bpm_plot"] = work["gt_bpm"] + x_j * np.sin(phase)
+        work["est_bpm_plot"] = work["est_bpm"] + y_j * np.cos(phase)
+    else:
+        work["gt_bpm_plot"] = work["gt_bpm"]
+        work["est_bpm_plot"] = work["est_bpm"]
+
+    sns.scatterplot(
+        data=work,
+        x='gt_bpm_plot',
+        y='est_bpm_plot',
+        hue='method',
+        hue_order=hue_order,
+        alpha=0.8,
+        s=62,
+    )
+
     # Add identity line
-    min_val = min(df['gt_bpm'].min(), df['est_bpm'].min())
-    max_val = max(df['gt_bpm'].max(), df['est_bpm'].max())
+    min_val = min(work['gt_bpm'].min(), work['est_bpm'].min())
+    max_val = max(work['gt_bpm'].max(), work['est_bpm'].max())
     plt.plot([min_val, max_val], [min_val, max_val], '--', color='gray', alpha=0.8, label='Identity (GT)')
-    
-    plt.title(title)
+
+    if len(work) <= 40:
+        for _, row in work.iterrows():
+            lbl = str(row["method"]).split("__", 1)[-1][:16]
+            plt.annotate(
+                lbl,
+                (row["gt_bpm_plot"], row["est_bpm_plot"]),
+                textcoords="offset points",
+                xytext=(4, 3),
+                fontsize=7,
+                alpha=0.75,
+            )
+
+    title_suffix = " (jittered for visibility)" if use_jitter else ""
+    plt.title(title + title_suffix)
     plt.xlabel("Ground Truth BPM")
     plt.ylabel("Estimated BPM")
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -108,8 +163,14 @@ def _method_sort_key(method_name: str):
     elif 'profile1d_cubic' in name: family = 50
     else: family = 99
 
-    if '__kfstd' in name: sub = 2
-    elif '__ukffreq' in name: sub = 3
-    elif '__agakf' in name: sub = 4
-    else: sub = 1
+    if '__kfstd' in name:
+        sub = 2
+    elif '__robust_ossm_ekf' in name or name.endswith('__ekf'):
+        sub = 3
+    elif '__robust_ossm_ukf' in name or '__ukffreq' in name or name.endswith('__ukf'):
+        sub = 4
+    elif '__agakf' in name:
+        sub = 5
+    else:
+        sub = 1
     return (family, sub, name)

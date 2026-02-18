@@ -1,36 +1,63 @@
+#!/usr/bin/env python3
+"""
+Compare two methods on a chosen metric from raw metrics CSV.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+
 import pandas as pd
-import numpy as np
-import sys
 
-# Load metrics
-RESULTS_DIR = "results/cohface_robust_ossm"
-df = pd.read_csv(f"{RESULTS_DIR}/metrics/metrics_freq_domain_raw.csv")
 
-# Filter relevant methods
-robust = df[df['method'] == 'profile1d_cubic__robust_ossm_ekf']
-kfstd = df[df['method'] == 'profile1d_cubic__kfstd']
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run-dir", default="results/cohface_robust_ossm")
+    ap.add_argument("--domain", choices=["freq", "time"], default="freq")
+    ap.add_argument("--method-a", required=True)
+    ap.add_argument("--method-b", required=True)
+    ap.add_argument("--metric", default="MAE")
+    ap.add_argument("--threshold", type=float, default=1.0)
+    args = ap.parse_args()
 
-print(f"Robust Count: {len(robust)}")
-print(f"KFStd Count: {len(kfstd)}")
+    csv_name = "metrics_freq_domain_raw.csv" if args.domain == "freq" else "metrics_time_domain_raw.csv"
+    csv_path = os.path.join(args.run_dir, "metrics", csv_name)
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(csv_path)
 
-# Join on video
-merged = pd.merge(robust, kfstd, on='video', suffixes=('_rob', '_kf'))
+    df = pd.read_csv(csv_path)
+    if args.metric not in df.columns:
+        raise ValueError(f"Metric '{args.metric}' not in {csv_name}. Columns: {list(df.columns)}")
 
-# Compare MAE
-merged['mae_diff'] = merged['MAE_rob'] - merged['MAE_kf']
+    a = df[df["method"] == args.method_a]
+    b = df[df["method"] == args.method_b]
+    merged = pd.merge(a, b, on="video", suffixes=("_a", "_b"))
+    if merged.empty:
+        print("No overlapping videos between methods.")
+        return
 
-print("\n=== MAE Comparison (Robust - KFStd) ===")
-print(merged['mae_diff'].describe())
+    diff_col = f"{args.metric}_diff"
+    merged[diff_col] = merged[f"{args.metric}_a"] - merged[f"{args.metric}_b"]
 
-print("\n=== Cases where Robust is significantly worse (> 1 BPM) ===")
-worse = merged[merged['mae_diff'] > 1.0]
-print(worse[['video', 'MAE_rob', 'MAE_kf', 'mae_diff']].sort_values('mae_diff', ascending=False).head(10))
+    print(f"[Domain] {args.domain} | [Metric] {args.metric}")
+    print(f"[A] {args.method_a}")
+    print(f"[B] {args.method_b}")
+    print("\n=== Difference Summary (A - B) ===")
+    print(merged[diff_col].describe())
 
-print("\n=== Cases where Robust is significantly better (< -1 BPM) ===")
-better = merged[merged['mae_diff'] < -1.0]
-print(better[['video', 'MAE_rob', 'MAE_kf', 'mae_diff']].sort_values('mae_diff').head(10))
+    thr = float(args.threshold)
+    worse = merged[merged[diff_col] > thr].sort_values(diff_col, ascending=False)
+    better = merged[merged[diff_col] < -thr].sort_values(diff_col, ascending=True)
 
-# Check correlation with SNR
-if 'SNR_Spec_rob' in merged.columns:
-    print("\n=== Correlation of MAE Diff with SNR (Robust) ===")
-    print(merged[['mae_diff', 'SNR_Spec_rob']].corr())
+    print(f"\n=== A significantly worse than B (>{thr}) ===")
+    cols = ["video", f"{args.metric}_a", f"{args.metric}_b", diff_col]
+    print(worse[cols].head(15).to_string(index=False))
+
+    print(f"\n=== A significantly better than B (<-{thr}) ===")
+    print(better[cols].head(15).to_string(index=False))
+
+
+if __name__ == "__main__":
+    main()
+

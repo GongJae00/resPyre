@@ -41,7 +41,9 @@ def RMSEerror(bpmES, bpmGT, timesES=None, timesGT=None):
             df[c] += np.power(diff[c, j], 2)
 
     # -- final RMSE
-    RMSE = round(float(np.sqrt(df/m)),2)
+    rmse_arr = np.sqrt(df / max(m, 1))
+    rmse_val = rmse_arr[0] if rmse_arr.size else np.nan
+    RMSE = round(float(rmse_val), 2) if np.isfinite(rmse_val) else float('nan')
     return RMSE
 
 
@@ -53,7 +55,9 @@ def MAEerror(bpmES, bpmGT, timesES=None, timesGT=None):
     df = np.sum(np.abs(diff), axis=1)
 
     # -- final MAE
-    MAE = round(float(df/m),2)
+    mae_arr = df / max(m, 1)
+    mae_val = mae_arr[0] if mae_arr.size else np.nan
+    MAE = round(float(mae_val), 2) if np.isfinite(mae_val) else float('nan')
     return MAE
 
 def MAPEerror(bpmES, bpmGT, timesES=None, timesGT=None):
@@ -64,7 +68,9 @@ def MAPEerror(bpmES, bpmGT, timesES=None, timesGT=None):
     df = np.sum(np.abs(diff), axis=1)
 
     # -- final MAE
-    MAPE = round(float((df/m) * 100),2)
+    mape_arr = (df / max(m, 1)) * 100.0
+    mape_val = mape_arr[0] if mape_arr.size else np.nan
+    MAPE = round(float(mape_val), 2) if np.isfinite(mape_val) else float('nan')
     return MAPE
 
 
@@ -516,9 +522,19 @@ def nis_calibration_chi2(nis_sequence, dof=1, alpha=0.05):
     ci_upper = float(chi2.ppf(1 - alpha / 2, df) / n)
     pass_chi2 = ci_lower <= mean_nis <= ci_upper
 
-    # Also compute p-value: P(χ²(n·dof) ≤ n·mean_nis)
-    cdf_val = chi2.cdf(n * mean_nis, df)
-    pval = float(2 * min(cdf_val, 1 - cdf_val))  # two-sided
+    # Also compute two-sided p-value with log-space tails to avoid
+    # floating-point underflow to exact zero for extreme statistics.
+    x = n * mean_nis
+    log_cdf = float(chi2.logcdf(x, df))
+    log_sf = float(chi2.logsf(x, df))
+    log_tail = min(log_cdf, log_sf)  # smaller tail drives two-sided p-value
+
+    min_pos = float(np.nextafter(0.0, 1.0))  # smallest positive float
+    if np.isfinite(log_tail):
+        pval = float(np.exp(np.log(2.0) + log_tail))
+        pval = float(np.clip(pval, min_pos, 1.0))
+    else:
+        pval = min_pos
 
     return {
         'mean_nis': mean_nis,
@@ -636,4 +652,3 @@ def stability_duration(freq_track, fs, eps_hz=0.02):
         'max_stable_frames': max_frames,
         'total_stable_pct': float(total_pct),
     }
-

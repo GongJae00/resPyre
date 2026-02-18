@@ -23,7 +23,12 @@ from ..core.robust_update import RobustKalmanUpdater
 from ..core.trust import TrustAllocator, TrustConfig, TrustParams
 from ..core.failure_monitor import FailureMonitor, FailureConfig
 from core.evaluation.frame_logger import FrameLogger
-from components.observations.quality import QualityEstimator, default_quality
+from core.pipeline.common import (
+    derive_trial_identifiers,
+    sanitize_trial_key,
+    update_frame_log_manifest,
+)
+from components.observations.quality import QualityConfig, QualityEstimator, normalize_roi_stats_t
 
 # Extra audit fields beyond the default 23-field FRAME_SCHEMA.
 # These enable Phase-0 EDA and post-hoc diagnostics.
@@ -32,7 +37,13 @@ _EXTRA_FIELDS = [
     'K_x1', 'K_x2', 'K_z',             # Kalman gain components
     'q_vis', 'q_drift', 'q_cons',       # quality vector (placeholder)
     'q_out', 'q_harm', 'q_burst',
-    'qx_eff', 'qf_eff', 'rv_eff',      # effective noise params used
+    'freq_std_hz', 'amp_std',
+    'g_z_eff',
+    'qx_eff', 'qf_eff', 'rv_eff',
+    'qx_base', 'qf_base', 'rv_base',   # base params before trust scaling
+    'qx_used', 'qf_used',              # effective process-noise values used
+    'rv_scaled', 'R_post',             # measurement-noise after trust / robust scaling
+    'post_smooth_alpha_base', 'post_smooth_alpha_used',
 ]
 
 
@@ -107,6 +118,8 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
 
         # ── Effective noise params (meta-driven) ──
         eff = self._effective_params(fs, meta)
+        alpha_base = float(eff.get('post_smooth_alpha_base', getattr(self.params, 'post_smooth_alpha', 0.0) or 0.0))
+        alpha_used = float(eff.get('post_smooth_alpha_used', alpha_base))
 
         # P0-4: Convert eff['rho'] → tau_env so compute_rho() is consistent.
         # tau_eff = -dt / ln(rho_eff).  rho=0 means "use tau_env" (default).
@@ -135,7 +148,14 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 trace_cap=float(p.trace_cap),
             )
 
-        trust_alloc = TrustAllocator()
+        trust_cfg_obj = None
+        trust_cfg_raw = (meta or {}).get('trust', {})
+        if isinstance(trust_cfg_raw, dict):
+            allowed_t = set(TrustConfig.__dataclass_fields__.keys())
+            t_kwargs = {k: v for k, v in trust_cfg_raw.items() if k in allowed_t}
+            if t_kwargs:
+                trust_cfg_obj = TrustConfig(**t_kwargs)
+        trust_alloc = TrustAllocator(cfg=trust_cfg_obj)
         monitor = FailureMonitor(f_ref=freq0)
         decoder = StateDecoder()
 
@@ -143,12 +163,54 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
         logger = FrameLogger(n, extra_fields=_EXTRA_FIELDS)
 
         # Phase 1: Quality estimator (uses live signal + ROI metadata)
-        qe = QualityEstimator(fs=fs, f_min=p.f_min, f_max=p.f_max)
+        quality_cfg_obj = None
+        quality_cfg_raw = (meta or {}).get('quality', {})
+        if isinstance(quality_cfg_raw, dict):
+            allowed = set(QualityConfig.__dataclass_fields__.keys())
+            q_kwargs = {k: v for k, v in quality_cfg_raw.items() if k in allowed}
+            if q_kwargs:
+                quality_cfg_obj = QualityConfig(**q_kwargs)
+        qe = QualityEstimator(fs=fs, cfg=quality_cfg_obj, f_min=p.f_min, f_max=p.f_max)
+        gating_cfg = (meta or {}).get('gating', {})
+        gating_scope = str((meta or {}).get('gating_scope', 'evaluation_only')).strip().lower()
+        if gating_scope not in {'evaluation_only', 'filter_time'}:
+            raise ValueError(
+                f"Invalid gating_scope '{gating_scope}'. Allowed values: ['evaluation_only', 'filter_time']"
+            )
+        gating_supported = {
+            'debug.disable_gating',
+            'spectral.peak_ratio_min',
+            'tracker.std_min_bpm',
+            'tracker.unique_min',
+            'tracker.saturation_max',
+            'tracker.std_is_soft',
+            'tracker.saturation_margin_hz',
+        }
+        gating_seen = set()
+        gating_consumed = []
+        gating_unused = []
+        if isinstance(gating_cfg, dict):
+            def _leaf_paths(d: Dict, prefix: str = ""):
+                out = []
+                for k, v in d.items():
+                    key = f"{prefix}.{k}" if prefix else str(k)
+                    if isinstance(v, dict):
+                        out.extend(_leaf_paths(v, key))
+                    else:
+                        out.append(key)
+                return out
+            gating_seen = set(_leaf_paths(gating_cfg))
+        if gating_scope == 'filter_time':
+            gating_consumed = sorted(x for x in gating_seen if x in gating_supported)
+            gating_unused = sorted(x for x in gating_seen if x not in gating_supported)
+        else:
+            # Evaluation-only scope: no gating key is consumed in filter-time path.
+            gating_consumed = []
+            gating_unused = sorted(gating_seen)
         
-        # Retrieve per-frame ROI stats if available (P1)
-        roi_stats_seq = (meta or {}).get('roi_stats_t', [])
-        if not isinstance(roi_stats_seq, (list, tuple)):
-            roi_stats_seq = []
+        # Retrieve per-frame ROI stats if available (P1), normalized to canonical schema.
+        roi_stats_seq = normalize_roi_stats_t((meta or {}).get('roi_stats_t'), n)
+        freq_hist_bpm = []
 
         # ── Initialize state ──
         x, P = predictor.init_state(freq0)
@@ -182,9 +244,76 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             else:
                 trust = trust_alloc.allocate(quality, nis=nis_prev,
                                               current_freq=current_freq)
+                # Optional filter-time gating overrides from config/meta.
+                # Kept deterministic and structure-preserving.
+                if gating_scope == 'filter_time' and isinstance(gating_cfg, dict):
+                    debug_cfg = gating_cfg.get('debug', {})
+                    gating_disabled = isinstance(debug_cfg, dict) and bool(debug_cfg.get('disable_gating', False))
+                    if gating_disabled:
+                        trust = TrustParams()
+                    if not gating_disabled:
+                        spec_cfg = gating_cfg.get('spectral', {})
+                        peak_ratio = (meta or {}).get('welch_peak_ratio')
+                        if (
+                            isinstance(spec_cfg, dict) and
+                            isinstance(peak_ratio, (int, float, np.floating)) and
+                            np.isfinite(peak_ratio)
+                        ):
+                            ratio_min = spec_cfg.get('peak_ratio_min')
+                            if isinstance(ratio_min, (int, float, np.floating)) and ratio_min > 0:
+                                deficit = max(0.0, float(ratio_min - peak_ratio) / float(ratio_min))
+                                if deficit > 0.0:
+                                    trust.alpha_R = float(np.clip(trust.alpha_R * (1.0 + 0.5 * deficit), 1.0, 50.0))
+                                    trust.g_t = float(np.clip(trust.g_t * (1.0 - 0.6 * deficit), 0.0, 1.0))
+                                    trust.g_z = float(np.clip(trust.g_z * (1.0 - 0.8 * deficit), 0.0, 1.0))
+
+                        tracker_cfg = gating_cfg.get('tracker', {})
+                        if isinstance(tracker_cfg, dict):
+                            freq_hist_bpm.append(current_freq * 60.0)
+                            if len(freq_hist_bpm) > int(max(fs, 1.0) * 10):
+                                freq_hist_bpm = freq_hist_bpm[-int(max(fs, 1.0) * 10):]
+
+                            hist = np.asarray(freq_hist_bpm, dtype=np.float64)
+                            if hist.size >= 5:
+                                std_min_bpm = tracker_cfg.get('std_min_bpm')
+                                if isinstance(std_min_bpm, (int, float, np.floating)) and std_min_bpm > 0:
+                                    std_bpm = float(np.std(hist))
+                                    if std_bpm < float(std_min_bpm):
+                                        if bool(tracker_cfg.get('std_is_soft', True)):
+                                            scale = float(np.clip(std_bpm / float(std_min_bpm), 0.05, 1.0))
+                                            trust.g_z = float(np.clip(trust.g_z * scale, 0.0, 1.0))
+                                        else:
+                                            trust.g_z = 0.0
+
+                                unique_min = tracker_cfg.get('unique_min')
+                                if isinstance(unique_min, (int, float, np.floating)) and unique_min > 0:
+                                    uniq_ratio = float(np.unique(np.round(hist, 2)).size / hist.size)
+                                    if uniq_ratio < float(unique_min):
+                                        scale = float(np.clip(uniq_ratio / float(unique_min), 0.05, 1.0))
+                                        trust.g_z = float(np.clip(trust.g_z * scale, 0.0, 1.0))
+
+                                saturation_max = tracker_cfg.get('saturation_max')
+                                if isinstance(saturation_max, (int, float, np.floating)) and 0 <= saturation_max < 1:
+                                    margin_hz = float(tracker_cfg.get('saturation_margin_hz', 0.0) or 0.0)
+                                    hist_hz = hist / 60.0
+                                    sat = (
+                                        (hist_hz <= (p.f_min + margin_hz)) |
+                                        (hist_hz >= (p.f_max - margin_hz))
+                                    )
+                                    sat_ratio = float(np.mean(sat))
+                                    if sat_ratio > float(saturation_max):
+                                        excess = sat_ratio - float(saturation_max)
+                                        trust.alpha_R = float(np.clip(trust.alpha_R * (1.0 + excess), 1.0, 50.0))
+                                        trust.g_z = float(np.clip(trust.g_z * (1.0 - excess), 0.0, 1.0))
 
             # 3. Robust update (Algorithm 1)
             R_scaled = predictor.build_R(alpha_R=trust.alpha_R)
+            qx_base = float(self.ssm_cfg.qx)
+            qf_base = float(self.ssm_cfg.qf)
+            rv_base = float(self.ssm_cfg.rv_floor)
+            qx_used = qx_base * float(trust.alpha_Q)
+            qf_used = qf_base * float(trust.alpha_Q)
+            rv_scaled = float(R_scaled[0, 0])
 
             # Only re-predict with scaled Q if trust actually modified it
             if not self.eda_baseline and trust.alpha_Q != 1.0:
@@ -216,17 +345,11 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             # 7. Failure monitor
             flags = monitor.update(state, result.nis, float(np.trace(P)))
 
-            # Handle divergence → reinitialize
-            if flags.diverge:
-                x, P = predictor.init_state(freq0)
-                monitor.reset(f_ref=freq0)
-                trust_alloc.reset()
-
             # 8. Logging — core state
             logger.log_state(
                 t, x, P,
                 y_t=y[t],
-                y_pred=float(H @ x_pred),
+                y_pred=(H @ x_pred).item(),
                 v_t=result.v_t,
                 nis=result.nis,
                 lambda_t=result.lambda_t,
@@ -252,33 +375,96 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 K_x1=float(result.K[0]),
                 K_x2=float(result.K[1]),
                 K_z=float(result.K[2]) if len(result.K) >= 3 else 0.0,
+                g_z_eff=gate_z_eff,
                 q_vis=quality['q_vis'],
                 q_drift=quality['q_drift'],
                 q_cons=quality['q_cons'],
                 q_out=quality['q_out'],
                 q_harm=quality['q_harm'],
                 q_burst=quality['q_burst'],
-                qx_eff=self.ssm_cfg.qx,
-                qf_eff=self.ssm_cfg.qf,
-                rv_eff=self.ssm_cfg.rv_floor,
+                freq_std_hz=state.get('freq_std_hz', np.nan),
+                amp_std=state.get('amp_std', np.nan),
+                qx_eff=qx_used,
+                qf_eff=qf_used,
+                rv_eff=rv_scaled,
+                qx_base=qx_base,
+                qf_base=qf_base,
+                rv_base=rv_base,
+                qx_used=qx_used,
+                qf_used=qf_used,
+                rv_scaled=rv_scaled,
+                R_post=result.R_eff,
+                post_smooth_alpha_base=alpha_base,
+                post_smooth_alpha_used=alpha_used,
             )
 
             # 9. Store outputs
             x1_out[t] = state['x1']
             freq_track[t] = state['freq_hz']
 
+            # Handle divergence for the *next* step after logging current frame.
+            if flags.diverge:
+                x, P = predictor.init_state(freq0)
+                monitor.reset(f_ref=freq0)
+                trust_alloc.reset()
+
         # ── Post-processing ──
         freq_track = np.clip(freq_track, p.f_min, p.f_max)
-        freq_track = self._apply_post_smoothing(freq_track)
+        freq_track = self._apply_post_smoothing(freq_track, alpha_override=alpha_used)
 
         # ── Save frame log ──
         aux_dir = (meta or {}).get('aux_save_dir')
-        trial_key = (meta or {}).get('trial_key')
+        trial_key = str((meta or {}).get('trial_key') or "").strip()
+        trial_key_full = (meta or {}).get('trial_key_full')
+        trial_uid = (meta or {}).get('trial_uid')
+        if not trial_key:
+            short_key, full_key = derive_trial_identifiers(
+                {
+                    "dataset_name": (meta or {}).get("dataset"),
+                    "subject": (meta or {}).get("subject"),
+                    "trial": (meta or {}).get("trial"),
+                    "video_path": (meta or {}).get("data_file"),
+                },
+                dataset_name=str((meta or {}).get("dataset", "")),
+                sample_index=0,
+            )
+            trial_key = short_key
+            trial_key_full = trial_key_full or full_key
+            trial_uid = trial_uid or full_key
         if aux_dir and trial_key:
             import os
+            import hashlib
             log_dir = os.path.join(aux_dir, 'frame_logs')
             os.makedirs(log_dir, exist_ok=True)
-            logger.save(os.path.join(log_dir, f"{trial_key}.npz"))
+            base_key = sanitize_trial_key(trial_key, fallback="trial")
+            suffix = ""
+            suffix_int = 0
+            out_path = os.path.join(log_dir, f"{base_key}.npz")
+            while os.path.exists(out_path):
+                suffix_int += 1
+                suffix = f"_{suffix_int}"
+                out_path = os.path.join(log_dir, f"{base_key}{suffix}.npz")
+            logger.save(out_path)
+            # Deterministic resolution contract: latest saved file must be pinned in manifest.
+            sha256 = ""
+            try:
+                h = hashlib.sha256()
+                with open(out_path, "rb") as fp:
+                    for chunk in iter(lambda: fp.read(1024 * 1024), b""):
+                        h.update(chunk)
+                sha256 = h.hexdigest()
+            except Exception:
+                # Hash is optional; manifest update remains mandatory.
+                sha256 = ""
+            update_frame_log_manifest(
+                aux_dir=aux_dir,
+                base_trial_key=base_key,
+                actual_filename=os.path.basename(out_path),
+                suffix=suffix_int,
+                sha256=sha256,
+            )
+        else:
+            suffix = ""
 
         # ── Package output ──
         meta_payload = dict(meta or {})
@@ -291,7 +477,31 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             'student_t_nu': self.nu if not self.eda_baseline else float('inf'),
             'predict_method': self.predict_method,
             'eda_baseline': self.eda_baseline,
+            'gating_scope_used': gating_scope,
+            'gating_consumed_keys': gating_consumed,
+            'gating_unused_keys': gating_unused,
+            'trial_key': trial_key if aux_dir else (meta_payload.get('trial_key') or trial_key),
+            'trial_key_full': trial_key_full,
+            'trial_uid': trial_uid,
+            'trial_key_suffix': suffix,
+            'post_smooth_alpha_base': alpha_base,
+            'post_smooth_alpha_used': alpha_used,
         })
+        inherited_unused = meta_payload.get('unused_config_keys', [])
+        merged_unused = []
+        if isinstance(inherited_unused, list):
+            merged_unused.extend([str(x) for x in inherited_unused])
+        merged_unused.extend([f"gating.{k}" for k in gating_unused])
+        if merged_unused:
+            # Deduplicate but keep deterministic order.
+            seen = set()
+            ordered = []
+            for key in merged_unused:
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append(key)
+            meta_payload['unused_config_keys'] = ordered
         meta_payload.setdefault('is_constant_track', False)
 
         return self._package(x1_out, freq_track, meta_payload)

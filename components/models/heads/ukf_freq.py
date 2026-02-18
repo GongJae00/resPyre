@@ -57,6 +57,8 @@ class oscillator_UKF_freq(_BaseOscillatorHead):
         qx = eff['qx']
         rv = eff['rv']
         qf = max(eff['qf'], 1e-10)
+        alpha_base = float(eff.get('post_smooth_alpha_base', getattr(self.params, 'post_smooth_alpha', 0.0) or 0.0))
+        alpha_used = float(eff.get('post_smooth_alpha_used', alpha_base))
 
         log_f_min = np.log(max(p.f_min, 1e-4))
         log_f_max = np.log(max(p.f_max, p.f_min + 1e-4))
@@ -117,9 +119,11 @@ class oscillator_UKF_freq(_BaseOscillatorHead):
             states[t] = x
 
         track_hz = np.clip(np.exp(states[:, 2]), p.f_min, p.f_max)
-        track_hz = self._apply_post_smoothing(track_hz)
+        track_hz = self._apply_post_smoothing(track_hz, alpha_override=alpha_used)
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
+        meta_payload["post_smooth_alpha_base"] = alpha_base
+        meta_payload["post_smooth_alpha_used"] = alpha_used
         qf_eff = float(qf)
         meta_payload["qf_eff"] = qf_eff
         try:

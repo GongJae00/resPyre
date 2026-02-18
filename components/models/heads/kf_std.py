@@ -22,6 +22,8 @@ class oscillator_KFstd(_BaseOscillatorHead):
         rho = eff['rho']
         qx = eff['qx']
         rv = eff['rv']
+        alpha_base = float(eff.get('post_smooth_alpha_base', getattr(self.params, 'post_smooth_alpha', 0.0) or 0.0))
+        alpha_used = float(eff.get('post_smooth_alpha_used', alpha_base))
 
         cos_w = np.cos(omega0 * dt)
         sin_w = np.sin(omega0 * dt)
@@ -98,10 +100,12 @@ class oscillator_KFstd(_BaseOscillatorHead):
         if np.any(bad_mask):
             track_hz[bad_mask] = freq0
         track_hz = np.clip(track_hz, p.f_min, p.f_max)
-        track_hz = self._apply_post_smoothing(track_hz)
+        track_hz = self._apply_post_smoothing(track_hz, alpha_override=alpha_used)
 
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
         meta_payload["freq_source"] = "kf_phase"
+        meta_payload["post_smooth_alpha_base"] = alpha_base
+        meta_payload["post_smooth_alpha_used"] = alpha_used
         meta_payload.setdefault("is_constant_track", False)
         return self._package(x1, track_hz, meta_payload)

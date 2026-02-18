@@ -191,8 +191,8 @@ class _BaseOscillatorHead:
         }
         return x
 
-    def _apply_post_smoothing(self, track: np.ndarray) -> np.ndarray:
-        alpha = getattr(self.params, "post_smooth_alpha", None)
+    def _apply_post_smoothing(self, track: np.ndarray, alpha_override: Optional[float] = None) -> np.ndarray:
+        alpha = alpha_override if alpha_override is not None else getattr(self.params, "post_smooth_alpha", None)
         if alpha is None or (not np.isfinite(alpha)):
             return track
         if alpha <= 0.0 or alpha >= 1.0 or track.size < 2:
@@ -476,6 +476,15 @@ class _BaseOscillatorHead:
             qf = float(p.qf_override)
             qf_base = qf
         # Meta-driven scaling: motion energy / ROI variance / SNR hints from the base method.
+        alpha_base = getattr(self.params, "post_smooth_alpha", 0.0)
+        try:
+            alpha_base = float(alpha_base)
+        except Exception:
+            alpha_base = 0.0
+        if not np.isfinite(alpha_base):
+            alpha_base = 0.0
+        alpha_used = float(alpha_base)
+
         if isinstance(meta, dict):
             try:
                 sig_std = float(meta.get("signal_std", float("nan")))
@@ -526,24 +535,29 @@ class _BaseOscillatorHead:
                     qf *= 1.15
                     rv *= 1.1
             # Motion-dependent smoother (only if not explicitly set to a strong value)
-            alpha = getattr(self.params, "post_smooth_alpha", 0.0)
-            target_alpha = alpha
+            target_alpha = alpha_used
             if motion_level > 1.2:
                 target_alpha = max(target_alpha, min(0.98, 0.9 + 0.03 * (motion_level - 1.0)))
             elif motion_level < 0.9:
                 target_alpha = max(target_alpha, 0.85)
             if np.isfinite(target_alpha) and 0.0 < target_alpha < 1.0:
-                self.params.post_smooth_alpha = float(target_alpha)
+                alpha_used = float(target_alpha)
         # Guardrails to prevent runaway variances
         qx = float(np.clip(qx, 1e-7, 1e-1))
         qf = float(np.clip(qf, 1e-7, 5e-3))
         rv = float(np.clip(rv, rv_floor, rv_cap))
         qx, qf, rv = self._apply_spectral_guidance(qx, qf, rv, rv_floor, qf_base)
+        if not np.isfinite(alpha_used):
+            alpha_used = alpha_base
+        if not (0.0 < alpha_used < 1.0):
+            alpha_used = alpha_base
         return {
             'rho': float(rho),
             'qx': float(qx),
             'rv': float(rv),
-            'qf': float(qf)
+            'qf': float(qf),
+            'post_smooth_alpha_base': float(alpha_base),
+            'post_smooth_alpha_used': float(alpha_used),
         }
 
     def _spectral_guidance_score(self) -> float:

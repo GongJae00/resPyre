@@ -5,7 +5,15 @@ import numpy as np
 from functools import wraps
 
 from core.utils.common import tqdm
-from core.pipeline.common import _dataset_results_dir, _atomic_json_dump, _filter_valid_rois, _merge_results_payload, _method_suffix, _sanitize_run_label
+from core.pipeline.common import (
+    _dataset_results_dir,
+    _atomic_json_dump,
+    _filter_valid_rois,
+    _merge_results_payload,
+    _method_suffix,
+    _sanitize_run_label,
+    derive_trial_identifiers,
+)
 # from core.utils.config import load_config # Config loader will be fixed separately
 
 def get_vid_stats(path):
@@ -54,22 +62,24 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
         if not getattr(dataset, 'data', None):
             dataset.load_dataset()
         # Loop over the dataset
-        for d in tqdm(dataset.data, desc="Processing files"):
+        for sample_idx, d in enumerate(tqdm(dataset.data, desc="Processing files")):
             dataset_label = str(getattr(dataset, 'name', '') or '').strip().lower() or 'unknown'
             dataset_slug = dataset_label.upper()
             d['dataset_name'] = dataset_label
             d.setdefault('dataset', dataset_label)
             d['dataset_slug'] = dataset_slug
 
-            if 'trial' in d.keys(): 
+            if 'trial' in d.keys():
                 outfilename = os.path.join(data_dir, dataset.name + '_' + d['subject'] + '_' + d['trial'] + '.pkl')
-                trial_key = f"{d['subject']}_{d['trial']}"
             else:
                 outfilename = os.path.join(data_dir, dataset.name + '_' + d['subject'] + '.pkl')
-                trial_key = d['subject']
 
             _, d['fps'] = get_vid_stats(d['video_path'])
+            # Deterministic per-sample identifiers shared by all methods.
+            trial_key, trial_key_full = derive_trial_identifiers(d, dataset_name=dataset_label, sample_index=sample_idx)
             d['trial_key'] = trial_key
+            d['trial_key_full'] = trial_key_full
+            d['trial_uid'] = trial_key_full
 
             results_payload = {
                 'dataset': dataset_label,
@@ -83,9 +93,21 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
             }
 
             if 'trial' in d.keys(): 
-                tqdm.write("> Processing video %s/%s\n> fps: %d" % (d['subject'], d['trial'], d['fps']))
+                tqdm.write("> Processing video subject=%s trial=%s\n> fps: %d" % (d['subject'], d['trial'], d['fps']))
             else:
                 tqdm.write("> Processing video %s\n> fps: %d" % (d['subject'], d['fps']))
+
+            chest_roi_notice_shown = False
+
+            def _ensure_chest_rois(reason: str):
+                nonlocal chest_roi_notice_shown
+                if not d['chest_rois']:
+                    if not chest_roi_notice_shown:
+                        tqdm.write(f"> Preparing chest ROIs ({reason}); this can take a while...")
+                        chest_roi_notice_shown = True
+                    d['chest_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], 'chest'))
+                else:
+                    d['chest_rois'] = _filter_valid_rois(d['chest_rois'])
 
             # Apply every method to each video
             for m in methods:
@@ -93,37 +115,36 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
                 skip_method = False
                 aux_dir = os.path.join(dataset_results_dir, 'aux', m.name.replace(' ', '_'))
                 d['aux_save_dir'] = aux_dir
+                needs_roi_meta = hasattr(m, 'osc_head') or ('__' in getattr(m, 'name', ''))
 
                 if m.data_type == 'chest':
-                    # Lazy loading: Try processing first (in case of cache hit)
-                    success_lazy = False
-                    if not d['chest_rois']:
-                        try:
-                            # Attempt process with empty ROIs. 
-                            # If cache exists, methods.py returns result.
-                            # If cache missing, methods.py might crash or return invalid, triggering except.
-                            # Note: We rely on methods throwing error on empty ROIs if cache missed.
-                            estimate = m.process(d)
-                            # If we get here, it worked (cache hit)!
-                            success_lazy = True
-                            # tqdm.write(f"> Loaded cached result for {m.name}")
-                        except Exception as e:
-                            # Cache miss or other error. Proceed to load ROIs.
-                            # tqdm.write(f"> Lazy load failed for {m.name}: {e}")
-                            pass
-
-                    if not success_lazy:
-                        if not d['chest_rois']:
-                            d['chest_rois'] = _filter_valid_rois(dataset.extract_ROI(d['video_path'], m.data_type))
-                        else:
-                            d['chest_rois'] = _filter_valid_rois(d['chest_rois'])
-                        
+                    # Wrapped oscillator heads always require ROI-derived per-frame
+                    # metadata (roi_stats_t), so ROIs must be prepared first.
+                    if needs_roi_meta:
+                        _ensure_chest_rois("for wrapped quality metadata")
                         if not d['chest_rois']:
                             tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
                             skip_method = True
                         else:
-                            # Retry processing with loaded ROIs
                             estimate = m.process(d)
+                    else:
+                        # Base chest methods can use lazy cache-first processing.
+                        success_lazy = False
+                        if not d['chest_rois']:
+                            try:
+                                estimate = m.process(d)
+                                success_lazy = True
+                            except Exception:
+                                pass
+
+                        if not success_lazy:
+                            _ensure_chest_rois(f"cache miss at {m.name}")
+
+                            if not d['chest_rois']:
+                                tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
+                                skip_method = True
+                            else:
+                                estimate = m.process(d)
 
                 elif m.data_type == 'face':
                      if not d['face_rois']:
@@ -157,6 +178,8 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
             # release some memory between videos
             d.pop('aux_save_dir', None)
             d.pop('trial_key', None)
+            d.pop('trial_key_full', None)
+            d.pop('trial_uid', None)
             d['chest_rois'] = []
             d['face_rois'] = []
 

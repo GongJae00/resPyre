@@ -3,7 +3,6 @@ from .core.base import OscillatorParams, _BaseOscillatorHead, PLLAdaptiveControl
 from .heads.kf_std import oscillator_KFstd
 from .heads.ukf_freq import oscillator_UKF_freq
 from .heads.robust_attention import oscillator_Robust_Attention
-from .heads.robust_attention import oscillator_Robust_Attention
 from .heads.head_ensemble import OscillatorHeadEnsemble
 from .heads.ag_akf import oscillator_AGAKF
 from .heads.robust_ossm import oscillator_RobustOSSM
@@ -14,7 +13,6 @@ HEAD_REGISTRY = {
     "ukffreq": oscillator_UKF_freq,
     "ukf_freq": oscillator_UKF_freq,
     "robust_attention": oscillator_Robust_Attention,
-    "robust": oscillator_Robust_Attention,
     "robust": oscillator_Robust_Attention,
     "ensemble": OscillatorHeadEnsemble,
     "agakf": oscillator_AGAKF,

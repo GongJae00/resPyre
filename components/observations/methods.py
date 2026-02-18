@@ -17,7 +17,8 @@ class OF_Model(MethodBase):
 
 	def __init__(self):
 		super().__init__()
-		self.name = 'OF_Model'
+		# Canonical base method name used across configs/results.
+		self.name = 'of_farneback'
 		self.data_type = 'chest'
 
 	def process(self, data):

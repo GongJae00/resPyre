@@ -92,21 +92,7 @@
         "name": "profile1d_linear"
       },
       {
-        "name": "profile1d_quadratic"
-      },
-      {
         "name": "profile1d_linear__kfstd",
-        "params": {
-          "oscillator": {
-            "em_mode": "online",
-            "qx": 0.005,
-            "qf": 0.005,
-            "rv_floor": 0.05
-          }
-        }
-      },
-      {
-        "name": "profile1d_quadratic__kfstd",
         "params": {
           "oscillator": {
             "em_mode": "online",
@@ -230,6 +216,29 @@
         "clip": 2.5
       }
     },
+    "quality": {
+      "vis_snr_low_db": -5.0,
+      "vis_snr_high_db": 5.0,
+      "vis_blend_contrast": 0.2,
+      "vis_blend_snr": 0.5,
+      "vis_blend_valid": 0.3,
+      "drift_scale": 0.25,
+      "burst_sigma": 3.0
+    },
+    "trust": {
+      "beta_1": 2.0,
+      "beta_2": 1.5,
+      "gamma_1": 1.0,
+      "w_gate_vis": 2.0,
+      "w_gate_cons": 1.5,
+      "w_gate_nis": 0.5,
+      "gate_bias": 1.0,
+      "freq_jitter_decay": 0.8,
+      "thd_max": 0.3,
+      "nis_hard_gate": 15.0,
+      "alpha_R_max": 20.0,
+      "alpha_Q_max": 5.0
+    },
     "gating": {
       "profile": "paper",
       "tracker": {
@@ -245,7 +254,7 @@
         "fwhm_df_guard": 0.05
       },
       "debug": {
-        "disable_gating": true
+        "disable_gating": false
       }
     },
     "report": {
@@ -259,6 +268,7 @@
       "estimate",
       "evaluate",
       "metrics",
+      "eda",
       "visualize",
       "metadata"
     ]

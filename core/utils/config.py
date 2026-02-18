@@ -6,7 +6,7 @@ _DEFAULT_CFG = {
     "results_dir": "results",
     "datasets": ["COHFACE"],
     "methods": [
-        "OF_Model",
+        "of_farneback",
         "DoF",
         "profile1D"
     ],

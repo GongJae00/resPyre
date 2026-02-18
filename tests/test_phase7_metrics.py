@@ -112,6 +112,17 @@ def test_7_import_consistency():
     print("  [7] Import + smoke test: PASS")
 
 
+def test_8_nis_pval_underflow_guard():
+    """Extreme miscalibration should still return a strictly positive p-value."""
+    from core.evaluation.metrics import nis_calibration_chi2
+    nis = np.full(2000, 1e8, dtype=np.float64)
+    result = nis_calibration_chi2(nis, dof=1)
+    assert result['pval'] > 0.0, "p-value should not underflow to exact zero"
+    assert result['pval'] <= 1.0
+    assert not result['pass_chi2']
+    print("  [8] NIS p-value underflow guard: PASS")
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("PHASE 7: EXTENDED BAYESIAN METRICS TESTS")
@@ -123,6 +134,7 @@ if __name__ == '__main__':
     test_5_stability_long()
     test_6_stability_short()
     test_7_import_consistency()
+    test_8_nis_pval_underflow_guard()
     print("=" * 60)
-    print("ALL 7 TESTS PASSED ✅")
+    print("ALL 8 TESTS PASSED ✅")
     print("=" * 60)

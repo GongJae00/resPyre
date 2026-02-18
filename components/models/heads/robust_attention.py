@@ -22,6 +22,8 @@ class oscillator_Robust_Attention(oscillator_UKF_freq):
         qx = eff['qx']
         rv = eff['rv']
         qf = max(eff['qf'], 1e-10)
+        alpha_base = float(eff.get('post_smooth_alpha_base', getattr(self.params, 'post_smooth_alpha', 0.0) or 0.0))
+        alpha_used = float(eff.get('post_smooth_alpha_used', alpha_base))
 
         # Robust / Student-t parameters
         nu = float(getattr(p, 'student_t_nu', 4.0)) # Degrees of freedom
@@ -129,11 +131,13 @@ class oscillator_Robust_Attention(oscillator_UKF_freq):
             states[t] = x
 
         track_hz = np.clip(np.exp(states[:, 2]), p.f_min, p.f_max)
-        track_hz = self._apply_post_smoothing(track_hz)
+        track_hz = self._apply_post_smoothing(track_hz, alpha_override=alpha_used)
         
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
         meta_payload["robust_weights_mean"] = float(np.mean(weights_hist))
+        meta_payload["post_smooth_alpha_base"] = alpha_base
+        meta_payload["post_smooth_alpha_used"] = alpha_used
         meta_payload["is_constant_track"] = False
         
         return self._package(states[:, 0], track_hz, meta_payload)

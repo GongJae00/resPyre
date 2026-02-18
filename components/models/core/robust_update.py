@@ -149,26 +149,6 @@ class RobustKalmanUpdater:
             K=K[:, 0]
         )
 
-    def _compute_lambda(self, nis: float, nu: float) -> float:
-        """VB E-step: λ = (ν + n_y) / (ν + v²/S).
-
-        For ν → ∞, λ → 1 (Gaussian recovery).
-        For large NIS (outlier), λ → 0 (suppress observation).
-        """
-        if not np.isfinite(nu) or nu > 1e6:
-            # Gaussian limit
-            return 1.0
-        n_y = 1.0  # scalar observation
-        lambda_t = (nu + n_y) / (nu + nis)
-
-        # Multi-iteration refinement (typically 1 is enough for 1D)
-        # For multi-dim this would iterate, but for scalar it converges in 1 step.
-        for _ in range(self.vb_iters - 1):
-            # Recompute with updated λ (for 1D this is idempotent)
-            lambda_t = (nu + n_y) / (nu + nis)
-
-        return float(np.clip(lambda_t, 1e-6, 1e6))
-
     def _psd_project(self, P: np.ndarray) -> np.ndarray:
         """Symmetrize and clamp eigenvalues to ensure PSD."""
         P = 0.5 * (P + P.T)
