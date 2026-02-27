@@ -17,7 +17,7 @@
         "name": "of_farneback__kfstd",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -31,7 +31,7 @@
         "name": "of_farneback__agakf",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -46,7 +46,7 @@
         "name": "dof__kfstd",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -60,7 +60,7 @@
         "name": "dof__agakf",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -75,7 +75,7 @@
         "name": "profile1d_linear__kfstd",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -89,7 +89,7 @@
         "name": "profile1d_linear__agakf",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -104,7 +104,7 @@
         "name": "profile1d_quadratic__kfstd",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -118,7 +118,7 @@
         "name": "profile1d_quadratic__agakf",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -133,7 +133,7 @@
         "name": "profile1d_cubic__kfstd",
         "params": {
              "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,
@@ -147,7 +147,7 @@
         "name": "profile1d_cubic__agakf",
         "params": {
             "oscillator": {
-              "em_mode": "online",
+              "em_mode": "off",
               "qx": 0.005,
               "qf": 0.005,
               "rv_floor": 0.05,

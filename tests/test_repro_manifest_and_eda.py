@@ -122,19 +122,31 @@ def test_evaluation_uses_manifest_latest_log_and_promotes_unused_keys():
     log_dir = os.path.join(aux_dir, "frame_logs")
     os.makedirs(log_dir, exist_ok=True)
 
-    _write_frame_log(os.path.join(log_dir, "1_0.npz"), q_vis_value=0.1, n=n)
+    p_old = os.path.join(log_dir, "1_0.npz")
+    _write_frame_log(p_old, q_vis_value=0.1, n=n)
+    run_epoch = datetime.now(timezone.utc)
     status_path = os.path.join(run_dir, "run_status.json")
     with open(status_path, "w", encoding="utf-8") as fp:
         json.dump({
             "schema_version": "run_status.v1",
             "status": "running",
-            "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "run_instance_started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "started_at": run_epoch.isoformat().replace("+00:00", "Z"),
+            "run_instance_started_at": run_epoch.isoformat().replace("+00:00", "Z"),
+            "updated_at": run_epoch.isoformat().replace("+00:00", "Z"),
         }, fp)
     _write_frame_log(os.path.join(log_dir, "1_0_1.npz"), q_vis_value=0.9, n=n)
+    stale_t = run_epoch.timestamp() - 30.0
+    os.utime(p_old, (stale_t, stale_t))
 
-    run_evaluation(tmp, run_label="testrun", win_size=30.0, stride=1.0, min_hz=0.08, max_hz=0.5)
+    run_evaluation(
+        tmp,
+        run_label="testrun",
+        win_size=30.0,
+        stride=1.0,
+        min_hz=0.08,
+        max_hz=0.5,
+        frame_log_strict=False,
+    )
 
     qdf = pd.read_csv(os.path.join(run_dir, "logs", "method_quality.csv"))
     row = qdf[qdf["method"] == "profile1d_quadratic__robust_ossm_ekf"].iloc[0]
@@ -186,11 +198,14 @@ def test_resolve_frame_logs_for_run_epoch_selects_latest_and_marks_orphans():
     os.utime(p1, (new_t1, new_t1))
     os.utime(p2, (new_t2, new_t2))
 
-    selected, orphans, diag = resolve_frame_logs_for_run(
+    resolution = resolve_frame_logs_for_run(
         run_dir,
         expected_trials=[{"method": "m", "trial": "trial"}],
-        strict=True,
+        strict=False,
     )
+    selected = resolution["canonical"]
+    orphans = resolution["extras"]
+    diag = resolution["diag"]
     assert selected["m"]["trial"].endswith("trial_2.npz")
     reasons = {str(o.get("reason")) for o in orphans}
     assert "duplicate_suffix_ignored" in reasons
@@ -198,7 +213,60 @@ def test_resolve_frame_logs_for_run_epoch_selects_latest_and_marks_orphans():
     assert str(diag.get("selection_policy")) == "post_epoch_latest_mtime_suffix"
 
 
-def test_innovation_eda_writes_summary_and_skips_when_all_logs_malformed():
+def test_resolver_suffix_is_relative_to_trial_key_not_embedded_trial_index():
+    tmp = tempfile.mkdtemp(prefix="resolver_trial_suffix_")
+    run_dir = os.path.join(tmp, "testrun")
+    os.makedirs(os.path.join(run_dir, "aux", "m", "frame_logs"), exist_ok=True)
+    log_dir = os.path.join(run_dir, "aux", "m", "frame_logs")
+
+    # "10_3" is a legitimate trial key, not a collision suffix.
+    p_base = os.path.join(log_dir, "10_3.npz")
+    p_collide = os.path.join(log_dir, "10_3_1.npz")
+    _write_frame_log(p_base, q_vis_value=0.3, n=32)
+    _write_frame_log(p_collide, q_vis_value=0.4, n=32)
+
+    now = datetime.now(timezone.utc)
+    run_epoch = now - timedelta(seconds=5)
+    with open(os.path.join(run_dir, "run_status.json"), "w", encoding="utf-8") as fp:
+        json.dump({
+            "schema_version": "run_status.v1",
+            "status": "running",
+            "started_at": (now - timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+            "run_instance_started_at": run_epoch.isoformat().replace("+00:00", "Z"),
+            "updated_at": now.isoformat().replace("+00:00", "Z"),
+        }, fp)
+    os.utime(p_base, (run_epoch.timestamp() + 1.0, run_epoch.timestamp() + 1.0))
+    os.utime(p_collide, (run_epoch.timestamp() + 2.0, run_epoch.timestamp() + 2.0))
+
+    resolution = resolve_frame_logs_for_run(
+        run_dir,
+        expected_trials=[{"method": "m", "trial": "10_3"}],
+        strict=False,
+    )
+    sel = resolution["diag"]["selected_details"]["m"]["10_3"]
+    assert sel["frame_log_filename_used"] == "10_3_1.npz"
+    assert int(sel["frame_log_suffix_used"]) == 1
+    # Ensure base log is represented as duplicate ignored with suffix=0.
+    extras = [e for e in resolution["extras"] if e.get("trial_key") == "10_3"]
+    assert any(int(e.get("suffix", -1)) == 0 for e in extras)
+
+
+def test_resolver_strict_raises_on_extras_stale_logs():
+    tmp = tempfile.mkdtemp(prefix="resolver_strict_extras_")
+    run_dir = os.path.join(tmp, "testrun")
+    os.makedirs(os.path.join(run_dir, "aux", "m", "frame_logs"), exist_ok=True)
+    log_dir = os.path.join(run_dir, "aux", "m", "frame_logs")
+    _write_frame_log(os.path.join(log_dir, "trial.npz"), q_vis_value=0.2, n=32)
+    _write_frame_log(os.path.join(log_dir, "trial_1.npz"), q_vis_value=0.3, n=32)
+    with pytest.raises(ValueError, match="strict failure"):
+        resolve_frame_logs_for_run(
+            run_dir,
+            expected_trials=[{"method": "m", "trial": "trial"}],
+            strict=True,
+        )
+
+
+def test_innovation_eda_allow_missing_true_writes_placeholder_when_all_logs_malformed():
     tmp = tempfile.mkdtemp(prefix="eda_missing_")
     run_dir = os.path.join(tmp, "testrun")
     os.makedirs(os.path.join(run_dir, "data"), exist_ok=True)
@@ -233,7 +301,7 @@ def test_innovation_eda_writes_summary_and_skips_when_all_logs_malformed():
     os.makedirs(bad_dir, exist_ok=True)
     np.savez_compressed(os.path.join(bad_dir, "1_0.npz"), bad=np.array([1, 2, 3]))
 
-    run_innovation_eda(tmp, run_label="testrun", allow_missing=False)
+    run_innovation_eda(tmp, run_label="testrun", allow_missing=True, strict=False)
     skipped_path = os.path.join(run_dir, "eda", "innovation_eda_skipped_logs.json")
     summary_json = os.path.join(run_dir, "eda", "innovation_summary.json")
     summary_csv = os.path.join(run_dir, "eda", "innovation_summary.csv")
@@ -243,10 +311,79 @@ def test_innovation_eda_writes_summary_and_skips_when_all_logs_malformed():
     with open(skipped_path, "r", encoding="utf-8") as fp:
         skipped = json.load(fp)
     assert int(skipped.get("skipped_count", -1)) >= 1
+    assert skipped.get("schema_version") == "innovation_eda_skipped_logs.v1"
+    assert bool(skipped.get("allow_missing")) is True
+    assert bool(skipped.get("strict")) is False
     with open(summary_json, "r", encoding="utf-8") as fp:
         summary = json.load(fp)
-    assert summary.get("status") == "no_valid_logs"
+    assert summary.get("status") == "incomplete_all_skipped"
+    assert bool(summary.get("incomplete")) is True
     assert int(summary.get("n_valid", -1)) == 0
+
+
+def test_innovation_eda_strict_raises_but_writes_diagnostics_on_malformed():
+    tmp = tempfile.mkdtemp(prefix="eda_strict_fail_")
+    run_dir = os.path.join(tmp, "testrun")
+    os.makedirs(os.path.join(run_dir, "data"), exist_ok=True)
+    fs = 20.0
+    n = 128
+    pkl_path = os.path.join(run_dir, "data", "dummy_1_0.pkl")
+    with open(pkl_path, "wb") as fp:
+        pickle.dump({
+            "video_path": "/tmp/dummy_1_0.avi",
+            "fps": fs,
+            "gt": np.zeros(n, dtype=np.float32),
+            "fs_gt": fs,
+            "estimates": [{
+                "method": "bad_method",
+                "estimate": {
+                    "signal_hat": np.zeros(n, dtype=np.float32),
+                    "track_hz": np.full(n, 0.25, dtype=np.float32),
+                    "meta": {},
+                },
+            }],
+        }, fp)
+    bad_dir = os.path.join(run_dir, "aux", "bad_method", "frame_logs")
+    os.makedirs(bad_dir, exist_ok=True)
+    np.savez_compressed(os.path.join(bad_dir, "1_0.npz"), bad=np.array([1, 2, 3]))
+    with pytest.raises(ValueError, match="EDA strict"):
+        run_innovation_eda(tmp, run_label="testrun", allow_missing=False, strict=False)
+    assert os.path.exists(os.path.join(run_dir, "eda", "innovation_eda_skipped_logs.json"))
+    assert os.path.exists(os.path.join(run_dir, "eda", "innovation_summary.json"))
+    assert os.path.exists(os.path.join(run_dir, "eda", "innovation_summary.csv"))
+
+
+def test_innovation_eda_zero_canonical_behavior_by_allow_missing():
+    tmp = tempfile.mkdtemp(prefix="eda_zero_canonical_")
+    run_dir = os.path.join(tmp, "testrun")
+    os.makedirs(os.path.join(run_dir, "data"), exist_ok=True)
+    fs = 20.0
+    n = 128
+    pkl_path = os.path.join(run_dir, "data", "dummy_1_0.pkl")
+    with open(pkl_path, "wb") as fp:
+        pickle.dump({
+            "video_path": "/tmp/dummy_1_0.avi",
+            "fps": fs,
+            "gt": np.zeros(n, dtype=np.float32),
+            "fs_gt": fs,
+            "estimates": [{
+                "method": "bad_method",
+                "estimate": {
+                    "signal_hat": np.zeros(n, dtype=np.float32),
+                    "track_hz": np.full(n, 0.25, dtype=np.float32),
+                    "meta": {},
+                },
+            }],
+        }, fp)
+    # allow_missing=True -> placeholder
+    run_innovation_eda(tmp, run_label="testrun", allow_missing=True, strict=True)
+    with open(os.path.join(run_dir, "eda", "innovation_summary.json"), "r", encoding="utf-8") as fp:
+        summary = json.load(fp)
+    assert summary.get("status") == "incomplete_all_skipped"
+    # allow_missing=False -> strict raise, diagnostics still written
+    with pytest.raises(ValueError, match="strict"):
+        run_innovation_eda(tmp, run_label="testrun", allow_missing=False, strict=True)
+    assert os.path.exists(os.path.join(run_dir, "eda", "innovation_eda_skipped_logs.json"))
 
 
 def test_post_smooth_alpha_isolation_no_inplace_leakage():
@@ -279,3 +416,58 @@ def test_post_smooth_alpha_isolation_no_inplace_leakage():
     sm_hi = head._apply_post_smoothing(track, alpha_override=float(eff_hi["post_smooth_alpha_used"]))
     sm_lo = head._apply_post_smoothing(track, alpha_override=float(eff_lo["post_smooth_alpha_used"]))
     assert not np.allclose(sm_hi, sm_lo)
+
+
+def test_innovation_eda_summary_rows_use_per_method_counts():
+    tmp = tempfile.mkdtemp(prefix="eda_method_counts_")
+    run_dir = os.path.join(tmp, "testrun")
+    os.makedirs(os.path.join(run_dir, "data"), exist_ok=True)
+    fs = 20.0
+    n = 128
+    pkl_path = os.path.join(run_dir, "data", "dummy_1_0.pkl")
+    with open(pkl_path, "wb") as fp:
+        pickle.dump({
+            "video_path": "/tmp/dummy_1_0.avi",
+            "fps": fs,
+            "gt": np.zeros(n, dtype=np.float32),
+            "fs_gt": fs,
+            "estimates": [
+                {
+                    "method": "m1",
+                    "estimate": {
+                        "signal_hat": np.zeros(n, dtype=np.float32),
+                        "track_hz": np.full(n, 0.25, dtype=np.float32),
+                        "meta": {},
+                    },
+                },
+                {
+                    "method": "m2",
+                    "estimate": {
+                        "signal_hat": np.zeros(n, dtype=np.float32),
+                        "track_hz": np.full(n, 0.25, dtype=np.float32),
+                        "meta": {},
+                    },
+                },
+            ],
+        }, fp)
+    with open(os.path.join(run_dir, "run_status.json"), "w", encoding="utf-8") as fp:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        json.dump({
+            "schema_version": "run_status.v1",
+            "status": "running",
+            "started_at": now,
+            "run_instance_started_at": now,
+            "updated_at": now,
+        }, fp)
+
+    for method in ("m1", "m2"):
+        log_dir = os.path.join(run_dir, "aux", method, "frame_logs")
+        os.makedirs(log_dir, exist_ok=True)
+        _write_frame_log(os.path.join(log_dir, "1_0.npz"), q_vis_value=0.5, n=n)
+
+    run_innovation_eda(tmp, run_label="testrun", allow_missing=False, strict=False)
+    sdf = pd.read_csv(os.path.join(run_dir, "eda", "innovation_summary.csv"))
+    rows = sdf[sdf["method"].isin(["m1", "m2"])]
+    assert len(rows) == 2
+    assert set(rows["n_expected"].astype(int).tolist()) == {1}
+    assert set(rows["n_valid"].astype(int).tolist()) == {1}

@@ -471,9 +471,37 @@ def _select_latest_candidate(candidates: List[Dict]) -> Optional[Dict]:
 	# Deterministic tie-break: mtime -> suffix -> stem -> path
 	ordered = sorted(
 		candidates,
-		key=lambda c: (float(c.get("mtime", 0.0)), int(c.get("suffix", 0)), str(c.get("stem", "")), str(c.get("path", "")))
+		key=lambda c: (
+			float(c.get("mtime", 0.0)),
+			int(c.get("trial_suffix", c.get("suffix", 0))),
+			str(c.get("stem", "")),
+			str(c.get("path", "")),
+		)
 	)
 	return ordered[-1]
+
+
+def _trial_relative_suffix(stem: str, trial_base: str) -> int:
+	"""Return collision suffix relative to expected trial key.
+
+	Examples:
+	  stem='10_3', trial_base='10_3'     -> 0
+	  stem='10_3_1', trial_base='10_3'   -> 1
+	  stem='10_3_x', trial_base='10_3'   -> -1 (not a valid collision suffix)
+	"""
+	stem_s = str(stem or "")
+	base = str(trial_base or "")
+	if not base:
+		return -1
+	if stem_s == base:
+		return 0
+	prefix = f"{base}_"
+	if not stem_s.startswith(prefix):
+		return -1
+	tail = stem_s[len(prefix):]
+	if tail.isdigit():
+		return int(tail)
+	return -1
 
 
 def _match_trial_candidates(method_rows: List[Dict], trial_base: str) -> List[Dict]:
@@ -481,13 +509,11 @@ def _match_trial_candidates(method_rows: List[Dict], trial_base: str) -> List[Di
 	out = []
 	for row in method_rows:
 		stem = str(row.get("stem", ""))
-		if stem == base:
-			out.append(row)
-			continue
-		if stem.startswith(f"{base}_"):
-			tail = stem[len(base) + 1:]
-			if tail.isdigit():
-				out.append(row)
+		rel_suffix = _trial_relative_suffix(stem, base)
+		if rel_suffix >= 0:
+			row_copy = dict(row)
+			row_copy["trial_suffix"] = int(rel_suffix)
+			out.append(row_copy)
 	return out
 
 
@@ -496,13 +522,22 @@ def resolve_frame_logs_for_run(
 	expected_trials: Optional[List[Dict[str, str]]] = None,
 	method_filter: Optional[List[str]] = None,
 	strict: bool = True,
+	allow_empty: bool = False,
 ):
 	"""Resolve canonical frame logs for this run execution.
 
-	Returns:
-	  selected: {method: {trial_base: selected_log_path}}
-	  orphans: [{method, trial_key, path, reason, filename, suffix, mtime, ...}]
-	  diagnostics: selection metadata + counts
+	Returns a structured object:
+	  {
+	    "canonical": {method: {trial_key: absolute_npz_path}},
+	    "extras": [{method, trial_key, path, reason, filename, suffix, mtime}],
+	    "missing": [{method, trial_key, reason}],
+	    "diag": {...}
+	  }
+
+	Strict mode (`strict=True`) raises ValueError when:
+	  - ambiguous candidates exist without a unique manifest-based selection
+	  - extra/stale/unindexed logs are present
+	  - no canonical logs are selected while expected trials exist and allow_empty=False
 	"""
 	run_dir = os.path.abspath(str(run_dir))
 	expected = expected_trials if isinstance(expected_trials, list) else collect_expected_method_trials(run_dir)
@@ -548,7 +583,6 @@ def resolve_frame_logs_for_run(
 			if os.path.isdir(d):
 				method_slugs.append(os.path.basename(d))
 
-	# Ensure methods seen in expected are represented even if aux missing.
 	for method in sorted(method_expected.keys()):
 		slug = method.replace(" ", "_")
 		if slug not in method_slugs:
@@ -558,56 +592,116 @@ def resolve_frame_logs_for_run(
 		filter_slugs = set(m.replace(" ", "_") for m in method_filter_set)
 		method_slugs = [m for m in method_slugs if m in filter_slugs]
 
-	selected: Dict[str, Dict[str, str]] = {}
+	canonical: Dict[str, Dict[str, str]] = {}
 	selected_details: Dict[str, Dict[str, Dict[str, object]]] = {}
-	orphans: List[Dict[str, object]] = []
+	extras: List[Dict[str, object]] = []
+	missing: List[Dict[str, object]] = []
+	ambiguities: List[Dict[str, object]] = []
 
 	for method_slug in sorted(method_slugs):
 		method_rows = _frame_log_info_for_method(run_dir, method_slug)
+		aux_method_dir = os.path.join(run_dir, "aux", method_slug)
+		method_manifest = _read_frame_log_manifest(aux_method_dir)
+		manifest_entries = {}
+		if isinstance(method_manifest, dict):
+			entries = method_manifest.get("entries", {})
+			if isinstance(entries, dict):
+				manifest_entries = entries
+
 		method_name = method_slug
-		if method_slug in method_expected:
-			method_name = method_slug
-		else:
-			# Map slug to exact expected method name when possible.
+		if method_slug not in method_expected:
 			for expected_name in method_expected.keys():
 				if expected_name.replace(" ", "_") == method_slug:
 					method_name = expected_name
 					break
 
 		expected_trials_for_method = list(method_expected.get(method_name, []))
-		selected[method_name] = {}
+		canonical[method_name] = {}
 		selected_details[method_name] = {}
 		consumed_paths = set()
 
 		for trial_base in sorted(expected_trials_for_method):
 			cands = _match_trial_candidates(method_rows, trial_base)
 			if not cands:
+				missing.append({
+					"method": method_name,
+					"trial_key": trial_base,
+					"reason": "expected_not_found",
+				})
 				continue
+
 			eligible = cands
 			if cutoff is not None:
 				eligible = [c for c in cands if float(c.get("mtime", 0.0)) >= cutoff]
-			if not eligible:
-				for c in cands:
-					orphans.append({
+				if not eligible:
+					for c in cands:
+						extras.append({
+							"method": method_name,
+							"trial_key": trial_base,
+							"path": c["path"],
+							"filename": c["filename"],
+							"suffix": int(c.get("trial_suffix", c.get("suffix", -1))),
+							"mtime": float(c["mtime"]),
+							"reason": "pre_epoch_stale",
+						})
+						consumed_paths.add(c["path"])
+					missing.append({
 						"method": method_name,
 						"trial_key": trial_base,
-						"path": c["path"],
-						"filename": c["filename"],
-						"suffix": int(c["suffix"]),
-						"mtime": float(c["mtime"]),
-						"reason": "pre_epoch_stale",
+						"reason": "all_candidates_pre_epoch",
 					})
-					consumed_paths.add(c["path"])
+					continue
+
+			chosen = None
+			resolution_mode = "canonical_selected"
+			manifest_entry = manifest_entries.get(trial_base)
+			if isinstance(manifest_entry, dict):
+				fname = str(manifest_entry.get("filename", "")).strip()
+				if fname:
+					matches = [c for c in eligible if str(c.get("filename", "")) == fname]
+					if len(matches) == 1:
+						chosen = matches[0]
+						resolution_mode = "manifest"
+					elif len(matches) > 1:
+						ambiguities.append({
+							"method": method_name,
+							"trial_key": trial_base,
+							"reason": "manifest_nonunique_match",
+							"candidates": [str(c.get("filename", "")) for c in matches],
+						})
+					else:
+						ambiguities.append({
+							"method": method_name,
+							"trial_key": trial_base,
+							"reason": "manifest_target_not_eligible",
+							"manifest_filename": fname,
+							"eligible": [str(c.get("filename", "")) for c in eligible],
+						})
+
+			if chosen is None:
+				if len(eligible) > 1:
+					ambiguities.append({
+						"method": method_name,
+						"trial_key": trial_base,
+						"reason": "ambiguous_candidates_no_manifest",
+						"candidates": [str(c.get("filename", "")) for c in eligible],
+					})
+				chosen = _select_latest_candidate(eligible)
+				resolution_mode = "canonical_selected"
+
+			if chosen is None:
+				missing.append({
+					"method": method_name,
+					"trial_key": trial_base,
+					"reason": "selection_failed",
+				})
 				continue
 
-			chosen = _select_latest_candidate(eligible)
-			if chosen is None:
-				continue
-			selected[method_name][trial_base] = chosen["path"]
+			canonical[method_name][trial_base] = chosen["path"]
 			selected_details[method_name][trial_base] = {
 				"frame_log_filename_used": str(chosen["filename"]),
-				"frame_log_suffix_used": int(chosen["suffix"]),
-				"frame_log_resolution_mode": "canonical_selected",
+				"frame_log_suffix_used": int(chosen.get("trial_suffix", chosen.get("suffix", -1))),
+				"frame_log_resolution_mode": resolution_mode,
 				"mtime": float(chosen["mtime"]),
 			}
 			consumed_paths.add(chosen["path"])
@@ -618,27 +712,26 @@ def resolve_frame_logs_for_run(
 				reason = "duplicate_suffix_ignored"
 				if cutoff is not None and float(c.get("mtime", 0.0)) < cutoff:
 					reason = "pre_epoch_stale"
-				orphans.append({
+				extras.append({
 					"method": method_name,
 					"trial_key": trial_base,
 					"path": c["path"],
 					"filename": c["filename"],
-					"suffix": int(c["suffix"]),
+					"suffix": int(c.get("trial_suffix", c.get("suffix", -1))),
 					"mtime": float(c["mtime"]),
 					"reason": reason,
 				})
 				consumed_paths.add(c["path"])
 
-		# Remaining logs are unindexed extras for this run.
 		for c in method_rows:
 			if c["path"] in consumed_paths:
 				continue
 			reason = "unindexed_extra_log"
 			if cutoff is not None and float(c.get("mtime", 0.0)) < cutoff:
 				reason = "pre_epoch_stale"
-			orphans.append({
+			extras.append({
 				"method": method_name,
-				"trial_key": str(c.get("base_guess", "")),
+				"trial_key": str(c.get("stem", "")),
 				"path": c["path"],
 				"filename": c["filename"],
 				"suffix": int(c["suffix"]),
@@ -646,17 +739,23 @@ def resolve_frame_logs_for_run(
 				"reason": reason,
 			})
 
-	# Remove empty method buckets for cleaner manifests.
-	selected = {m: t for m, t in selected.items() if t}
+	canonical = {m: t for m, t in canonical.items() if t}
 	selected_details = {m: t for m, t in selected_details.items() if t}
-
-	orphans = sorted(
-		orphans,
+	extras = sorted(
+		extras,
 		key=lambda r: (str(r.get("method", "")), str(r.get("trial_key", "")), str(r.get("filename", "")))
 	)
-	n_selected = int(sum(len(v) for v in selected.values()))
+	missing = sorted(
+		missing,
+		key=lambda r: (str(r.get("method", "")), str(r.get("trial_key", "")), str(r.get("reason", "")))
+	)
+	ambiguities = sorted(
+		ambiguities,
+		key=lambda r: (str(r.get("method", "")), str(r.get("trial_key", "")), str(r.get("reason", "")))
+	)
+	n_selected = int(sum(len(v) for v in canonical.values()))
 	n_expected = int(sum(len(v) for v in method_expected.values()))
-	diagnostics = {
+	diag = {
 		"schema_version": FRAME_LOG_MANIFEST_SCHEMA,
 		"generated_at": _utc_iso_now(),
 		"run_dir": run_dir,
@@ -667,42 +766,62 @@ def resolve_frame_logs_for_run(
 		"counts": {
 			"n_expected_trials": n_expected,
 			"n_selected_trials": n_selected,
-			"n_orphan_logs": int(len(orphans)),
-			"n_methods": int(len(set(list(selected.keys()) + list(method_expected.keys())))),
+			"n_missing_trials": int(len(missing)),
+			"n_extra_logs": int(len(extras)),
+			"n_ambiguities": int(len(ambiguities)),
+			"n_methods": int(len(set(list(canonical.keys()) + list(method_expected.keys())))),
 		},
 		"selected_details": selected_details,
+		"ambiguities": ambiguities,
 	}
 
-	# Persist run-scoped canonical manifest for auditability.
 	logs_dir = os.path.join(run_dir, "logs")
 	os.makedirs(logs_dir, exist_ok=True)
 	manifest_payload = {
 		"schema_version": FRAME_LOG_MANIFEST_SCHEMA,
-		"generated_at": diagnostics["generated_at"],
+		"generated_at": diag["generated_at"],
 		"run_dir": run_dir,
 		"selection_policy": selection_policy,
 		"run_instance_started_at_used": run_instance_started_at,
 		"run_epoch_cutoff_unix": cutoff,
 		"warnings": list(warnings),
 		"selected": selected_details,
+		"missing": missing,
 		"orphans": [
 			{
 				**o,
 				"path": os.path.relpath(str(o.get("path", "")), run_dir) if o.get("path") else "",
 			}
-			for o in orphans
+			for o in extras
 		],
-		"counts": diagnostics["counts"],
+		"ambiguities": ambiguities,
+		"counts": diag["counts"],
 	}
 	_atomic_json_dump(manifest_payload, os.path.join(logs_dir, "frame_log_manifest.json"), indent=2)
 
-	if strict and n_expected > 0 and n_selected == 0:
-		# Do not fail hard; return actionable diagnostics and let caller decide.
-		diagnostics["warnings"].append(
-			"No canonical frame logs selected for expected trials under current selection policy."
-		)
+	result = {
+		"canonical": canonical,
+		"extras": extras,
+		"missing": missing,
+		"diag": diag,
+	}
 
-	return selected, orphans, diagnostics
+	if strict:
+		issues = []
+		if ambiguities:
+			issues.append(f"ambiguities={len(ambiguities)}")
+		if extras:
+			issues.append(f"extras_or_stale={len(extras)}")
+		if (not allow_empty) and (n_expected > 0) and (n_selected == 0):
+			issues.append("no_canonical_logs")
+		if issues:
+			raise ValueError(
+				"Frame log resolution strict failure: "
+				+ ", ".join(issues)
+				+ ". Use a fresh run_dir or cleanup stale/suffix logs, or set strict=False for exploratory mode."
+			)
+
+	return result
 
 
 def _filter_valid_rois(rois):
@@ -770,3 +889,10 @@ def _merge_results_payload(out_path, partial_results, method_order=None):
             existing_estimates.sort(key=_order_key)
         data['estimates'] = existing_estimates
         _atomic_pickle_dump(data, out_path)
+    # Best-effort cleanup: keep lock file lifecycle short to avoid stale
+    # *.pkl.lock artifacts after successful single-process runs.
+    try:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except OSError:
+        pass

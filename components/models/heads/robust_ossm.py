@@ -39,12 +39,25 @@ _EXTRA_FIELDS = [
     'q_out', 'q_harm', 'q_burst',
     'freq_std_hz', 'amp_std',
     'g_z_eff',
+    'g_z_eff_raw',
     'qx_eff', 'qf_eff', 'rv_eff',
     'qx_base', 'qf_base', 'rv_base',   # base params before trust scaling
     'qx_used', 'qf_used',              # effective process-noise values used
     'rv_scaled', 'R_post',             # measurement-noise after trust / robust scaling
     'post_smooth_alpha_base', 'post_smooth_alpha_used',
 ]
+
+
+def _bounded_nonnegative_ratio(numer: float, denom: float, *, cap: float = 1.0) -> float:
+    """Return a finite, non-negative ratio clipped to [0, cap]."""
+    if not np.isfinite(numer):
+        return 0.0
+    if not np.isfinite(denom) or denom <= 0.0:
+        return 0.0
+    ratio = max(0.0, float(numer) / float(denom))
+    if np.isfinite(cap) and cap > 0.0:
+        ratio = min(ratio, float(cap))
+    return float(ratio)
 
 
 class oscillator_RobustOSSM(_BaseOscillatorHead):
@@ -146,6 +159,8 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 vb_iters=int(p.vb_iters),
                 eig_floor=1e-9,
                 trace_cap=float(p.trace_cap),
+                lambda_floor=float(getattr(p, "lambda_floor", 1e-3)),
+                r_eff_max_scale=float(getattr(p, "r_eff_max_scale", 80.0)),
             )
 
         trust_cfg_obj = None
@@ -156,6 +171,7 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             if t_kwargs:
                 trust_cfg_obj = TrustConfig(**t_kwargs)
         trust_alloc = TrustAllocator(cfg=trust_cfg_obj)
+        alpha_r_clip_max = float(max(getattr(trust_alloc.cfg, "alpha_R_max", 50.0), 1.0))
         monitor = FailureMonitor(f_ref=freq0)
         decoder = StateDecoder()
 
@@ -178,8 +194,12 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 f"Invalid gating_scope '{gating_scope}'. Allowed values: ['evaluation_only', 'filter_time']"
             )
         gating_supported = {
+            'profile',
             'debug.disable_gating',
             'spectral.peak_ratio_min',
+            'spectral.prominence_min_db',
+            'spectral.fwhm_max_hz',
+            'spectral.fwhm_df_guard',
             'tracker.std_min_bpm',
             'tracker.unique_min',
             'tracker.saturation_max',
@@ -207,6 +227,17 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             # Evaluation-only scope: no gating key is consumed in filter-time path.
             gating_consumed = []
             gating_unused = sorted(gating_seen)
+
+        profile_name = str((gating_cfg or {}).get('profile', 'paper')).strip().lower()
+        if profile_name in {'relaxed', 'loose'}:
+            spec_penalty_gain = 0.75
+            tracker_penalty_gain = 0.75
+        elif profile_name in {'strict', 'hard'}:
+            spec_penalty_gain = 1.25
+            tracker_penalty_gain = 1.25
+        else:
+            spec_penalty_gain = 1.0
+            tracker_penalty_gain = 1.0
         
         # Retrieve per-frame ROI stats if available (P1), normalized to canonical schema.
         roi_stats_seq = normalize_roi_stats_t((meta or {}).get('roi_stats_t'), n)
@@ -261,11 +292,104 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                         ):
                             ratio_min = spec_cfg.get('peak_ratio_min')
                             if isinstance(ratio_min, (int, float, np.floating)) and ratio_min > 0:
-                                deficit = max(0.0, float(ratio_min - peak_ratio) / float(ratio_min))
+                                deficit = _bounded_nonnegative_ratio(
+                                    float(ratio_min) - float(peak_ratio),
+                                    float(ratio_min),
+                                    cap=1.0,
+                                )
                                 if deficit > 0.0:
-                                    trust.alpha_R = float(np.clip(trust.alpha_R * (1.0 + 0.5 * deficit), 1.0, 50.0))
-                                    trust.g_t = float(np.clip(trust.g_t * (1.0 - 0.6 * deficit), 0.0, 1.0))
-                                    trust.g_z = float(np.clip(trust.g_z * (1.0 - 0.8 * deficit), 0.0, 1.0))
+                                    trust.alpha_R = float(np.clip(
+                                        trust.alpha_R * (1.0 + 0.5 * spec_penalty_gain * deficit),
+                                        1.0,
+                                        alpha_r_clip_max,
+                                    ))
+                                    trust.g_t = float(np.clip(
+                                        trust.g_t * (1.0 - 0.6 * spec_penalty_gain * deficit),
+                                        0.0,
+                                        1.0,
+                                    ))
+                                    trust.g_z = float(np.clip(
+                                        trust.g_z * (1.0 - 0.8 * spec_penalty_gain * deficit),
+                                        0.0,
+                                        1.0,
+                                    ))
+
+                        if isinstance(spec_cfg, dict):
+                            prom_db = (meta or {}).get('welch_prom_db')
+                            prom_min = spec_cfg.get('prominence_min_db')
+                            if (
+                                isinstance(prom_db, (int, float, np.floating)) and np.isfinite(prom_db) and
+                                isinstance(prom_min, (int, float, np.floating))
+                            ):
+                                # NOTE:
+                                # `welch_prom_db` can be strongly negative when the spectral peak is broad/weak.
+                                # Raw relative deficit can explode and collapse gates to 0.0.
+                                # We bound the deficit to keep the spectral gate effect soft and stable.
+                                # Map prominence mismatch onto a wide dB span so that
+                                # moderately negative `welch_prom_db` does not immediately
+                                # saturate to full penalty on every frame.
+                                prom_scale_db = max(abs(float(prom_min)), 20.0)
+                                prom_def = _bounded_nonnegative_ratio(
+                                    float(prom_min) - float(prom_db),
+                                    prom_scale_db,
+                                    cap=1.0,
+                                )
+                                if prom_def > 0.0:
+                                    trust.alpha_R = float(np.clip(
+                                        trust.alpha_R * (1.0 + 0.4 * spec_penalty_gain * prom_def),
+                                        1.0,
+                                        alpha_r_clip_max,
+                                    ))
+                                    trust.g_t = float(np.clip(
+                                        trust.g_t * (1.0 - 0.45 * spec_penalty_gain * prom_def),
+                                        0.0,
+                                        1.0,
+                                    ))
+                                    trust.g_z = float(np.clip(
+                                        trust.g_z * (1.0 - 0.65 * spec_penalty_gain * prom_def),
+                                        0.0,
+                                        1.0,
+                                    ))
+
+                            fwhm_hz = (meta or {}).get('welch_fwhm_hz')
+                            fwhm_max = spec_cfg.get('fwhm_max_hz')
+                            fwhm_df_guard = spec_cfg.get('fwhm_df_guard')
+                            welch_df_hz = (meta or {}).get('welch_df_hz')
+                            fwhm_guard_ok = True
+                            if (
+                                isinstance(fwhm_df_guard, (int, float, np.floating)) and
+                                isinstance(welch_df_hz, (int, float, np.floating)) and
+                                np.isfinite(welch_df_hz) and float(fwhm_df_guard) > 0.0
+                            ):
+                                min_resolved = float(fwhm_df_guard) * float(welch_df_hz)
+                                if isinstance(fwhm_max, (int, float, np.floating)):
+                                    fwhm_guard_ok = float(fwhm_max) > min_resolved
+                            if (
+                                fwhm_guard_ok and
+                                isinstance(fwhm_hz, (int, float, np.floating)) and np.isfinite(fwhm_hz) and
+                                isinstance(fwhm_max, (int, float, np.floating)) and float(fwhm_max) > 0.0
+                            ):
+                                fwhm_excess = _bounded_nonnegative_ratio(
+                                    float(fwhm_hz) - float(fwhm_max),
+                                    float(fwhm_max),
+                                    cap=2.0,
+                                )
+                                if fwhm_excess > 0.0:
+                                    trust.alpha_R = float(np.clip(
+                                        trust.alpha_R * (1.0 + 0.35 * spec_penalty_gain * fwhm_excess),
+                                        1.0,
+                                        alpha_r_clip_max,
+                                    ))
+                                    trust.g_t = float(np.clip(
+                                        trust.g_t * (1.0 - 0.25 * spec_penalty_gain * fwhm_excess),
+                                        0.0,
+                                        1.0,
+                                    ))
+                                    trust.g_z = float(np.clip(
+                                        trust.g_z * (1.0 - 0.7 * spec_penalty_gain * fwhm_excess),
+                                        0.0,
+                                        1.0,
+                                    ))
 
                         tracker_cfg = gating_cfg.get('tracker', {})
                         if isinstance(tracker_cfg, dict):
@@ -281,6 +405,7 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                                     if std_bpm < float(std_min_bpm):
                                         if bool(tracker_cfg.get('std_is_soft', True)):
                                             scale = float(np.clip(std_bpm / float(std_min_bpm), 0.05, 1.0))
+                                            scale = float(scale ** tracker_penalty_gain)
                                             trust.g_z = float(np.clip(trust.g_z * scale, 0.0, 1.0))
                                         else:
                                             trust.g_z = 0.0
@@ -290,6 +415,7 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                                     uniq_ratio = float(np.unique(np.round(hist, 2)).size / hist.size)
                                     if uniq_ratio < float(unique_min):
                                         scale = float(np.clip(uniq_ratio / float(unique_min), 0.05, 1.0))
+                                        scale = float(scale ** tracker_penalty_gain)
                                         trust.g_z = float(np.clip(trust.g_z * scale, 0.0, 1.0))
 
                                 saturation_max = tracker_cfg.get('saturation_max')
@@ -303,8 +429,16 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                                     sat_ratio = float(np.mean(sat))
                                     if sat_ratio > float(saturation_max):
                                         excess = sat_ratio - float(saturation_max)
-                                        trust.alpha_R = float(np.clip(trust.alpha_R * (1.0 + excess), 1.0, 50.0))
-                                        trust.g_z = float(np.clip(trust.g_z * (1.0 - excess), 0.0, 1.0))
+                                        trust.alpha_R = float(np.clip(
+                                            trust.alpha_R * (1.0 + tracker_penalty_gain * excess),
+                                            1.0,
+                                            alpha_r_clip_max,
+                                        ))
+                                        trust.g_z = float(np.clip(
+                                            trust.g_z * (1.0 - tracker_penalty_gain * excess),
+                                            0.0,
+                                            1.0,
+                                        ))
 
             # 3. Robust update (Algorithm 1)
             R_scaled = predictor.build_R(alpha_R=trust.alpha_R)
@@ -324,7 +458,13 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
 
             # P1-6: Wire harmonic suppression into frequency gate
             # gate_z_eff = g_z * w_h (structure-preserving: w_h=1 when no harmonic → no change)
-            gate_z_eff = trust.g_z * trust.w_h
+            gate_z_eff_raw = float(trust.g_z * trust.w_h)
+            gate_z_floor_ratio = float(max(getattr(p, "g_z_eff_floor_ratio", 0.0), 0.0))
+            if trust.g_t > 0.0 and gate_z_floor_ratio > 0.0:
+                gate_z_eff = max(gate_z_eff_raw, gate_z_floor_ratio * trust.g_t)
+            else:
+                gate_z_eff = gate_z_eff_raw
+            gate_z_eff = float(np.clip(gate_z_eff, 0.0, 1.0))
 
             result = updater.update(
                 x_pred, P_pred, y[t], H, R_scaled,
@@ -332,12 +472,19 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             )
 
             # 4. Post-update clamp (P0-3)
-            predictor.clamp_state(result.x)
+            x_candidate = predictor.clamp_state(np.asarray(result.x, dtype=np.float64).copy())
+            P_candidate = predictor.sanitize_covariance(np.asarray(result.P, dtype=np.float64))
 
-            # 5. Accept state
-            x = result.x
-            P = result.P
-            nis_prev = result.nis
+            # 5. Accept state (or safe re-init on numeric blow-up)
+            if (not np.all(np.isfinite(x_candidate))) or (not np.all(np.isfinite(P_candidate))):
+                x, P = predictor.init_state(freq0)
+                monitor.reset(f_ref=freq0)
+                trust_alloc.reset()
+                nis_prev = 0.0
+            else:
+                x = x_candidate
+                P = P_candidate
+                nis_prev = float(result.nis) if np.isfinite(result.nis) else 0.0
 
             # 6. Decode
             state = decoder.decode(x, P)
@@ -376,6 +523,7 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 K_x2=float(result.K[1]),
                 K_z=float(result.K[2]) if len(result.K) >= 3 else 0.0,
                 g_z_eff=gate_z_eff,
+                g_z_eff_raw=gate_z_eff_raw,
                 q_vis=quality['q_vis'],
                 q_drift=quality['q_drift'],
                 q_cons=quality['q_cons'],
@@ -477,6 +625,7 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             'student_t_nu': self.nu if not self.eda_baseline else float('inf'),
             'predict_method': self.predict_method,
             'eda_baseline': self.eda_baseline,
+            'no_autotune': bool(getattr(self.params, 'no_autotune', False)),
             'gating_scope_used': gating_scope,
             'gating_consumed_keys': gating_consumed,
             'gating_unused_keys': gating_unused,

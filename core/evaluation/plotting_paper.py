@@ -156,8 +156,8 @@ def plot_trace_paper(times, sig_est, bpm_est, sig_gt=None, bpm_gt=None, title="S
 def _method_sort_key(method_name: str):
     """Hierarchical sort key for grouping methods."""
     name = str(method_name).lower().replace(' ', '_')
-    if 'dof' in name: family = 10
-    elif 'of_farneback' in name or 'of_model' in name: family = 20
+    if 'of_farneback' in name or 'of_model' in name: family = 10
+    elif 'dof' in name: family = 20
     elif 'profile1d_linear' in name: family = 30
     elif 'profile1d_quadratic' in name: family = 40
     elif 'profile1d_cubic' in name: family = 50

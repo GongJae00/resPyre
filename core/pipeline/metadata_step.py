@@ -123,19 +123,28 @@ def write_run_status(
     prev = _load_json(status_path)
     started_at = None
     prev_run_instance = None
+    prev_completed_at = None
     if isinstance(prev, dict):
         started_at = prev.get("started_at")
         prev_run_instance = prev.get("run_instance_started_at")
+        prev_completed_at = prev.get("completed_at")
     now_iso = datetime.utcnow().isoformat() + "Z"
-    if str(status).lower() == "running":
+    status_l = str(status).lower()
+    if status_l == "running":
         run_instance_started_at = now_iso
+        completed_at = None
     else:
         run_instance_started_at = prev_run_instance or started_at or now_iso
+        if status_l in {"completed", "failed"}:
+            completed_at = now_iso
+        else:
+            completed_at = prev_completed_at
     payload = {
         "schema_version": "run_status.v1",
         "status": str(status),
         "started_at": started_at or now_iso,
         "run_instance_started_at": run_instance_started_at,
+        "completed_at": completed_at,
         "updated_at": now_iso,
         "command": command,
         "config_path": config_path,
@@ -221,6 +230,21 @@ def _default_artifacts(run_dir: Path) -> Dict[str, str]:
         diag_pkl = metrics_dir / 'metrics_filter_diagnostics.pkl'
         if diag_pkl.exists():
             artifacts['metrics_filter_diag_pickle'] = str(diag_pkl.resolve())
+        calib_split = metrics_dir / 'metrics_filter_calibration_split.csv'
+        if calib_split.exists():
+            artifacts['metrics_filter_calibration_split_csv'] = str(calib_split.resolve())
+        calib_split_all = metrics_dir / 'metrics_filter_calibration_split_all.csv'
+        if calib_split_all.exists():
+            artifacts['metrics_filter_calibration_split_all_csv'] = str(calib_split_all.resolve())
+        calib_split_json = metrics_dir / 'metrics_filter_calibration_split.json'
+        if calib_split_json.exists():
+            artifacts['metrics_filter_calibration_split_json'] = str(calib_split_json.resolve())
+        calib_split_txt = metrics_dir / 'metrics_filter_calibration_split.txt'
+        if calib_split_txt.exists():
+            artifacts['metrics_filter_calibration_split_txt'] = str(calib_split_txt.resolve())
+        resolver_diag = metrics_dir / 'resolver_diag.json'
+        if resolver_diag.exists():
+            artifacts['frame_log_resolver_diag'] = str(resolver_diag.resolve())
         # Legacy single-file name
         legacy_pkl = metrics_dir / 'metrics.pkl'
         if legacy_pkl.exists():

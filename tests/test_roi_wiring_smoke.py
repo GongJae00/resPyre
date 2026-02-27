@@ -5,7 +5,7 @@ import numpy as np
 
 from components.models.core.base import OscillatorParams
 from components.models.heads.robust_ossm import oscillator_RobustOSSM
-from core.pipeline.wrapped_method import OscillatorWrappedMethod
+from core.pipeline.wrapped_method import OscillatorWrappedMethod, compute_roi_stats_time_series, save_roi_stats_cache
 
 
 def test_roi_stats_generation_has_required_keys():
@@ -53,3 +53,100 @@ def test_roi_quality_wiring_changes_qvis_and_alpha_r():
     alpha_R = arr[:, fields.index("alpha_R")]
     assert np.mean(q_vis[:20]) > np.mean(q_vis[20:])
     assert np.mean(alpha_R[:20]) < np.mean(alpha_R[20:])
+
+
+def test_roi_stats_disk_cache_reuse(monkeypatch):
+    tmp = tempfile.mkdtemp(prefix="roi_cache_")
+    video_path = os.path.join(tmp, "sample.avi")
+    with open(video_path, "wb"):
+        pass
+
+    rois = [
+        np.ones((12, 12), dtype=np.float32) * 100.0,
+        np.ones((12, 12), dtype=np.float32) * 98.0,
+        np.ones((12, 12), dtype=np.float32) * 102.0,
+    ]
+    wrapper = OscillatorWrappedMethod("dof", "robust_ossm")
+
+    monkeypatch.setattr(wrapper.base_method, "process", lambda _data: np.zeros(16, dtype=np.float64))
+
+    def _fake_run(base_signal, fs, meta):
+        n = int(base_signal.size)
+        return {
+            "signal_hat": np.asarray(base_signal, dtype=np.float32),
+            "track_hz": np.full(n, 0.25, dtype=np.float32),
+            "rr_hz": 0.25,
+            "rr_bpm": 15.0,
+            "meta": "{}",
+        }
+
+    monkeypatch.setattr(wrapper.osc_head, "run", _fake_run)
+
+    data1 = {
+        "video_path": video_path,
+        "fps": 20.0,
+        "dataset_name": "dummy",
+        "chest_rois": rois,
+    }
+    wrapper.process(data1)
+    assert data1.get("roi_stats_source") == "computed"
+    cache_path = os.path.join(tmp, "obs_roi_stats_v1.npz")
+    assert os.path.exists(cache_path)
+
+    data2 = {
+        "video_path": video_path,
+        "fps": 20.0,
+        "dataset_name": "dummy",
+        "chest_rois": rois,
+    }
+    monkeypatch.setattr(
+        wrapper,
+        "_roi_stats_time_series",
+        lambda _rois: (_ for _ in ()).throw(AssertionError("should not recompute roi stats")),
+    )
+    wrapper.process(data2)
+    assert data2.get("roi_stats_source") == "disk_cache"
+    assert isinstance(data2.get("roi_stats_t"), list) and len(data2["roi_stats_t"]) == len(rois)
+
+
+def test_wrapped_method_requires_roi_source_when_no_rois(monkeypatch):
+    tmp = tempfile.mkdtemp(prefix="roi_missing_src_")
+    video_path = os.path.join(tmp, "sample.avi")
+    with open(video_path, "wb"):
+        pass
+
+    wrapper = OscillatorWrappedMethod("dof", "robust_ossm")
+    monkeypatch.setattr(wrapper.base_method, "process", lambda _data: np.zeros(16, dtype=np.float64))
+
+    data = {
+        "video_path": video_path,
+        "fps": 20.0,
+        "dataset_name": "dummy",
+        "chest_rois": [],
+    }
+    try:
+        wrapper.process(data)
+    except ValueError as exc:
+        assert "cannot build roi_stats_t without chest ROIs" in str(exc)
+    else:
+        raise AssertionError("expected ValueError when no chest ROIs and no roi_stats cache")
+
+
+def test_can_run_without_chest_rois_with_disk_caches():
+    tmp = tempfile.mkdtemp(prefix="roi_cacheonly_ready_")
+    video_path = os.path.join(tmp, "sample.avi")
+    with open(video_path, "wb"):
+        pass
+
+    # Base observation cache required by cache-only path.
+    np.save(os.path.join(tmp, "obs_dof.npy"), np.zeros(32, dtype=np.float32))
+    wrapper = OscillatorWrappedMethod("dof", "robust_ossm")
+
+    data = {"video_path": video_path, "chest_rois": []}
+    assert wrapper.can_run_without_chest_rois(data) is False
+
+    rois = [np.ones((8, 8), dtype=np.float32) * 100.0 for _ in range(5)]
+    stats_t, _, _, _ = compute_roi_stats_time_series(rois)
+    save_roi_stats_cache(video_path, 20.0, stats_t)
+
+    assert wrapper.can_run_without_chest_rois(data) is True

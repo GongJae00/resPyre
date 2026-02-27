@@ -1,70 +1,575 @@
 {
-  "name": "cohface_robust_ossm_phase0_baseline",
-  "results_dir": "results",
-  "datasets": [
-    {
-      "name": "COHFACE",
-      "roi": {
-        "chest": {
-          "mp_complexity": 1,
-          "skip_rate": 10
+    "name": "cohface_robust_ossm_phase0_baseline",
+    "results_dir": "results",
+    "datasets": [
+        {
+            "name": "COHFACE",
+            "roi": {
+                "chest": {
+                    "mp_complexity": 1,
+                    "skip_rate": 10
+                }
+            }
         }
-      }
-    }
-  ],
-  "methods": [
-    {
-      "name": "of_farneback__robust_ossm_ekf",
-      "params": {
-        "oscillator": {
-          "predict_method": "ekf",
-          "eda_baseline": true,
-          "student_t_nu": 15.0,
-          "qx": 0.005,
-          "qf": 0.005,
-          "rv_floor": 0.05,
-          "tau_env": 32
+    ],
+    "methods": [
+        {
+            "name": "of_farneback__robust_ossm_ekf",
+            "params": {
+                "oscillator": {
+                    "predict_method": "ekf",
+                    "eda_baseline": true
+                }
+            }
+        },
+        {
+            "name": "profile1d_quadratic__robust_ossm_ekf",
+            "params": {
+                "oscillator": {
+                    "predict_method": "ekf",
+                    "eda_baseline": true
+                }
+            }
         }
-      }
+    ],
+    "eval": {
+        "win_size": 30,
+        "stride": 1,
+        "min_hz": 0.08,
+        "max_hz": 0.5
     },
-    {
-      "name": "profile1d_quadratic__robust_ossm_ekf",
-      "params": {
-        "oscillator": {
-          "predict_method": "ekf",
-          "eda_baseline": true,
-          "student_t_nu": 15.0,
-          "qx": 0.005,
-          "qf": 0.005,
-          "rv_floor": 0.05,
-          "tau_env": 32
+    "oscillator": {
+        "f_min": 0.08,
+        "f_max": 0.5,
+        "predict_method": "ekf",
+        "no_autotune": true,
+        "em_mode": "off",
+        "qx": 0.00035,
+        "qf": 8e-05,
+        "rv_floor": 0.015,
+        "rv_mad_scale": 1.0,
+        "tau_env": 56,
+        "student_t_nu": 10.0,
+        "vb_iters": 2,
+        "trace_cap": 150.0,
+        "lambda_floor": 0.0015,
+        "r_eff_max_scale": 50.0,
+        "g_z_eff_floor_ratio": 0.16,
+        "post_smooth_alpha": 0.84,
+        "spec_guidance_strength": 1.15,
+        "spec_guidance_offset": 0.32
+    },
+    "preproc": {
+        "robust_zscore": {
+            "enabled": true,
+            "eps": 1e-06,
+            "clip": 2.5
+        },
+        "sign_align": {
+            "enabled": true,
+            "seconds": 10.0
         }
-      }
+    },
+    "steps": [
+        "estimate",
+        "evaluate",
+        "eda",
+        "metadata"
+    ],
+    "trust": {
+        "beta_1": 1.4,
+        "beta_2": 1.1,
+        "gamma_1": 2.2,
+        "w_gate_vis": 1.5,
+        "w_gate_cons": 1.4,
+        "w_gate_nis": 0.7,
+        "gate_bias": 0.85,
+        "freq_jitter_decay": 0.8,
+        "thd_max": 0.4,
+        "w_h_min": 0.25,
+        "g_z_floor": 0.12,
+        "nis_hard_gate": 16.0,
+        "alpha_R_max": 20.0,
+        "alpha_Q_max": 5.0
+    },
+    "optuna": {
+        "search_space": {
+            "robust_ossm_ekf": [
+                {
+                    "path": "oscillator.qx",
+                    "kind": "float",
+                    "low": 2e-05,
+                    "high": 0.003,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.qf",
+                    "kind": "float",
+                    "low": 2e-06,
+                    "high": 0.0005,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.rv_floor",
+                    "kind": "float",
+                    "low": 0.002,
+                    "high": 0.04,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.rv_mad_scale",
+                    "kind": "float",
+                    "low": 0.6,
+                    "high": 1.8
+                },
+                {
+                    "path": "oscillator.tau_env",
+                    "kind": "float",
+                    "low": 20.0,
+                    "high": 120.0
+                },
+                {
+                    "path": "oscillator.student_t_nu",
+                    "kind": "float",
+                    "low": 4.0,
+                    "high": 20.0
+                },
+                {
+                    "path": "oscillator.trace_cap",
+                    "kind": "float",
+                    "low": 40.0,
+                    "high": 260.0
+                },
+                {
+                    "path": "oscillator.lambda_floor",
+                    "kind": "float",
+                    "low": 0.0008,
+                    "high": 0.008,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.r_eff_max_scale",
+                    "kind": "float",
+                    "low": 20.0,
+                    "high": 100.0
+                },
+                {
+                    "path": "oscillator.g_z_eff_floor_ratio",
+                    "kind": "float",
+                    "low": 0.06,
+                    "high": 0.25
+                },
+                {
+                    "path": "oscillator.post_smooth_alpha",
+                    "kind": "float",
+                    "low": 0.72,
+                    "high": 0.94
+                },
+                {
+                    "path": "oscillator.spec_guidance_strength",
+                    "kind": "float",
+                    "low": 0.5,
+                    "high": 1.6
+                },
+                {
+                    "path": "oscillator.spec_guidance_offset",
+                    "kind": "float",
+                    "low": 0.1,
+                    "high": 0.45
+                },
+                {
+                    "path": "trust.beta_1",
+                    "kind": "float",
+                    "low": 0.8,
+                    "high": 2.6
+                },
+                {
+                    "path": "trust.beta_2",
+                    "kind": "float",
+                    "low": 0.6,
+                    "high": 2.4
+                },
+                {
+                    "path": "trust.gamma_1",
+                    "kind": "float",
+                    "low": 1.0,
+                    "high": 3.2
+                },
+                {
+                    "path": "trust.w_gate_nis",
+                    "kind": "float",
+                    "low": 0.2,
+                    "high": 1.2
+                },
+                {
+                    "path": "trust.nis_hard_gate",
+                    "kind": "float",
+                    "low": 10.0,
+                    "high": 30.0
+                },
+                {
+                    "path": "trust.alpha_R_max",
+                    "kind": "float",
+                    "low": 10.0,
+                    "high": 30.0
+                },
+                {
+                    "path": "trust.alpha_Q_max",
+                    "kind": "float",
+                    "low": 2.5,
+                    "high": 6.0
+                },
+                {
+                    "path": "quality.vis_snr_low_db",
+                    "kind": "float",
+                    "low": -12.0,
+                    "high": -4.0
+                },
+                {
+                    "path": "quality.vis_snr_high_db",
+                    "kind": "float",
+                    "low": 12.0,
+                    "high": 22.0
+                },
+                {
+                    "path": "quality.drift_scale",
+                    "kind": "float",
+                    "low": 0.08,
+                    "high": 0.5
+                },
+                {
+                    "path": "quality.cons_window",
+                    "kind": "int",
+                    "low": 24,
+                    "high": 64
+                },
+                {
+                    "path": "quality.hampel_thresh",
+                    "kind": "float",
+                    "low": 2.0,
+                    "high": 4.2
+                },
+                {
+                    "path": "quality.harm_window_sec",
+                    "kind": "float",
+                    "low": 3.0,
+                    "high": 7.0
+                },
+                {
+                    "path": "preproc.robust_zscore.enabled",
+                    "kind": "choice",
+                    "choices": [
+                        true
+                    ]
+                },
+                {
+                    "path": "preproc.robust_zscore.clip",
+                    "kind": "float",
+                    "low": 2.0,
+                    "high": 4.0
+                },
+                {
+                    "path": "preproc.sign_align.enabled",
+                    "kind": "choice",
+                    "choices": [
+                        true
+                    ]
+                },
+                {
+                    "path": "preproc.sign_align.seconds",
+                    "kind": "float",
+                    "low": 8.0,
+                    "high": 14.0
+                }
+            ],
+            "robust_ossm_ukf": [
+                {
+                    "path": "oscillator.qx",
+                    "kind": "float",
+                    "low": 2e-05,
+                    "high": 0.003,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.qf",
+                    "kind": "float",
+                    "low": 2e-06,
+                    "high": 0.0005,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.rv_floor",
+                    "kind": "float",
+                    "low": 0.002,
+                    "high": 0.04,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.rv_mad_scale",
+                    "kind": "float",
+                    "low": 0.6,
+                    "high": 1.8
+                },
+                {
+                    "path": "oscillator.tau_env",
+                    "kind": "float",
+                    "low": 20.0,
+                    "high": 120.0
+                },
+                {
+                    "path": "oscillator.student_t_nu",
+                    "kind": "float",
+                    "low": 4.0,
+                    "high": 20.0
+                },
+                {
+                    "path": "oscillator.trace_cap",
+                    "kind": "float",
+                    "low": 40.0,
+                    "high": 260.0
+                },
+                {
+                    "path": "oscillator.lambda_floor",
+                    "kind": "float",
+                    "low": 0.0008,
+                    "high": 0.008,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.r_eff_max_scale",
+                    "kind": "float",
+                    "low": 20.0,
+                    "high": 100.0
+                },
+                {
+                    "path": "oscillator.g_z_eff_floor_ratio",
+                    "kind": "float",
+                    "low": 0.06,
+                    "high": 0.25
+                },
+                {
+                    "path": "oscillator.post_smooth_alpha",
+                    "kind": "float",
+                    "low": 0.72,
+                    "high": 0.94
+                },
+                {
+                    "path": "oscillator.spec_guidance_strength",
+                    "kind": "float",
+                    "low": 0.5,
+                    "high": 1.6
+                },
+                {
+                    "path": "oscillator.spec_guidance_offset",
+                    "kind": "float",
+                    "low": 0.1,
+                    "high": 0.45
+                },
+                {
+                    "path": "trust.beta_1",
+                    "kind": "float",
+                    "low": 0.8,
+                    "high": 2.6
+                },
+                {
+                    "path": "trust.beta_2",
+                    "kind": "float",
+                    "low": 0.6,
+                    "high": 2.4
+                },
+                {
+                    "path": "trust.gamma_1",
+                    "kind": "float",
+                    "low": 1.0,
+                    "high": 3.2
+                },
+                {
+                    "path": "trust.w_gate_nis",
+                    "kind": "float",
+                    "low": 0.2,
+                    "high": 1.2
+                },
+                {
+                    "path": "trust.nis_hard_gate",
+                    "kind": "float",
+                    "low": 10.0,
+                    "high": 30.0
+                },
+                {
+                    "path": "trust.alpha_R_max",
+                    "kind": "float",
+                    "low": 10.0,
+                    "high": 30.0
+                },
+                {
+                    "path": "trust.alpha_Q_max",
+                    "kind": "float",
+                    "low": 2.5,
+                    "high": 6.0
+                },
+                {
+                    "path": "quality.vis_snr_low_db",
+                    "kind": "float",
+                    "low": -12.0,
+                    "high": -4.0
+                },
+                {
+                    "path": "quality.vis_snr_high_db",
+                    "kind": "float",
+                    "low": 12.0,
+                    "high": 22.0
+                },
+                {
+                    "path": "quality.drift_scale",
+                    "kind": "float",
+                    "low": 0.08,
+                    "high": 0.5
+                },
+                {
+                    "path": "quality.cons_window",
+                    "kind": "int",
+                    "low": 24,
+                    "high": 64
+                },
+                {
+                    "path": "quality.hampel_thresh",
+                    "kind": "float",
+                    "low": 2.0,
+                    "high": 4.2
+                },
+                {
+                    "path": "quality.harm_window_sec",
+                    "kind": "float",
+                    "low": 3.0,
+                    "high": 7.0
+                },
+                {
+                    "path": "preproc.robust_zscore.enabled",
+                    "kind": "choice",
+                    "choices": [
+                        true
+                    ]
+                },
+                {
+                    "path": "preproc.robust_zscore.clip",
+                    "kind": "float",
+                    "low": 2.0,
+                    "high": 4.0
+                },
+                {
+                    "path": "preproc.sign_align.enabled",
+                    "kind": "choice",
+                    "choices": [
+                        true
+                    ]
+                },
+                {
+                    "path": "preproc.sign_align.seconds",
+                    "kind": "float",
+                    "low": 8.0,
+                    "high": 14.0
+                },
+                {
+                    "path": "oscillator.ukf_alpha",
+                    "kind": "float",
+                    "low": 0.0008,
+                    "high": 0.03,
+                    "log": true
+                },
+                {
+                    "path": "oscillator.ukf_beta",
+                    "kind": "float",
+                    "low": 1.6,
+                    "high": 3.2
+                },
+                {
+                    "path": "oscillator.ukf_kappa",
+                    "kind": "float",
+                    "low": -0.2,
+                    "high": 0.8
+                }
+            ]
+        },
+        "family_defaults": {
+            "robust_ossm_ekf": {
+                "oscillator.predict_method": "ekf",
+                "oscillator.eda_baseline": false,
+                "oscillator.no_autotune": true,
+                "oscillator.em_mode": "off",
+                "oscillator.qx": 0.00035,
+                "oscillator.qf": 8e-05,
+                "oscillator.rv_floor": 0.015,
+                "oscillator.rv_mad_scale": 1.0,
+                "oscillator.tau_env": 56.0,
+                "oscillator.student_t_nu": 10.0,
+                "oscillator.vb_iters": 2,
+                "oscillator.trace_cap": 150.0,
+                "oscillator.lambda_floor": 0.0015,
+                "oscillator.r_eff_max_scale": 50.0,
+                "oscillator.g_z_eff_floor_ratio": 0.16,
+                "oscillator.post_smooth_alpha": 0.84,
+                "oscillator.spec_guidance_strength": 1.15,
+                "oscillator.spec_guidance_offset": 0.32,
+                "trust.beta_1": 1.4,
+                "trust.beta_2": 1.1,
+                "trust.gamma_1": 2.2,
+                "trust.w_gate_vis": 1.5,
+                "trust.w_gate_cons": 1.4,
+                "trust.w_gate_nis": 0.7,
+                "trust.gate_bias": 0.85,
+                "trust.freq_jitter_decay": 0.8,
+                "trust.thd_max": 0.4,
+                "trust.w_h_min": 0.25,
+                "trust.g_z_floor": 0.12,
+                "trust.nis_hard_gate": 16.0,
+                "trust.alpha_R_max": 20.0,
+                "trust.alpha_Q_max": 5.0,
+                "preproc.robust_zscore.enabled": true,
+                "preproc.robust_zscore.clip": 2.5,
+                "preproc.sign_align.enabled": true,
+                "preproc.sign_align.seconds": 10.0
+            },
+            "robust_ossm_ukf": {
+                "oscillator.predict_method": "ukf",
+                "oscillator.eda_baseline": false,
+                "oscillator.no_autotune": true,
+                "oscillator.em_mode": "off",
+                "oscillator.qx": 0.00035,
+                "oscillator.qf": 8e-05,
+                "oscillator.rv_floor": 0.015,
+                "oscillator.rv_mad_scale": 1.0,
+                "oscillator.tau_env": 56.0,
+                "oscillator.student_t_nu": 10.0,
+                "oscillator.vb_iters": 2,
+                "oscillator.trace_cap": 150.0,
+                "oscillator.lambda_floor": 0.0015,
+                "oscillator.r_eff_max_scale": 50.0,
+                "oscillator.g_z_eff_floor_ratio": 0.16,
+                "oscillator.post_smooth_alpha": 0.84,
+                "oscillator.spec_guidance_strength": 1.15,
+                "oscillator.spec_guidance_offset": 0.32,
+                "trust.beta_1": 1.4,
+                "trust.beta_2": 1.1,
+                "trust.gamma_1": 2.2,
+                "trust.w_gate_vis": 1.5,
+                "trust.w_gate_cons": 1.4,
+                "trust.w_gate_nis": 0.7,
+                "trust.gate_bias": 0.85,
+                "trust.freq_jitter_decay": 0.8,
+                "trust.thd_max": 0.4,
+                "trust.w_h_min": 0.25,
+                "trust.g_z_floor": 0.12,
+                "trust.nis_hard_gate": 16.0,
+                "trust.alpha_R_max": 20.0,
+                "trust.alpha_Q_max": 5.0,
+                "preproc.robust_zscore.enabled": true,
+                "preproc.robust_zscore.clip": 2.5,
+                "preproc.sign_align.enabled": true,
+                "preproc.sign_align.seconds": 10.0,
+                "oscillator.ukf_alpha": 0.005,
+                "oscillator.ukf_beta": 2.0,
+                "oscillator.ukf_kappa": 0.0
+            }
+        }
     }
-  ],
-  "eval": {
-    "win_size": 30,
-    "stride": 1,
-    "min_hz": 0.08,
-    "max_hz": 0.5
-  },
-  "oscillator": {
-    "f_min": 0.08,
-    "f_max": 0.5,
-    "tau_env": 32
-  },
-  "preproc": {
-    "robust_zscore": {
-      "enabled": true,
-      "eps": 1e-06,
-      "clip": 2.5
-    }
-  },
-  "steps": [
-    "estimate",
-    "evaluate",
-    "eda",
-    "metadata"
-  ]
 }
-

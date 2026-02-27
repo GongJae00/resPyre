@@ -95,9 +95,28 @@ def analyze_step4_residual(y_clean):
     # ── 1. Student-t vs Gaussian AIC ──
     try:
         from scipy.stats import t as t_dist, norm as norm_dist
-        # Fit Student-t (3 params: ν, loc, scale)
-        t_params = t_dist.fit(innovation_norm)
+        import scipy.optimize as opt
+        
+        # Helper for robust Student-t fit
+        def robust_t_fit(data_norm):
+            def nll(params):
+                nu, loc, scale = params
+                if nu <= 1.05 or scale <= 1e-6:
+                    return 1e10
+                val = -np.sum(t_dist.logpdf(data_norm, df=nu, loc=loc, scale=scale))
+                if nu > 100:
+                    val += (nu - 100) * 0.01  # weak penalty to keep nu bounded if Data is Gaussian
+                return val
+                
+            res = opt.minimize(nll, x0=[5.0, 0.0, 1.0], method='L-BFGS-B', bounds=[(1.1, 500), (None, None), (1e-6, None)])
+            if res.success:
+                return res.x
+            else:
+                return t_dist.fit(data_norm)
+
+        t_params = robust_t_fit(innovation_norm)
         t_ll = np.sum(t_dist.logpdf(innovation_norm, *t_params))
+
         t_aic = 2 * 3 - 2 * t_ll  # k=3 params
         # Fit Gaussian (2 params: loc, scale)
         g_params = norm_dist.fit(innovation_norm)

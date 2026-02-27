@@ -79,7 +79,11 @@ class OscillatorParams:
     predict_method: str = "ekf"    # "ekf" or "ukf" for prediction step
     vb_iters: int = 1              # VB E-step iterations for λ
     trace_cap: float = 100.0       # Maximum trace(P) before scaling
+    lambda_floor: float = 1e-3     # lower bound for Student-t latent scale λ
+    r_eff_max_scale: float = 80.0  # cap R_eff <= r_eff_max_scale * R_scaled
+    g_z_eff_floor_ratio: float = 0.08  # floor for harmonic-suppressed frequency gate
     eda_baseline: bool = False     # Phase-0 EDA mode: no trust, Gaussian update (ν→∞)
+    no_autotune: bool = False      # skip loading autotune/EM overrides from disk
     detrend: bool = True
     bandpass: bool = True
     zscore: bool = True

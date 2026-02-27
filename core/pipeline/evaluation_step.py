@@ -25,6 +25,44 @@ PRIMARY_METRICS = ['RMSE', 'MAE', 'MAPE', 'R', 'SNR']
 METHOD_QUALITY_SCHEMA_VERSION = "method_quality.v1"
 CONFIG_USAGE_SCHEMA_VERSION = "config_usage.v1"
 
+
+def _resolve_calibration_policy(eval_cfg: Optional[Dict]) -> Dict[str, float]:
+    """Calibration policy used to separate strict-test failure vs practical miscalibration.
+
+    Strict test:
+    - NIS mean chi-square consistency test (`NIS_Pass` / `NIS_Pass_Strict`)
+
+    Relaxed practical test:
+    - |mean_nis - dof| <= nis_mean_tol_relaxed
+    - |nis_inband - nis_inband_target| <= nis_inband_tol_relaxed
+
+    This lets us label:
+    - NIS_OverStrict: strict fail but relaxed pass
+    - NIS_TrueFail: strict fail and relaxed fail
+    """
+    cfg = eval_cfg if isinstance(eval_cfg, dict) else {}
+    cal = cfg.get("calibration", {}) if isinstance(cfg.get("calibration", {}), dict) else {}
+
+    def _pick(name: str, default: float) -> float:
+        if name in cal:
+            try:
+                return float(cal.get(name, default))
+            except Exception:
+                return float(default)
+        try:
+            return float(cfg.get(name, default))
+        except Exception:
+            return float(default)
+
+    policy = {
+        "dof": max(1.0, _pick("nis_dof", 1.0)),
+        "alpha_strict": float(np.clip(_pick("nis_alpha_strict", 0.05), 1e-6, 0.5)),
+        "inband_target": float(np.clip(_pick("nis_inband_target", 0.95), 0.0, 1.0)),
+        "mean_tol_relaxed": max(0.0, _pick("nis_mean_tol_relaxed", 0.35)),
+        "inband_tol_relaxed": max(0.0, _pick("nis_inband_tol_relaxed", 0.08)),
+    }
+    return policy
+
 def _format_scalar(value, decimals=3):
     if isinstance(value, (float, np.floating)):
         if np.isnan(value):
@@ -80,13 +118,22 @@ def _build_config_usage(
             f"Invalid gating_scope '{gating_scope}'. Allowed values: ['evaluation_only', 'filter_time']"
         )
 
-    eval_used = {"win_size", "stride", "min_hz", "max_hz"}
+    eval_used = {
+        "win_size", "stride", "min_hz", "max_hz",
+        "calibration",
+        "nis_dof", "nis_alpha_strict", "nis_inband_target",
+        "nis_mean_tol_relaxed", "nis_inband_tol_relaxed",
+    }
     eval_seen = set(eval_cfg.keys())
     eval_unused = sorted(k for k in eval_seen if k not in eval_used)
 
     gating_supported = {
+        "profile",
         "debug.disable_gating",
         "spectral.peak_ratio_min",
+        "spectral.prominence_min_db",
+        "spectral.fwhm_df_guard",
+        "spectral.fwhm_max_hz",
         "tracker.std_min_bpm",
         "tracker.unique_min",
         "tracker.saturation_max",
@@ -436,6 +483,23 @@ def _collect_expected_method_trials(run_dir: str) -> List[Dict[str, object]]:
     return expected
 
 
+def _filter_expected_trials_for_frame_logs(
+    run_dir: str,
+    expected_trials: List[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    """Keep only expected trials for methods that have frame-log directories."""
+    out: List[Dict[str, object]] = []
+    for item in expected_trials:
+        method = str(item.get("method", "")).strip()
+        trial = str(item.get("trial", "")).strip()
+        if not method or not trial:
+            continue
+        log_dir = os.path.join(run_dir, "aux", method.replace(" ", "_"), "frame_logs")
+        if os.path.isdir(log_dir):
+            out.append(item)
+    return out
+
+
 def _compute_method_quality_records(
     run_dir: str,
     min_hz: float,
@@ -509,16 +573,23 @@ def _write_method_quality_artifacts(
     run_dir: str,
     eval_settings: Dict,
     expected_trials: Optional[List[Dict[str, object]]] = None,
+    frame_log_strict: bool = True,
 ) -> None:
     logs_dir = os.path.join(run_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
 
-    expected = expected_trials if isinstance(expected_trials, list) else _collect_expected_method_trials(run_dir)
-    selected, orphans, resolver_diag = resolve_frame_logs_for_run(
+    expected_raw = expected_trials if isinstance(expected_trials, list) else _collect_expected_method_trials(run_dir)
+    expected = _filter_expected_trials_for_frame_logs(run_dir, expected_raw)
+    resolution = resolve_frame_logs_for_run(
         run_dir,
         expected_trials=[{"method": str(x.get("method", "")), "trial": str(x.get("trial", ""))} for x in expected],
-        strict=True,
+        strict=bool(frame_log_strict),
+        allow_empty=True,
     )
+    selected = resolution.get("canonical", {})
+    orphans = resolution.get("extras", [])
+    missing_trials = resolution.get("missing", [])
+    resolver_diag = resolution.get("diag", {}) if isinstance(resolution, dict) else {}
     selected_details = resolver_diag.get("selected_details", {}) if isinstance(resolver_diag, dict) else {}
 
     min_hz = float(eval_settings.get("min_hz", 0.08))
@@ -587,9 +658,11 @@ def _write_method_quality_artifacts(
         "n_trials_total_expected": n_trials_total,
         "n_trials_with_logs": n_trials_with_logs,
         "n_trials_missing_logs": n_trials_missing,
+        "n_trials_missing_expected_in_resolver": int(len(missing_trials)),
         "n_orphan_logs_ignored": int(len(orphans)),
         "selection_policy": resolver_diag.get("selection_policy"),
         "run_instance_started_at_used": resolver_diag.get("run_instance_started_at_used"),
+        "resolver_diag": resolver_diag,
         "method_summary": method_summary,
         "frame_log_resolution_counts": resolution_counts,
         "frame_log_fallback_count": int(
@@ -690,6 +763,7 @@ def _compute_filter_diag_record(
     fps: float,
     est_track_hz: np.ndarray,
     gt_inst_hz: np.ndarray,
+    calibration_policy: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
     """Compute per-trial filter diagnostics from frame logs and tracks."""
     rec = {
@@ -702,7 +776,16 @@ def _compute_filter_diag_record(
         "Fail_Double": np.nan,
         "NIS_Mean": np.nan,
         "NIS_Pass": np.nan,
+        "NIS_Pass_Strict": np.nan,
+        "NIS_Pass_Relaxed": np.nan,
+        "NIS_OverStrict": np.nan,
+        "NIS_TrueFail": np.nan,
         "NIS_InBand": np.nan,
+        "NIS_InBand_Target": np.nan,
+        "NIS_InBand_DevAbs": np.nan,
+        "NIS_Mean_DevAbs": np.nan,
+        "NIS_CI_Lower": np.nan,
+        "NIS_CI_Upper": np.nan,
         "NIS_pval": np.nan,
         "Lambda_Mean": np.nan,
         "Lambda_LT1_Frac": np.nan,
@@ -749,17 +832,43 @@ def _compute_filter_diag_record(
     if fail_vals:
         rec["Fail_Total"] = float(max(fail_vals))
 
+    cal = calibration_policy if isinstance(calibration_policy, dict) else {}
+    dof = int(max(1, round(float(cal.get("dof", 1.0)))))
+    alpha_strict = float(np.clip(cal.get("alpha_strict", 0.05), 1e-6, 0.5))
+    inband_target = float(np.clip(cal.get("inband_target", 0.95), 0.0, 1.0))
+    mean_tol_relaxed = float(max(0.0, cal.get("mean_tol_relaxed", 0.35)))
+    inband_tol_relaxed = float(max(0.0, cal.get("inband_tol_relaxed", 0.08)))
+    rec["NIS_InBand_Target"] = inband_target
+
     nis = col("nis")
     if nis is not None and np.isfinite(nis).any():
-        nis_cal = metrics_lib.nis_calibration_chi2(nis, dof=1, alpha=0.05)
+        nis_cal = metrics_lib.nis_calibration_chi2(nis, dof=dof, alpha=alpha_strict)
         rec["NIS_Mean"] = float(nis_cal.get("mean_nis", np.nan))
-        rec["NIS_Pass"] = 1.0 if bool(nis_cal.get("pass_chi2", False)) else 0.0
+        strict_pass = bool(nis_cal.get("pass_chi2", False))
+        rec["NIS_Pass"] = 1.0 if strict_pass else 0.0
+        rec["NIS_Pass_Strict"] = rec["NIS_Pass"]
         rec["NIS_pval"] = float(nis_cal.get("pval", np.nan))
+        rec["NIS_CI_Lower"] = float(nis_cal.get("ci_lower", np.nan))
+        rec["NIS_CI_Upper"] = float(nis_cal.get("ci_upper", np.nan))
+        if np.isfinite(rec["NIS_Mean"]):
+            rec["NIS_Mean_DevAbs"] = float(abs(rec["NIS_Mean"] - float(dof)))
+
         nis_f = nis[np.isfinite(nis)]
         if nis_f.size > 0:
-            lo = float(chi2.ppf(0.025, 1))
-            hi = float(chi2.ppf(0.975, 1))
+            lo = float(chi2.ppf(0.025, dof))
+            hi = float(chi2.ppf(0.975, dof))
             rec["NIS_InBand"] = float(np.mean((nis_f >= lo) & (nis_f <= hi)))
+            rec["NIS_InBand_DevAbs"] = float(abs(rec["NIS_InBand"] - inband_target))
+
+        relaxed_pass = False
+        if np.isfinite(rec["NIS_Mean_DevAbs"]) and np.isfinite(rec["NIS_InBand_DevAbs"]):
+            relaxed_pass = bool(
+                rec["NIS_Mean_DevAbs"] <= mean_tol_relaxed and
+                rec["NIS_InBand_DevAbs"] <= inband_tol_relaxed
+            )
+        rec["NIS_Pass_Relaxed"] = 1.0 if relaxed_pass else 0.0
+        rec["NIS_OverStrict"] = 1.0 if ((not strict_pass) and relaxed_pass) else 0.0
+        rec["NIS_TrueFail"] = 1.0 if ((not strict_pass) and (not relaxed_pass)) else 0.0
 
     lam = col("lambda_t")
     if lam is not None and np.isfinite(lam).any():
@@ -794,6 +903,7 @@ def run_evaluation(
     eval_cfg: Optional[Dict] = None,
     gating_scope: str = "evaluation_only",
     strict_key_usage: bool = False,
+    frame_log_strict: bool = True,
 ):
     """
     Scans results and computes aggregate metrics using a strict Dual-Domain approach:
@@ -827,6 +937,7 @@ def run_evaluation(
             raise ValueError(
                 f"Invalid gating_scope '{gating_scope}'. Allowed values: ['evaluation_only', 'filter_time']"
             )
+        calibration_policy = _resolve_calibration_policy(eval_cfg)
 
         # Persist evaluation settings + config usage for audit/metadata.
         config_usage = _build_config_usage(eval_cfg, gating, gating_scope=scope)
@@ -841,8 +952,10 @@ def run_evaluation(
             'stride': float(stride),
             'min_hz': float(min_hz),
             'max_hz': float(max_hz),
+            'frame_log_strict': bool(frame_log_strict),
             'gating_scope': scope,
             'gating': copy.deepcopy(gating) if isinstance(gating, dict) else {},
+            'calibration': calibration_policy,
             'gating_note': (
                 "gating is evaluation-audit metadata; filter-time behavior is unchanged "
                 "unless wrapped methods explicitly run with gating_scope='filter_time'."
@@ -874,18 +987,34 @@ def run_evaluation(
         all_filter_diag_records = []
         frame_log_cache: Dict[str, Dict[str, np.ndarray]] = {}
         expected_trials = _collect_expected_method_trials(d_dir)
-        selected_logs, _, resolver_diag = resolve_frame_logs_for_run(
+        expected_trials_for_logs = _filter_expected_trials_for_frame_logs(d_dir, expected_trials)
+        resolution = resolve_frame_logs_for_run(
             d_dir,
-            expected_trials=[{"method": str(x.get("method", "")), "trial": str(x.get("trial", ""))} for x in expected_trials],
-            strict=True,
+            expected_trials=[{"method": str(x.get("method", "")), "trial": str(x.get("trial", ""))} for x in expected_trials_for_logs],
+            strict=bool(frame_log_strict),
+            allow_empty=True,
         )
+        selected_logs = resolution.get("canonical", {})
+        resolver_diag = resolution.get("diag", {}) if isinstance(resolution, dict) else {}
+        try:
+            with open(os.path.join(metrics_dir, "resolver_diag.json"), "w", encoding="utf-8") as fp:
+                json.dump({
+                    "schema_version": "frame_log_resolver_diag.v1",
+                    "frame_log_strict": bool(frame_log_strict),
+                    "resolver": resolver_diag,
+                    "missing": resolution.get("missing", []),
+                    "extras": resolution.get("extras", []),
+                }, fp, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            print(f"> Warning: failed to write resolver_diag.json for {dataset_name}: {exc}")
         
         # Metrics definitions
         time_metrics_list = ['CCC', 'MAE', 'RMSE', 'SNR_Time', 'Latency', 'DTW_Dist', 'IE_Err', 'PPI_MAE']
         freq_metrics_list = ['MAE', 'RMSE', 'MAPE', 'PearsonR', 'SNR_Spec', 'Bias', 'LoA_Width', 'KL_Div', 'Entropy_Err']
         filter_diag_metrics_list = [
             'Fail_Total', 'Fail_Div', 'Fail_Slip', 'Fail_Lock', 'Fail_Double',
-            'NIS_Mean', 'NIS_Pass', 'NIS_InBand', 'NIS_pval',
+            'NIS_Mean', 'NIS_Pass', 'NIS_OverStrict', 'NIS_TrueFail', 'NIS_Pass_Relaxed',
+            'NIS_InBand', 'NIS_Mean_DevAbs', 'NIS_InBand_DevAbs', 'NIS_pval',
             'Lambda_Mean', 'Lambda_LT1_Frac', 'Lambda_LowFrac',
             'Coverage95', 'FreqStd_Mean', 'Stability_Sec',
         ]
@@ -1080,6 +1209,7 @@ def run_evaluation(
                     fps=float(fps),
                     est_track_hz=est_track_hz if est_track_hz.size > 0 else None,
                     gt_inst_hz=gt_track_interp,
+                    calibration_policy=calibration_policy,
                 )
                 all_filter_diag_records.append(diag_rec)
 
@@ -1182,7 +1312,118 @@ def run_evaluation(
         _save_domain_v2(all_time_domain_records, 'time_domain', time_metrics_list)
         _save_domain_v2(all_freq_domain_records, 'freq_domain', freq_metrics_list)
         _save_domain_v2(all_filter_diag_records, 'filter_diagnostics', filter_diag_metrics_list)
-        _write_method_quality_artifacts(d_dir, eval_settings, expected_trials=expected_trials)
+
+        # Explicitly separate strict-test failures from practical miscalibration.
+        try:
+            fdf = pd.DataFrame(all_filter_diag_records)
+            if not fdf.empty and 'method' in fdf.columns:
+                def _safe_mean(series) -> float:
+                    arr = pd.to_numeric(series, errors='coerce').to_numpy(dtype=np.float64, copy=False)
+                    arr = arr[np.isfinite(arr)]
+                    return float(np.mean(arr)) if arr.size else float("nan")
+
+                def _safe_median(series) -> float:
+                    arr = pd.to_numeric(series, errors='coerce').to_numpy(dtype=np.float64, copy=False)
+                    arr = arr[np.isfinite(arr)]
+                    return float(np.median(arr)) if arr.size else float("nan")
+
+                out_rows = []
+                for method, g in fdf.groupby('method', dropna=False):
+                    s_strict = pd.to_numeric(g.get('NIS_Pass', np.nan), errors='coerce')
+                    s_relaxed = pd.to_numeric(g.get('NIS_Pass_Relaxed', np.nan), errors='coerce')
+                    s_over = pd.to_numeric(g.get('NIS_OverStrict', np.nan), errors='coerce')
+                    s_true = pd.to_numeric(g.get('NIS_TrueFail', np.nan), errors='coerce')
+                    s_mean = pd.to_numeric(g.get('NIS_Mean', np.nan), errors='coerce')
+                    s_inband = pd.to_numeric(g.get('NIS_InBand', np.nan), errors='coerce')
+                    has_calibration = bool(np.isfinite(s_mean).any() and np.isfinite(s_inband).any())
+                    out_rows.append({
+                        "method": str(method),
+                        "n_trials": int(len(g)),
+                        "calibration_applicable": bool(has_calibration),
+                        "applicability_reason": "" if has_calibration else "no_finite_nis_metrics",
+                        "strict_pass_rate": _safe_mean(s_strict) if has_calibration else np.nan,
+                        "relaxed_pass_rate": _safe_mean(s_relaxed) if has_calibration else np.nan,
+                        "overstrict_rate": _safe_mean(s_over) if has_calibration else np.nan,
+                        "true_fail_rate": _safe_mean(s_true) if has_calibration else np.nan,
+                        "nis_mean_median": _safe_median(s_mean) if has_calibration else np.nan,
+                        "nis_inband_median": _safe_median(s_inband) if has_calibration else np.nan,
+                    })
+                split_all_df = pd.DataFrame(out_rows)
+                if not split_all_df.empty:
+                    split_all_df["sort_key"] = split_all_df["method"].apply(_method_sort_key)
+                    split_all_df = (
+                        split_all_df
+                        .sort_values("sort_key")
+                        .drop(columns=["sort_key"])
+                        .reset_index(drop=True)
+                    )
+                split_df = split_all_df.loc[
+                    split_all_df["calibration_applicable"].astype(bool)
+                ].copy()
+                split_csv = os.path.join(metrics_dir, "metrics_filter_calibration_split.csv")
+                split_all_csv = os.path.join(metrics_dir, "metrics_filter_calibration_split_all.csv")
+                split_json = os.path.join(metrics_dir, "metrics_filter_calibration_split.json")
+                split_df.to_csv(split_csv, index=False)
+                split_all_df.to_csv(split_all_csv, index=False)
+                # Human-readable summary table for quick paper/debug review.
+                txt_path = os.path.join(metrics_dir, "metrics_filter_calibration_split.txt")
+                if not split_df.empty:
+                    table_headers = [
+                        "Method", "strict_pass", "relaxed_pass", "overstrict", "true_fail", "nis_mean_med", "nis_inband_med"
+                    ]
+                    table_rows = []
+                    for _, row in split_df.iterrows():
+                        table_rows.append([
+                            str(row.get("method", "")),
+                            _format_scalar(row.get("strict_pass_rate", np.nan)),
+                            _format_scalar(row.get("relaxed_pass_rate", np.nan)),
+                            _format_scalar(row.get("overstrict_rate", np.nan)),
+                            _format_scalar(row.get("true_fail_rate", np.nan)),
+                            _format_scalar(row.get("nis_mean_median", np.nan)),
+                            _format_scalar(row.get("nis_inband_median", np.nan)),
+                        ])
+                    with open(txt_path, "w", encoding="utf-8") as fp:
+                        fp.write("# Filter Calibration Split (applicable methods only)\n")
+                        fp.write(_render_table(table_headers, table_rows) + "\n")
+                else:
+                    with open(txt_path, "w", encoding="utf-8") as fp:
+                        fp.write("# Filter Calibration Split (applicable methods only)\n")
+                        fp.write("No applicable methods with finite NIS metrics.\n")
+                with open(split_json, "w", encoding="utf-8") as fp:
+                    json.dump({
+                        "schema_version": "filter_calibration_split.v1",
+                        "generated_at": pd.Timestamp.utcnow().isoformat() + "Z",
+                        "policy": calibration_policy,
+                        "n_methods_all": int(len(split_all_df)),
+                        "n_methods_applicable": int(len(split_df)),
+                        "n_methods_non_applicable": int(len(split_all_df) - len(split_df)),
+                        "rows": split_df.to_dict(orient="records"),
+                        "rows_all": split_all_df.to_dict(orient="records"),
+                    }, fp, ensure_ascii=False, indent=2)
+                if not split_df.empty:
+                    print("\n   [Calibration Split (Strict vs Relaxed)]")
+                    print(_render_table(
+                        ["Method", "strict_pass", "relaxed_pass", "overstrict", "true_fail"],
+                        [
+                            [
+                                str(r["method"]),
+                                _format_scalar(r["strict_pass_rate"]),
+                                _format_scalar(r["relaxed_pass_rate"]),
+                                _format_scalar(r["overstrict_rate"]),
+                                _format_scalar(r["true_fail_rate"]),
+                            ]
+                            for _, r in split_df.iterrows()
+                        ],
+                    ))
+        except Exception as exc:
+            print(f"> Warning: failed to write filter calibration split artifacts: {exc}")
+
+        _write_method_quality_artifacts(
+            d_dir,
+            eval_settings,
+            expected_trials=expected_trials_for_logs,
+            frame_log_strict=bool(frame_log_strict),
+        )
 
 
 def _method_sort_key(method_name: str):

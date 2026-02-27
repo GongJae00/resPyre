@@ -31,7 +31,7 @@ class TrustConfig:
     beta_2: float = 1.5       # visibility sensitivity
 
     # Q-scale: α_Q = 1 + γ₁·q_drift
-    gamma_1: float = 1.0      # drift sensitivity
+    gamma_1: float = 2.0      # drift sensitivity
 
     # Observation gate: σ(w₁·q_vis + w₂·q_cons − w₃·NIS − b)
     w_gate_vis: float = 2.0
@@ -42,8 +42,10 @@ class TrustConfig:
     # Frequency gate
     freq_jitter_decay: float = 0.8   # how much jitter reduces g_z
 
-    # Harmonic suppression: w_h = 1 − clip(q_harm/thd_max, 0, 1)
+    # Harmonic suppression: w_h = max(w_h_min, 1 − clip(q_harm/thd_max, 0, 1))
     thd_max: float = 0.3
+    w_h_min: float = 0.15
+    g_z_floor: float = 0.05
 
     # NIS hard gate threshold
     nis_hard_gate: float = 15.0
@@ -86,12 +88,18 @@ class TrustAllocator:
         q_out = float(quality.get('q_out', 0.0))
         q_harm = float(quality.get('q_harm', 0.0))
         q_burst = float(quality.get('q_burst', 0.0))
+        q_vis = float(np.clip(q_vis, 0.0, 1.0))
+        q_drift = float(np.clip(q_drift, 0.0, 1.0))
+        q_cons = float(np.clip(q_cons, 0.0, 1.0))
+        q_out = float(np.clip(q_out, 0.0, 1.0))
+        q_harm = float(np.clip(q_harm, 0.0, 1.0))
+        q_burst = float(np.clip(q_burst, 0.0, 1.0))
 
         # ── Rule 1: R-scale ──
         # Higher outlier score or lower visibility → inflate R → distrust y_t
         alpha_R = 1.0 + c.beta_1 * q_out + c.beta_2 * max(1.0 - q_vis, 0.0)
         # Burst events also inflate R
-        alpha_R += 3.0 * q_burst
+        alpha_R += 2.0 * q_burst
         alpha_R = float(np.clip(alpha_R, 1.0, c.alpha_R_max))
 
         # ── Rule 2: Q-scale ──
@@ -120,13 +128,17 @@ class TrustAllocator:
             freq_jitter = delta_f / max(abs(self._prev_freq), 1e-6)
             freq_jitter = min(freq_jitter, 1.0)
         g_z = g_t * max(1.0 - c.freq_jitter_decay * freq_jitter, 0.0)
+        if g_t > 0.0 and c.g_z_floor > 0.0:
+            g_z = max(g_z, float(c.g_z_floor) * g_t)
+        g_z = float(np.clip(g_z, 0.0, 1.0))
 
         if current_freq is not None:
             self._prev_freq = current_freq
 
         # ── Rule 5: Harmonic suppression ──
         # w_h = 1 − clip(q_harm / thd_max, 0, 1)
-        w_h = 1.0 - float(np.clip(q_harm / max(c.thd_max, 1e-6), 0.0, 1.0))
+        w_h_raw = 1.0 - float(np.clip(q_harm / max(c.thd_max, 1e-6), 0.0, 1.0))
+        w_h = float(np.clip(max(w_h_raw, float(c.w_h_min)), 0.0, 1.0))
 
         return TrustParams(
             alpha_R=alpha_R,

@@ -121,12 +121,32 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
                     # Wrapped oscillator heads always require ROI-derived per-frame
                     # metadata (roi_stats_t), so ROIs must be prepared first.
                     if needs_roi_meta:
-                        _ensure_chest_rois("for wrapped quality metadata")
-                        if not d['chest_rois']:
-                            tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
-                            skip_method = True
-                        else:
-                            estimate = m.process(d)
+                        success_cache_only = False
+                        if not d['chest_rois'] and hasattr(m, "can_run_without_chest_rois"):
+                            can_cache_only = False
+                            try:
+                                can_cache_only = bool(m.can_run_without_chest_rois(d))
+                            except Exception:
+                                can_cache_only = False
+                            if can_cache_only:
+                                try:
+                                    estimate = m.process(d)
+                                    success_cache_only = True
+                                    tqdm.write(f"> Using cache-only path for {m.name} (ROI extraction skipped)")
+                                except Exception as exc:
+                                    # Fall back to ROI extraction path for resilience.
+                                    tqdm.write(
+                                        f"> Cache-only path failed for {m.name} ({type(exc).__name__}: {exc}); "
+                                        "falling back to ROI extraction."
+                                    )
+
+                        if not success_cache_only:
+                            _ensure_chest_rois("for wrapped quality metadata")
+                            if not d['chest_rois']:
+                                tqdm.write(f"> Skipping method {m.name} (no valid chest ROIs)")
+                                skip_method = True
+                            else:
+                                estimate = m.process(d)
                     else:
                         # Base chest methods can use lazy cache-first processing.
                         success_lazy = False
@@ -180,6 +200,12 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
             d.pop('trial_key', None)
             d.pop('trial_key_full', None)
             d.pop('trial_uid', None)
+            d.pop('roi_stats_t', None)
+            d.pop('roi_intensity_mean', None)
+            d.pop('roi_intensity_std', None)
+            d.pop('roi_intensity_snr_db', None)
+            d.pop('roi_stats_source', None)
+            d.pop('roi_stats_cache_path', None)
             d['chest_rois'] = []
             d['face_rois'] = []
 

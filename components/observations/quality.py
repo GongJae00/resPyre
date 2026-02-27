@@ -5,7 +5,7 @@ Computes a per-frame quality vector used by TrustAllocator (§D):
     q_vis   – ROI visibility / brightness ratio
     q_drift – ROI center displacement rate
     q_cons  – sub-ROI cross-correlation consistency
-    q_out   – Hampel outlier score (observation-level)
+    q_out   – Hampel outlier score normalized to [0, 1]
     q_harm  – total harmonic distortion (THD) from Welch
     q_burst – impulse/burst binary flag
 
@@ -135,7 +135,7 @@ class QualityConfig:
     # q_cons
     cons_window: int = 30             # frames for sub-ROI cross-corr
 
-    # q_out (Hampel)
+    # q_out (Hampel, normalized)
     hampel_k: float = 1.4826         # MAD → σ scaling constant
     hampel_thresh: float = 3.0       # threshold in σ units
 
@@ -343,10 +343,13 @@ class QualityEstimator:
         return float(np.clip(corr, 0.0, 1.0))
 
     def _compute_outlier(self, y_t: float) -> float:
-        """Hampel outlier score: |y_t - median| / (k * MAD).
-        
-        Returns: score ∈ [0, ∞). Values > threshold indicate outlier.
-        For trust rules, raw score is returned (not clipped).
+        """Hampel outlier score normalized to [0, 1].
+
+        raw_score = |y_t - median| / (k * MAD + eps)
+        q_out = clip(raw_score / hampel_thresh, 0, 1)
+
+        This keeps the trust wiring numerically stable while preserving
+        monotonic outlier sensitivity.
         """
         cfg = self.cfg
         n = len(self._y_buf)
@@ -358,7 +361,8 @@ class QualityEstimator:
         mad = np.median(np.abs(buf - med))
         sigma = cfg.hampel_k * mad + 1e-9
         score = abs(y_t - med) / sigma
-        return float(score)
+        score = score / max(cfg.hampel_thresh, 1e-6)
+        return float(np.clip(score, 0.0, 1.0))
 
     def _compute_thd(self) -> float:
         """THD from Welch PSD on recent observation buffer.

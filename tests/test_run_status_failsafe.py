@@ -51,5 +51,6 @@ def test_run_status_and_metadata_exist_after_failure_signal():
         meta = json.load(fp)
 
     assert status.get("status") == "failed"
+    assert isinstance(status.get("completed_at"), str) and status.get("completed_at")
     assert meta.get("status") == "failed"
     assert isinstance(meta.get("run_status"), dict)

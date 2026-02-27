@@ -140,6 +140,7 @@ python core/optimization/run_optuna.py --config configs/cohface_p1d_cubic_tuning
 
 # 활성화
 conda activate respyre_env
+eval "$(python setup/auto_profile.py)"
 ```
 
 ## 5. 검증 (Verification)

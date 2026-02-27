@@ -5,6 +5,7 @@ import numpy as np
 
 from components.models.core.base import OscillatorParams
 from components.models.core.robust_update import RobustKalmanUpdater
+from components.models.core.ssm import OscillatorPredictor, SSMConfig, StateDecoder
 from components.models.core.trust import TrustAllocator
 from components.models.heads.robust_ossm import oscillator_RobustOSSM
 from components.observations.quality import QualityEstimator, normalize_roi_stats_t
@@ -113,6 +114,49 @@ def test_gaussian_updater_limit():
     res = updater.update(x, P, y_t=5.0, H=H, R=R_scaled)
     assert res.lambda_t == 1.0
     assert np.isclose(res.R_eff, R_scaled.item())
+
+
+def test_robust_updater_caps_extreme_r_eff():
+    """R_eff must be capped to avoid pathological UKF measurement-noise explosion."""
+    updater = RobustKalmanUpdater(
+        nu=3.0,
+        vb_iters=3,
+        lambda_floor=1e-3,
+        r_eff_max_scale=20.0,
+    )
+    x = np.array([0.0, 0.0, np.log(0.25)])
+    P = np.diag([0.2, 0.1, 0.01])
+    H = np.array([[1.0, 0.0, 0.0]])
+    R_scaled = np.array([[0.5]])
+    # Very large innovation to force tiny lambda before clipping.
+    res = updater.update(x, P, y_t=1000.0, H=H, R=R_scaled)
+    assert res.R_eff <= (20.0 * R_scaled.item() + 1e-12)
+
+
+def test_state_decoder_handles_extreme_state_without_overflow():
+    x = np.array([1e308, -1e308, np.log(0.25)], dtype=np.float64)
+    P = np.diag([1.0, 1.0, 0.01]).astype(np.float64)
+    state = StateDecoder.decode(x, P)
+    assert np.isfinite(state["amp"])
+    assert np.isfinite(state["freq_hz"])
+
+
+def test_ukf_predict_sanitizes_nonfinite_state_and_covariance():
+    pred = OscillatorPredictor(SSMConfig())
+    x = np.array([np.inf, np.nan, np.nan], dtype=np.float64)
+    P = np.array(
+        [
+            [np.inf, 0.0, 0.0],
+            [0.0, np.nan, 0.0],
+            [0.0, 0.0, -1.0],
+        ],
+        dtype=np.float64,
+    )
+    Q = pred.build_Q()
+    x_pred, P_pred = pred.predict_ukf(x, P, Q, dt=1.0 / 30.0)
+    assert np.all(np.isfinite(x_pred))
+    assert np.all(np.isfinite(P_pred))
+    assert np.all(np.diag(P_pred) > 0.0)
 
 
 def test_trust_monotonicity():

@@ -16,6 +16,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from core.utils.common import tqdm, get_chest_ROI
 from components.observations.methods import OF_Model, profile1D_Model, DoF_Model
 from components.datasets.impl import COHFACE
+from core.pipeline.wrapped_method import (
+    ROI_STATS_CACHE_FILE,
+    compute_roi_stats_time_series,
+    save_roi_stats_cache,
+)
 
 def main():
     # Force the dataset location if symlinked
@@ -43,13 +48,15 @@ def main():
         video_path = item['video_path']
         trial_dir = os.path.dirname(video_path)
         
-        # Check if all files including metadata exist to skip
+        # Check if all files including metadata/roi-stats cache exist to skip
         all_exist = True
         for name, _ in methods:
             if not os.path.exists(os.path.join(trial_dir, f"obs_{name}.npy")):
                 all_exist = False
                 break
         if not os.path.exists(os.path.join(trial_dir, "obs_meta.json")):
+            all_exist = False
+        if not os.path.exists(os.path.join(trial_dir, ROI_STATS_CACHE_FILE)):
             all_exist = False
         
         if all_exist:
@@ -67,6 +74,13 @@ def main():
             raw_res = analyze_step1_raw(frames)
             with open(os.path.join(trial_dir, "obs_meta.json"), 'w') as f:
                 json.dump({'fps': fs, 'raw_kurt': float(raw_res['kurtosis'])}, f)
+
+            # Cache per-frame ROI stats for wrapped cache-only execution path.
+            roi_cache_path = os.path.join(trial_dir, ROI_STATS_CACHE_FILE)
+            if not os.path.exists(roi_cache_path):
+                stats_t, _, _, _ = compute_roi_stats_time_series(frames)
+                if stats_t:
+                    save_roi_stats_cache(video_path, fs, stats_t)
 
             for name, model in methods:
                 out_path = os.path.join(trial_dir, f"obs_{name}.npy")

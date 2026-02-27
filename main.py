@@ -106,12 +106,13 @@ def _build_methods(method_configs, global_cfg=None):
             params = entry
 
         if '__' in name:
-            preproc = global_cfg.get('oscillator', {}) if global_cfg else {}
+            preproc = global_cfg.get('preproc', {}) if global_cfg else {}
             # Merge method-specific overrides
             methods.append(
                 create_wrapped_method(
                     name,
                     params=params,
+                    oscillator_defaults=(global_cfg.get('oscillator', {}) if global_cfg else None),
                     preproc_defaults=preproc,
                     gating_defaults=(global_cfg.get('gating', {}) if global_cfg else None),
                     quality_defaults=(global_cfg.get('quality', {}) if global_cfg else None),
@@ -200,6 +201,7 @@ def main():
         'gating_scope': cfg.get('gating_scope', 'evaluation_only'),
         'eval_cfg': eval_cfg,
         'strict_key_usage': bool((cfg.get('config') or {}).get('strict_key_usage', False)),
+        'frame_log_strict': bool(eval_cfg.get('frame_log_strict', True)),
     }
 
     cmd_str = f"python main.py --config {args.config}"
@@ -260,12 +262,22 @@ def main():
 
         if run_eda_step:
             from analysis.run_innovation_eda import run_innovation_eda
-            run_innovation_eda(results_dir, cfg.get('name'))
+            run_innovation_eda(
+                results_dir,
+                cfg.get('name'),
+                allow_missing=bool(eval_cfg.get('allow_missing', False)),
+                strict=bool(eval_cfg.get('frame_log_strict', True)),
+            )
             completed_steps.append("eda")
 
         if run_visualize_step:
             from core.pipeline.visualize_step import run_visualization
-            run_visualization(results_dir, cfg.get('name'), **common_eval_params)
+            run_visualization(
+                results_dir,
+                cfg.get('name'),
+                **common_eval_params,
+                frame_log_strict=bool(eval_cfg.get('frame_log_strict', True)),
+            )
             completed_steps.append("visualize")
     except Exception as exc:
         pipeline_error = exc

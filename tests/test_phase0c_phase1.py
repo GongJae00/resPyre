@@ -65,7 +65,7 @@ def test_2_quality_6d_valid():
 
 
 def test_3_quality_outlier():
-    """q_out should spike for an extreme observation."""
+    """q_out should spike toward 1.0 for an extreme observation."""
     from components.observations.quality import QualityEstimator
 
     qe = QualityEstimator(fs=30.0)
@@ -75,8 +75,10 @@ def test_3_quality_outlier():
 
     # Now inject a massive outlier
     q_outlier = qe.update(50, 100.0)  # 100x bigger than typical ~0.5
-    assert q_outlier['q_out'] > 3.0, \
+    assert q_outlier['q_out'] > 0.8, \
         f"q_out should be high for extreme outlier, got {q_outlier['q_out']}"
+    assert q_outlier['q_out'] <= 1.0, \
+        f"q_out must be normalized to [0,1], got {q_outlier['q_out']}"
 
     # Normal frame after that
     q_normal = qe.update(51, 0.3)

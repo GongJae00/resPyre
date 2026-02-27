@@ -129,6 +129,18 @@ def test_trial_key_propagation(monkeypatch):
     assert len(set(stems)) >= 2
 
 
+def test_create_wrapped_method_applies_global_oscillator_defaults():
+    method = create_wrapped_method(
+        "profile1d_linear__robust_ossm_ekf",
+        params={"params": {"oscillator": {"qx": 1e-4}}},
+        oscillator_defaults={"qx": 0.005, "qf": 2e-5, "no_autotune": True, "em_mode": "off"},
+    )
+    assert abs(float(method.osc_head.params.qx) - 1e-4) < 1e-12
+    assert abs(float(method.osc_head.params.qf) - 2e-5) < 1e-12
+    assert bool(method.osc_head.params.no_autotune) is True
+    assert str(method.osc_head.params.em_mode) == "off"
+
+
 def test_method_quality_artifacts_and_missing_rows():
     tmp = tempfile.mkdtemp(prefix="method_quality_missing_")
     run_dir = os.path.join(tmp, "testrun")
@@ -291,8 +303,24 @@ def test_event_summary_aggregate():
         suffix=1,
     )
 
-    run_evaluation(tmp, run_label="testrun", win_size=30.0, stride=1.0, min_hz=0.08, max_hz=0.5)
-    run_visualization(tmp, run_label="testrun", win_size=30.0, stride=1.0, min_hz=0.08, max_hz=0.5)
+    run_evaluation(
+        tmp,
+        run_label="testrun",
+        win_size=30.0,
+        stride=1.0,
+        min_hz=0.08,
+        max_hz=0.5,
+        frame_log_strict=False,
+    )
+    run_visualization(
+        tmp,
+        run_label="testrun",
+        win_size=30.0,
+        stride=1.0,
+        min_hz=0.08,
+        max_hz=0.5,
+        frame_log_strict=False,
+    )
 
     summary_csv = os.path.join(run_dir, "plots", "qrobf_diagnostics", "qrobf_event_summary.csv")
     assert os.path.exists(summary_csv)

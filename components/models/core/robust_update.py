@@ -44,7 +44,8 @@ class RobustKalmanUpdater:
     """
 
     def __init__(self, nu: float = 5.0, vb_iters: int = 1,
-                 eig_floor: float = 1e-9, trace_cap: float = 100.0):
+                 eig_floor: float = 1e-9, trace_cap: float = 100.0,
+                 lambda_floor: float = 1e-3, r_eff_max_scale: float = 80.0):
         """
         Args:
             nu: Student-t degrees of freedom. Lower = heavier tails.
@@ -53,11 +54,15 @@ class RobustKalmanUpdater:
                       Typically 1 is sufficient for 1D observation.
             eig_floor: minimum eigenvalue for PSD projection.
             trace_cap: maximum trace(P) before scaling down.
+            lambda_floor: lower bound for λ to avoid extreme R inflation.
+            r_eff_max_scale: cap R_eff to at most r_eff_max_scale * R_scaled.
         """
         self.nu = float(nu)
         self.vb_iters = max(1, int(vb_iters))
         self.eig_floor = float(eig_floor)
         self.trace_cap = float(trace_cap)
+        self.lambda_floor = float(max(lambda_floor, 1e-9))
+        self.r_eff_max_scale = float(max(r_eff_max_scale, 1.0))
 
     def update(self, x_pred: np.ndarray, P_pred: np.ndarray,
                y_t: float, H: np.ndarray, R: np.ndarray,
@@ -109,9 +114,13 @@ class RobustKalmanUpdater:
                 lambda_t = (self.nu + 1.0) / (self.nu + mahal_sq)
 
         # ── Step 4. Final update with converged λ ──
-        #    R_eff = R / λ
-        lambda_t = float(np.clip(lambda_t, 1e-6, 1e6)) # Clip lambda_t
+        #    R_eff = R / λ, with robust caps for numerical stability.
+        lambda_t = float(np.clip(lambda_t, self.lambda_floor, 1e6))
         R_eff = R_val / lambda_t
+        if np.isfinite(self.r_eff_max_scale) and self.r_eff_max_scale > 0:
+            R_eff_cap = R_val * self.r_eff_max_scale
+            if np.isfinite(R_eff_cap) and R_eff_cap > 0:
+                R_eff = float(min(R_eff, R_eff_cap))
         HP = (H @ P_pred @ H.T).item()
         S_eff_final = HP + R_eff
         S_eff_final = max(S_eff_final, 1e-12) # Ensure S_eff_final is not zero

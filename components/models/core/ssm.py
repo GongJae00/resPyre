@@ -27,6 +27,8 @@ class SSMConfig:
     ukf_alpha: float = 1e-3
     ukf_beta: float = 2.0
     ukf_kappa: float = 0.0
+    state_abs_max: float = 1e3
+    cov_diag_max: float = 1e4
 
     def compute_rho(self, dt: float) -> float:
         """Damping factor per sample.
@@ -61,20 +63,26 @@ class StateDecoder:
             amp_std: approximate amplitude uncertainty
             freq_std_hz: approximate frequency uncertainty
         """
-        x1, x2 = float(x[0]), float(x[1])
-        z = float(x[2]) if x.size >= 3 else 0.0
+        x1 = float(np.nan_to_num(x[0], nan=0.0, posinf=1e6, neginf=-1e6))
+        x2 = float(np.nan_to_num(x[1], nan=0.0, posinf=1e6, neginf=-1e6))
+        z = float(np.nan_to_num(x[2], nan=0.0, posinf=0.0, neginf=0.0)) if x.size >= 3 else 0.0
 
-        amp = np.sqrt(x1**2 + x2**2)
+        amp = float(np.hypot(x1, x2))
         phase = np.arctan2(x2, x1)
-        freq = np.exp(z)
+        freq = float(np.exp(np.clip(z, -50.0, 50.0)))
 
         # Propagate uncertainty (1st-order)
         # amp = sqrt(x1^2 + x2^2)  →  Jacobian ∂amp/∂x = [x1/amp, x2/amp, 0]
         if amp > 1e-9:
             J_amp = np.array([x1 / amp, x2 / amp, 0.0])
-            amp_var = float(J_amp @ P @ J_amp)
+            Pm = np.asarray(P, dtype=np.float64)
+            if not np.all(np.isfinite(Pm)):
+                Pm = np.nan_to_num(Pm, nan=0.0, posinf=0.0, neginf=0.0)
+            amp_var = float(J_amp @ Pm @ J_amp)
         else:
-            amp_var = float(P[0, 0])
+            Pm = np.asarray(P, dtype=np.float64)
+            p00 = float(np.nan_to_num(Pm[0, 0], nan=0.0, posinf=0.0, neginf=0.0))
+            amp_var = p00
         amp_std = np.sqrt(max(amp_var, 0.0))
 
         # freq = exp(z)  → Jacobian ∂freq/∂x = [0, 0, exp(z)]
@@ -117,8 +125,30 @@ class OscillatorPredictor:
         to prevent exp(z) explosion or collapse.
         """
         lo, hi = self.cfg.log_f_bounds
-        x[2] = np.clip(x[2], lo, hi)
+        state_abs_max = float(max(getattr(self.cfg, "state_abs_max", 1e3), 1.0))
+        x[0] = float(np.clip(np.nan_to_num(x[0], nan=0.0, posinf=state_abs_max, neginf=-state_abs_max), -state_abs_max, state_abs_max))
+        x[1] = float(np.clip(np.nan_to_num(x[1], nan=0.0, posinf=state_abs_max, neginf=-state_abs_max), -state_abs_max, state_abs_max))
+        z_raw = float(np.nan_to_num(x[2], nan=0.5 * (lo + hi), posinf=hi, neginf=lo))
+        x[2] = float(np.clip(z_raw, lo, hi))
         return x
+
+    def sanitize_covariance(self, P: np.ndarray) -> np.ndarray:
+        Pm = np.asarray(P, dtype=np.float64)
+        if Pm.shape != (self.n_state, self.n_state):
+            return np.diag([1.0, 1.0, 0.25 ** 2]).astype(np.float64)
+        if not np.all(np.isfinite(Pm)):
+            Pm = np.nan_to_num(Pm, nan=0.0, posinf=0.0, neginf=0.0)
+        Pm = 0.5 * (Pm + Pm.T)
+        diag_max = float(max(getattr(self.cfg, "cov_diag_max", 1e4), 1e-6))
+        for i in range(self.n_state):
+            Pm[i, i] = float(np.clip(Pm[i, i], 1e-10, diag_max))
+        try:
+            eigvals, eigvecs = np.linalg.eigh(Pm)
+            eigvals = np.clip(eigvals, 1e-10, diag_max)
+            Pm = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        except np.linalg.LinAlgError:
+            Pm = np.diag(np.clip(np.diag(Pm), 1e-10, diag_max))
+        return 0.5 * (Pm + Pm.T)
 
     def build_Q(self, qx: Optional[float] = None, qf: Optional[float] = None,
                 alpha_Q: float = 1.0) -> np.ndarray:
@@ -160,6 +190,10 @@ class OscillatorPredictor:
 
         Returns (x_pred, P_pred).
         """
+        x = self.clamp_state(np.asarray(x, dtype=np.float64).copy())
+        P = self.sanitize_covariance(P)
+        Q = self.sanitize_covariance(Q)
+
         rho = self.cfg.compute_rho(dt)
         x1, x2, z = float(x[0]), float(x[1]), float(x[2])
         freq = np.exp(np.clip(z, np.log(self.cfg.f_min), np.log(self.cfg.f_max)))
@@ -189,7 +223,8 @@ class OscillatorPredictor:
         ], dtype=np.float64)
 
         P_pred = F @ P @ F.T + Q
-        P_pred = 0.5 * (P_pred + P_pred.T)
+        x_pred = self.clamp_state(x_pred)
+        P_pred = self.sanitize_covariance(P_pred)
 
         return x_pred, P_pred
 
@@ -199,6 +234,8 @@ class OscillatorPredictor:
 
     def _sigma_points(self, x: np.ndarray, P: np.ndarray):
         """Compute sigma points and weights (Merwe's scaled form)."""
+        x = self.clamp_state(np.asarray(x, dtype=np.float64).copy())
+        P = self.sanitize_covariance(P)
         n = x.size
         alpha = self.cfg.ukf_alpha
         beta = self.cfg.ukf_beta
@@ -236,6 +273,7 @@ class OscillatorPredictor:
 
     def _transition_fn(self, x_state: np.ndarray, dt: float) -> np.ndarray:
         """Nonlinear transition for a single sigma point."""
+        x_state = self.clamp_state(np.asarray(x_state, dtype=np.float64).copy())
         rho = self.cfg.compute_rho(dt)
         x1, x2, z = x_state
         freq = np.clip(np.exp(z), self.cfg.f_min, self.cfg.f_max)
@@ -245,7 +283,7 @@ class OscillatorPredictor:
         x1_new = rho * (cos_t * x1 - sin_t * x2)
         x2_new = rho * (sin_t * x1 + cos_t * x2)
         z_new = np.clip(z, np.log(self.cfg.f_min), np.log(self.cfg.f_max))
-        return np.array([x1_new, x2_new, z_new], dtype=np.float64)
+        return self.clamp_state(np.array([x1_new, x2_new, z_new], dtype=np.float64))
 
     def predict_ukf(self, x: np.ndarray, P: np.ndarray,
                     Q: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
@@ -253,6 +291,9 @@ class OscillatorPredictor:
 
         Returns (x_pred, P_pred).
         """
+        x = self.clamp_state(np.asarray(x, dtype=np.float64).copy())
+        P = self.sanitize_covariance(P)
+        Q = self.sanitize_covariance(Q)
         sigma, Wm, Wc = self._sigma_points(x, P)
         sigma_pred = np.array([self._transition_fn(sp, dt) for sp in sigma],
                               dtype=np.float64)
@@ -261,7 +302,8 @@ class OscillatorPredictor:
         for i in range(sigma_pred.shape[0]):
             diff = sigma_pred[i] - x_pred
             P_pred += Wc[i] * np.outer(diff, diff)
-        P_pred = 0.5 * (P_pred + P_pred.T)
+        x_pred = self.clamp_state(x_pred)
+        P_pred = self.sanitize_covariance(P_pred)
         return x_pred, P_pred
 
     # ------------------------------------------------------------------

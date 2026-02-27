@@ -24,9 +24,11 @@ class FailureConfig:
     # Locking: σ_freq < ε_lock for ≥ lock_window frames
     epsilon_lock: float = 0.005      # Hz
     lock_window: int = 30
+    lock_ref_delta: float = 0.04     # Hz, lock is suspicious only if mean deviates from reference
 
     # Doubling: |f_track − 2·f_ref| < δ or |f_track − f_ref/2| < δ
     doubling_delta: float = 0.03     # Hz
+    doubling_window: int = 8         # require persistence to suppress single-frame false alarms
 
 
 @dataclass
@@ -71,6 +73,7 @@ class FailureMonitor:
         self._nis_exceed_count = 0
         self._trace_exceed_count = 0
         self._lock_count = 0
+        self._double_count = 0
         self._prev_phase = None
         self._freq_history: List[float] = []
 
@@ -130,7 +133,11 @@ class FailureMonitor:
         if len(self._freq_history) >= c.lock_window:
             freq_window = np.array(self._freq_history[-c.lock_window:])
             freq_sigma = float(np.std(freq_window))
-            if freq_sigma < c.epsilon_lock:
+            freq_mean = float(np.mean(freq_window))
+            suspicious_lock = freq_sigma < c.epsilon_lock
+            if suspicious_lock and self.f_ref is not None and self.f_ref > 0:
+                suspicious_lock = abs(freq_mean - float(self.f_ref)) >= c.lock_ref_delta
+            if suspicious_lock:
                 self._lock_count += 1
                 if self._lock_count >= c.lock_window:
                     flags.locking = True
@@ -139,10 +146,16 @@ class FailureMonitor:
 
         # ── Doubling ──
         if self.f_ref is not None and self.f_ref > 0:
-            if abs(freq - 2.0 * self.f_ref) < c.doubling_delta:
-                flags.doubling = True
-            elif abs(freq - 0.5 * self.f_ref) < c.doubling_delta:
-                flags.doubling = True
+            is_double = (
+                abs(freq - 2.0 * self.f_ref) < c.doubling_delta or
+                abs(freq - 0.5 * self.f_ref) < c.doubling_delta
+            )
+            if is_double:
+                self._double_count += 1
+                if self._double_count >= c.doubling_window:
+                    flags.doubling = True
+            else:
+                self._double_count = max(0, self._double_count - 1)
 
         return flags
 
@@ -151,6 +164,7 @@ class FailureMonitor:
         self._nis_exceed_count = 0
         self._trace_exceed_count = 0
         self._lock_count = 0
+        self._double_count = 0
         self._prev_phase = None
         self._freq_history = []
         if f_ref is not None:

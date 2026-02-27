@@ -1,6 +1,7 @@
 import os
 import glob
 import pickle
+import json
 import pandas as pd
 import numpy as np
 from core.utils.common import tqdm
@@ -76,7 +77,15 @@ def _build_scatter_df(run_dir: str, time_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def run_visualization(results_dir: str, run_label: str = None, win_size: float = 30.0, stride: float = 1.0, min_hz: float = 0.08, max_hz: float = 0.5):
+def run_visualization(
+    results_dir: str,
+    run_label: str = None,
+    win_size: float = 30.0,
+    stride: float = 1.0,
+    min_hz: float = 0.08,
+    max_hz: float = 0.5,
+    frame_log_strict: bool = True,
+):
     """
     Generates summary plots (PNG) from aggregated metrics and sample traces.
     Restores family-wise overlays and best-sample aligned overlays.
@@ -148,7 +157,7 @@ def run_visualization(results_dir: str, run_label: str = None, win_size: float =
         print("   >> Generating latency distribution plots...")
         _save_latency_distribution(d_dir)
         print("   >> Generating trust/failure timeline overlays...")
-        _save_trust_failure_overlays(d_dir)
+        _save_trust_failure_overlays(d_dir, frame_log_strict=bool(frame_log_strict))
 
 def _save_family_overlays(run_dir, metrics_pkl):
     import matplotlib.pyplot as plt
@@ -538,6 +547,8 @@ def _save_filter_diag_heatmap(run_dir: str):
     key_map = {
         'Fail_Total_median': 'Fail_Total',
         'NIS_Mean_median': 'NIS_Mean',
+        'NIS_OverStrict_median': 'NIS_OverStrict',
+        'NIS_TrueFail_median': 'NIS_TrueFail',
         'Coverage95_median': 'Coverage95',
         'Lambda_LT1_Frac_median': 'Lambda_LT1_Frac',
     }
@@ -660,33 +671,90 @@ def _mark_events_on_axes(axes, t: np.ndarray, event_idx: np.ndarray, color: str,
             ax.axvline(xv, color=color, alpha=0.16, linewidth=0.8)
 
 
-def _save_trust_failure_overlays(run_dir: str):
+def _write_empty_qrobf_artifacts(out_dir: str, resolver_diag: dict, orphans: list):
+    import matplotlib.pyplot as plt
+
+    summary_cols = [
+        "method", "n_trials", "n_frames", "div", "slip", "lock", "double",
+        "gate_collapse_runs", "harm_suppress_runs",
+        "selection_policy", "run_instance_started_at_used", "n_orphan_logs_ignored",
+    ]
+    rates_cols = summary_cols + [
+        "div_rate", "slip_rate", "lock_rate", "double_rate",
+        "gate_collapse_rate", "harm_suppress_rate",
+    ]
+    summary_csv = os.path.join(out_dir, "qrobf_event_summary.csv")
+    rates_csv = os.path.join(out_dir, "qrobf_event_summary_rates.csv")
+    summary_json = os.path.join(out_dir, "qrobf_event_summary.json")
+    summary_png = os.path.join(out_dir, "qrobf_event_summary.png")
+
+    pd.DataFrame(columns=summary_cols).to_csv(summary_csv, index=False)
+    pd.DataFrame(columns=rates_cols).to_csv(rates_csv, index=False)
+
+    payload = {
+        "schema_version": "qrobf_event_summary.v1",
+        "status": "empty",
+        "reason": "no_canonical_logs",
+        "n_trials": 0,
+        "n_events": 0,
+        "selection_policy": str((resolver_diag or {}).get("selection_policy", "")),
+        "run_instance_started_at_used": str((resolver_diag or {}).get("run_instance_started_at_used", "")),
+        "n_orphan_logs_ignored": int(len(orphans or [])),
+        "resolver_diag": resolver_diag or {},
+    }
+    with open(summary_json, "w", encoding="utf-8") as fp:
+        json.dump(payload, fp, ensure_ascii=False, indent=2)
+
+    fig, ax = plt.subplots(figsize=(10, 3))
+    ax.axis("off")
+    ax.text(0.5, 0.5, "No canonical logs", ha="center", va="center", fontsize=16)
+    ax.set_title("QROBF Event Summary")
+    plt.tight_layout()
+    plt.savefig(summary_png, dpi=180)
+    plt.close(fig)
+    print(f"      [Saved] {summary_png}")
+
+
+def _save_trust_failure_overlays(run_dir: str, frame_log_strict: bool = True):
     import matplotlib.pyplot as plt
 
     out_dir = os.path.join(run_dir, 'plots', 'qrobf_diagnostics')
     os.makedirs(out_dir, exist_ok=True)
     summary_rows = []
 
-    expected = collect_expected_method_trials(run_dir)
-    selected, orphans, resolver_diag = resolve_frame_logs_for_run(
+    expected_all = collect_expected_method_trials(run_dir)
+    expected = []
+    for item in expected_all:
+        method = str(item.get("method", "")).strip()
+        trial = str(item.get("trial", "")).strip()
+        if not method or not trial:
+            continue
+        log_dir = os.path.join(run_dir, "aux", method.replace(" ", "_"), "frame_logs")
+        if os.path.isdir(log_dir):
+            expected.append({"method": method, "trial": trial})
+    resolution = resolve_frame_logs_for_run(
         run_dir,
         expected_trials=expected,
-        strict=True,
+        strict=bool(frame_log_strict),
+        allow_empty=True,
     )
+    selected = resolution.get("canonical", {})
+    orphans = resolution.get("extras", [])
+    resolver_diag = resolution.get("diag", {}) if isinstance(resolution, dict) else {}
     method_to_logs = {}
     for method, trial_map in sorted(selected.items()):
         method_to_logs[method] = [trial_map[k] for k in sorted(trial_map.keys())]
-    if not method_to_logs:
-        print("      [Skip] no canonical frame logs found")
-        orphan_csv = os.path.join(out_dir, "qrobf_orphan_logs.csv")
-        pd.DataFrame(orphans).to_csv(orphan_csv, index=False)
-        return
 
     orphan_csv = os.path.join(out_dir, "qrobf_orphan_logs.csv")
     if orphans:
         pd.DataFrame(orphans).to_csv(orphan_csv, index=False)
     else:
         pd.DataFrame(columns=["method", "trial_key", "path", "filename", "suffix", "mtime", "reason"]).to_csv(orphan_csv, index=False)
+
+    if not method_to_logs:
+        print("      [Info] no canonical frame logs found; writing placeholder qrobf summary artifacts")
+        _write_empty_qrobf_artifacts(out_dir, resolver_diag=resolver_diag, orphans=orphans)
+        return
 
     for method, method_paths in method_to_logs.items():
         try:
@@ -876,23 +944,37 @@ def _save_trust_failure_overlays(run_dir: str):
 
     # Cross-method summary for figure/table generation.
     if summary_rows:
-            summary_df = pd.DataFrame(summary_rows)
-            if not summary_df.empty:
-                summary_df = summary_df.sort_values(by="method", key=lambda s: s.map(_method_sort_key))
-                summary_df["selection_policy"] = str(resolver_diag.get("selection_policy", ""))
-                summary_df["run_instance_started_at_used"] = str(resolver_diag.get("run_instance_started_at_used", ""))
-                summary_df["n_orphan_logs_ignored"] = int(len(orphans))
-                summary_csv = os.path.join(out_dir, "qrobf_event_summary.csv")
-                summary_df.to_csv(summary_csv, index=False)
+        summary_df = pd.DataFrame(summary_rows)
+        if not summary_df.empty:
+            summary_df = summary_df.sort_values(by="method", key=lambda s: s.map(_method_sort_key))
+            summary_df["selection_policy"] = str(resolver_diag.get("selection_policy", ""))
+            summary_df["run_instance_started_at_used"] = str(resolver_diag.get("run_instance_started_at_used", ""))
+            summary_df["n_orphan_logs_ignored"] = int(len(orphans))
+            summary_csv = os.path.join(out_dir, "qrobf_event_summary.csv")
+            summary_df.to_csv(summary_csv, index=False)
 
-            # Add rate columns for fair method comparison.
-            denom = summary_df["n_frames"].replace(0, np.nan)
-            for key in ("div", "slip", "lock", "double"):
-                summary_df[f"{key}_rate"] = summary_df[key] / denom
-            summary_df["gate_collapse_rate"] = summary_df["gate_collapse_runs"] / denom
-            summary_df["harm_suppress_rate"] = summary_df["harm_suppress_runs"] / denom
-            summary_rate_csv = os.path.join(out_dir, "qrobf_event_summary_rates.csv")
-            summary_df.to_csv(summary_rate_csv, index=False)
+        # Add rate columns for fair method comparison.
+        denom = summary_df["n_frames"].replace(0, np.nan)
+        for key in ("div", "slip", "lock", "double"):
+            summary_df[f"{key}_rate"] = summary_df[key] / denom
+        summary_df["gate_collapse_rate"] = summary_df["gate_collapse_runs"] / denom
+        summary_df["harm_suppress_rate"] = summary_df["harm_suppress_runs"] / denom
+        summary_rate_csv = os.path.join(out_dir, "qrobf_event_summary_rates.csv")
+        summary_df.to_csv(summary_rate_csv, index=False)
+        summary_json = os.path.join(out_dir, "qrobf_event_summary.json")
+        with open(summary_json, "w", encoding="utf-8") as fp:
+            json.dump({
+                "schema_version": "qrobf_event_summary.v1",
+                "status": "ok",
+                "reason": "",
+                "n_trials": int(summary_df["n_trials"].sum()),
+                "n_events": int(summary_df[["div", "slip", "lock", "double"]].sum().sum()),
+                "selection_policy": str(resolver_diag.get("selection_policy", "")),
+                "run_instance_started_at_used": str(resolver_diag.get("run_instance_started_at_used", "")),
+                "n_orphan_logs_ignored": int(len(orphans)),
+                "resolver_diag": resolver_diag,
+                "methods": summary_df.to_dict(orient="records"),
+            }, fp, ensure_ascii=False, indent=2)
 
             # Compact visual summary (failure rates + gate/harm run rates).
             methods = summary_df["method"].tolist()
