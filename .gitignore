@@ -178,3 +178,4 @@ decode_logs_cohface/
 .venv/
 .vscode/
 prompts/
+notes/
