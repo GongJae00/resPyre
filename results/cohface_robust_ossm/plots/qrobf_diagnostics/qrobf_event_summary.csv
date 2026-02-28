@@ -1,0 +1,6 @@
+method,n_trials,n_frames,div,slip,lock,double,gate_collapse_runs,harm_suppress_runs,selection_policy,run_instance_started_at_used,n_orphan_logs_ignored
+of_farneback__robust_ossm_ekf,1,1205,2,1,0,0,15,21,post_epoch_latest_mtime_suffix,2026-02-27T07:33:22.855110Z,0
+dof__robust_ossm_ekf,1,1205,0,2,36,0,0,21,post_epoch_latest_mtime_suffix,2026-02-27T07:33:22.855110Z,0
+profile1d_linear__robust_ossm_ekf,1,1205,0,0,20,0,0,11,post_epoch_latest_mtime_suffix,2026-02-27T07:33:22.855110Z,0
+profile1d_quadratic__robust_ossm_ekf,1,1205,0,0,18,0,0,9,post_epoch_latest_mtime_suffix,2026-02-27T07:33:22.855110Z,0
+profile1d_cubic__robust_ossm_ekf,1,1205,0,0,13,0,0,9,post_epoch_latest_mtime_suffix,2026-02-27T07:33:22.855110Z,0

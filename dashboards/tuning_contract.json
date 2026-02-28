@@ -1,0 +1,1422 @@
+{
+  "schema_version": "optuna_tuning_contract.v1",
+  "generated_at": "2026-02-27T07:56:31.116309Z",
+  "config_path": "/home/gongjae/Projects/resPyre/configs/cohface_robust_ossm.json",
+  "selected_methods": [
+    "profile1d_quadratic__robust_ossm_ekf"
+  ],
+  "search_space": {
+    "robust_ossm_ekf": [
+      {
+        "path": "oscillator.qx",
+        "kind": "float",
+        "low": 0.00015,
+        "high": 0.005,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.qf",
+        "kind": "float",
+        "low": 3e-05,
+        "high": 0.002,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_floor",
+        "kind": "float",
+        "low": 0.008,
+        "high": 0.05,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_auto",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true,
+          false
+        ],
+        "log": false
+      },
+      {
+        "path": "oscillator.rv_mad_scale",
+        "kind": "float",
+        "low": 0.6,
+        "high": 1.1,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.rv",
+        "kind": "float",
+        "low": 0.012,
+        "high": 0.06,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.student_t_nu",
+        "kind": "float",
+        "low": 4.0,
+        "high": 16.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.g_z_eff_floor_ratio",
+        "kind": "float",
+        "low": 0.16,
+        "high": 0.45,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.post_smooth_alpha",
+        "kind": "float",
+        "low": 0.62,
+        "high": 0.92,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_strength",
+        "kind": "float",
+        "low": 0.65,
+        "high": 1.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_offset",
+        "kind": "float",
+        "low": 0.08,
+        "high": 0.32,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_1",
+        "kind": "float",
+        "low": 0.75,
+        "high": 1.8,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_2",
+        "kind": "float",
+        "low": 0.45,
+        "high": 1.4,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_gate_nis",
+        "kind": "float",
+        "low": 0.08,
+        "high": 0.45,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.gate_bias",
+        "kind": "float",
+        "low": 0.25,
+        "high": 0.9,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.g_z_floor",
+        "kind": "float",
+        "low": 0.18,
+        "high": 0.4,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.alpha_R_max",
+        "kind": "float",
+        "low": 3.0,
+        "high": 8.5,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "gating.profile",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          "relaxed",
+          "paper",
+          "strict"
+        ],
+        "log": false
+      },
+      {
+        "path": "gating.spectral.peak_ratio_min",
+        "kind": "float",
+        "low": 1.05,
+        "high": 1.45,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "gating.spectral.prominence_min_db",
+        "kind": "float",
+        "low": 0.5,
+        "high": 3.2,
+        "choices": null,
+        "log": false
+      }
+    ],
+    "robust_ossm_ukf": [
+      {
+        "path": "oscillator.qx",
+        "kind": "float",
+        "low": 2e-05,
+        "high": 0.003,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.qf",
+        "kind": "float",
+        "low": 2e-06,
+        "high": 0.0005,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_floor",
+        "kind": "float",
+        "low": 0.002,
+        "high": 0.04,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_mad_scale",
+        "kind": "float",
+        "low": 0.6,
+        "high": 1.8,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.tau_env",
+        "kind": "float",
+        "low": 20.0,
+        "high": 120.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.init_margin_hz",
+        "kind": "float",
+        "low": 0.0,
+        "high": 0.08,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.student_t_nu",
+        "kind": "float",
+        "low": 4.0,
+        "high": 20.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.vb_iters",
+        "kind": "int",
+        "low": 1,
+        "high": 4,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.trace_cap",
+        "kind": "float",
+        "low": 40.0,
+        "high": 260.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.lambda_floor",
+        "kind": "float",
+        "low": 0.0008,
+        "high": 0.008,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.r_eff_max_scale",
+        "kind": "float",
+        "low": 20.0,
+        "high": 100.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.g_z_eff_floor_ratio",
+        "kind": "float",
+        "low": 0.06,
+        "high": 0.25,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.post_smooth_alpha",
+        "kind": "float",
+        "low": 0.72,
+        "high": 0.94,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.rv_auto",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true,
+          false
+        ],
+        "log": false
+      },
+      {
+        "path": "oscillator.rv",
+        "kind": "float",
+        "low": 0.0001,
+        "high": 0.2,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.detrend",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true
+        ],
+        "log": false
+      },
+      {
+        "path": "oscillator.bandpass",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true
+        ],
+        "log": false
+      },
+      {
+        "path": "oscillator.zscore",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true
+        ],
+        "log": false
+      },
+      {
+        "path": "oscillator.ukf_alpha",
+        "kind": "float",
+        "low": 0.0008,
+        "high": 0.03,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.ukf_beta",
+        "kind": "float",
+        "low": 1.6,
+        "high": 3.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.ukf_kappa",
+        "kind": "float",
+        "low": -0.2,
+        "high": 0.8,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_strength",
+        "kind": "float",
+        "low": 0.5,
+        "high": 1.6,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_offset",
+        "kind": "float",
+        "low": 0.1,
+        "high": 0.45,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_confidence_scale",
+        "kind": "float",
+        "low": 2.0,
+        "high": 10.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_snr_scale",
+        "kind": "float",
+        "low": 2.0,
+        "high": 8.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_1",
+        "kind": "float",
+        "low": 0.8,
+        "high": 2.6,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_2",
+        "kind": "float",
+        "low": 0.6,
+        "high": 2.4,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.gamma_1",
+        "kind": "float",
+        "low": 1.0,
+        "high": 3.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_gate_vis",
+        "kind": "float",
+        "low": 0.8,
+        "high": 2.4,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_gate_cons",
+        "kind": "float",
+        "low": 0.8,
+        "high": 2.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_gate_nis",
+        "kind": "float",
+        "low": 0.2,
+        "high": 1.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.gate_bias",
+        "kind": "float",
+        "low": 0.6,
+        "high": 1.6,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.freq_jitter_decay",
+        "kind": "float",
+        "low": 0.6,
+        "high": 1.1,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.thd_max",
+        "kind": "float",
+        "low": 0.25,
+        "high": 0.5,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_h_min",
+        "kind": "float",
+        "low": 0.15,
+        "high": 0.35,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.g_z_floor",
+        "kind": "float",
+        "low": 0.06,
+        "high": 0.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.nis_hard_gate",
+        "kind": "float",
+        "low": 10.0,
+        "high": 30.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.alpha_R_max",
+        "kind": "float",
+        "low": 10.0,
+        "high": 30.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.alpha_Q_max",
+        "kind": "float",
+        "low": 2.5,
+        "high": 6.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.vis_eps",
+        "kind": "float",
+        "low": 1e-08,
+        "high": 0.001,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "quality.vis_snr_low_db",
+        "kind": "float",
+        "low": -12.0,
+        "high": -4.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.vis_snr_high_db",
+        "kind": "float",
+        "low": 12.0,
+        "high": 22.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.vis_blend_contrast",
+        "kind": "float",
+        "low": 0.0,
+        "high": 1.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.vis_blend_snr",
+        "kind": "float",
+        "low": 0.0,
+        "high": 1.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.vis_blend_valid",
+        "kind": "float",
+        "low": 0.0,
+        "high": 1.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.drift_scale",
+        "kind": "float",
+        "low": 0.08,
+        "high": 0.5,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.cons_window",
+        "kind": "int",
+        "low": 24,
+        "high": 64,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.hampel_k",
+        "kind": "float",
+        "low": 1.0,
+        "high": 3.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.hampel_thresh",
+        "kind": "float",
+        "low": 2.0,
+        "high": 4.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.harm_window_sec",
+        "kind": "float",
+        "low": 3.0,
+        "high": 7.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.harm_harmonics",
+        "kind": "int",
+        "low": 1,
+        "high": 4,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.burst_sigma",
+        "kind": "float",
+        "low": 1.5,
+        "high": 5.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "quality.burst_window",
+        "kind": "int",
+        "low": 8,
+        "high": 40,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "preproc.robust_zscore.enabled",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true
+        ],
+        "log": false
+      },
+      {
+        "path": "preproc.robust_zscore.clip",
+        "kind": "float",
+        "low": 2.0,
+        "high": 4.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "preproc.robust_zscore.eps",
+        "kind": "float",
+        "low": 1e-08,
+        "high": 0.001,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "preproc.sign_align.enabled",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true
+        ],
+        "log": false
+      },
+      {
+        "path": "preproc.sign_align.seconds",
+        "kind": "float",
+        "low": 8.0,
+        "high": 14.0,
+        "choices": null,
+        "log": false
+      }
+    ],
+    "kfstd": [
+      {
+        "path": "oscillator.qx",
+        "kind": "float",
+        "low": 1e-06,
+        "high": 0.02,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_floor",
+        "kind": "float",
+        "low": 0.0001,
+        "high": 0.2,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.tau_env",
+        "kind": "float",
+        "low": 4.0,
+        "high": 120.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.post_smooth_alpha",
+        "kind": "float",
+        "low": 0.0,
+        "high": 0.98,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_strength",
+        "kind": "float",
+        "low": 0.0,
+        "high": 2.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_offset",
+        "kind": "float",
+        "low": 0.0,
+        "high": 1.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "preproc.robust_zscore.clip",
+        "kind": "float",
+        "low": 1.5,
+        "high": 6.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "preproc.robust_zscore.eps",
+        "kind": "float",
+        "low": 1e-08,
+        "high": 0.0001,
+        "choices": null,
+        "log": true
+      }
+    ],
+    "ukffreq": [
+      {
+        "path": "oscillator.qx",
+        "kind": "float",
+        "low": 1e-06,
+        "high": 0.02,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.qf",
+        "kind": "float",
+        "low": 1e-07,
+        "high": 0.005,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_floor",
+        "kind": "float",
+        "low": 0.0001,
+        "high": 0.2,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.tau_env",
+        "kind": "float",
+        "low": 4.0,
+        "high": 120.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.ukf_alpha",
+        "kind": "float",
+        "low": 0.0001,
+        "high": 0.8,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.ukf_beta",
+        "kind": "float",
+        "low": 1.0,
+        "high": 4.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.ukf_kappa",
+        "kind": "float",
+        "low": -1.0,
+        "high": 3.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.post_smooth_alpha",
+        "kind": "float",
+        "low": 0.0,
+        "high": 0.98,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_strength",
+        "kind": "float",
+        "low": 0.0,
+        "high": 2.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_offset",
+        "kind": "float",
+        "low": 0.0,
+        "high": 1.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "preproc.robust_zscore.clip",
+        "kind": "float",
+        "low": 1.5,
+        "high": 6.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "preproc.robust_zscore.eps",
+        "kind": "float",
+        "low": 1e-08,
+        "high": 0.0001,
+        "choices": null,
+        "log": true
+      }
+    ],
+    "of_farneback__robust_ossm_ekf": [
+      {
+        "path": "oscillator.qx",
+        "kind": "float",
+        "low": 0.001,
+        "high": 0.0035,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.qf",
+        "kind": "float",
+        "low": 0.0001,
+        "high": 0.0025,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_floor",
+        "kind": "float",
+        "low": 0.006,
+        "high": 0.03,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.tau_env",
+        "kind": "float",
+        "low": 28.0,
+        "high": 60.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.student_t_nu",
+        "kind": "float",
+        "low": 3.0,
+        "high": 14.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.post_smooth_alpha",
+        "kind": "float",
+        "low": 0.45,
+        "high": 0.92,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.g_z_eff_floor_ratio",
+        "kind": "float",
+        "low": 0.14,
+        "high": 0.3,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_gate_nis",
+        "kind": "float",
+        "low": 0.06,
+        "high": 0.55,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.gate_bias",
+        "kind": "float",
+        "low": 0.3,
+        "high": 0.82,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.g_z_floor",
+        "kind": "float",
+        "low": 0.18,
+        "high": 0.34,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.alpha_R_max",
+        "kind": "float",
+        "low": 3.5,
+        "high": 7.5,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_strength",
+        "kind": "float",
+        "low": 0.65,
+        "high": 1.15,
+        "choices": null,
+        "log": false
+      }
+    ],
+    "dof__robust_ossm_ekf": [
+      {
+        "path": "oscillator.qx",
+        "kind": "float",
+        "low": 0.0007,
+        "high": 0.0035,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.qf",
+        "kind": "float",
+        "low": 0.00018,
+        "high": 0.0024,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_floor",
+        "kind": "float",
+        "low": 0.012,
+        "high": 0.05,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.tau_env",
+        "kind": "float",
+        "low": 24.0,
+        "high": 56.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.student_t_nu",
+        "kind": "float",
+        "low": 3.2,
+        "high": 8.5,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.post_smooth_alpha",
+        "kind": "float",
+        "low": 0.58,
+        "high": 0.86,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.g_z_eff_floor_ratio",
+        "kind": "float",
+        "low": 0.18,
+        "high": 0.38,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_strength",
+        "kind": "float",
+        "low": 0.65,
+        "high": 1.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_1",
+        "kind": "float",
+        "low": 1.0,
+        "high": 1.9,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_2",
+        "kind": "float",
+        "low": 0.35,
+        "high": 1.1,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_gate_nis",
+        "kind": "float",
+        "low": 0.16,
+        "high": 0.46,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.gate_bias",
+        "kind": "float",
+        "low": 0.42,
+        "high": 0.8,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.g_z_floor",
+        "kind": "float",
+        "low": 0.18,
+        "high": 0.36,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.alpha_R_max",
+        "kind": "float",
+        "low": 5.0,
+        "high": 9.5,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.thd_max",
+        "kind": "float",
+        "low": 0.22,
+        "high": 0.55,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_h_min",
+        "kind": "float",
+        "low": 0.16,
+        "high": 0.4,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.nis_hard_gate",
+        "kind": "float",
+        "low": 12.0,
+        "high": 24.0,
+        "choices": null,
+        "log": false
+      }
+    ],
+    "profile1d_*__robust_ossm_ekf": [
+      {
+        "path": "oscillator.rv_auto",
+        "kind": "choice",
+        "low": null,
+        "high": null,
+        "choices": [
+          true,
+          false
+        ],
+        "log": false
+      },
+      {
+        "path": "oscillator.rv",
+        "kind": "float",
+        "low": 0.008,
+        "high": 0.065,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.rv_mad_scale",
+        "kind": "float",
+        "low": 0.65,
+        "high": 1.1,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.qx",
+        "kind": "float",
+        "low": 0.0004,
+        "high": 0.008,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.qf",
+        "kind": "float",
+        "low": 0.00025,
+        "high": 0.005,
+        "choices": null,
+        "log": true
+      },
+      {
+        "path": "oscillator.tau_env",
+        "kind": "float",
+        "low": 20.0,
+        "high": 72.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.student_t_nu",
+        "kind": "float",
+        "low": 3.0,
+        "high": 14.0,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.post_smooth_alpha",
+        "kind": "float",
+        "low": 0.6,
+        "high": 0.97,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.g_z_eff_floor_ratio",
+        "kind": "float",
+        "low": 0.18,
+        "high": 0.65,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "oscillator.spec_guidance_strength",
+        "kind": "float",
+        "low": 0.55,
+        "high": 1.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_1",
+        "kind": "float",
+        "low": 0.55,
+        "high": 1.65,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.beta_2",
+        "kind": "float",
+        "low": 0.12,
+        "high": 1.2,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.w_gate_nis",
+        "kind": "float",
+        "low": 0.06,
+        "high": 0.45,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.gate_bias",
+        "kind": "float",
+        "low": 0.2,
+        "high": 0.72,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.g_z_floor",
+        "kind": "float",
+        "low": 0.1,
+        "high": 0.55,
+        "choices": null,
+        "log": false
+      },
+      {
+        "path": "trust.alpha_R_max",
+        "kind": "float",
+        "low": 2.0,
+        "high": 7.0,
+        "choices": null,
+        "log": false
+      }
+    ]
+  },
+  "family_defaults": {
+    "robust_ossm_ekf": {
+      "oscillator.predict_method": "ekf",
+      "oscillator.eda_baseline": false,
+      "oscillator.no_autotune": true,
+      "oscillator.em_mode": "off",
+      "oscillator.qx": 0.00022,
+      "oscillator.qf": 5e-05,
+      "oscillator.rv_floor": 0.012,
+      "oscillator.rv_mad_scale": 0.9,
+      "oscillator.tau_env": 52.0,
+      "oscillator.student_t_nu": 12.0,
+      "oscillator.vb_iters": 2,
+      "oscillator.trace_cap": 120.0,
+      "oscillator.lambda_floor": 0.004,
+      "oscillator.r_eff_max_scale": 25.0,
+      "oscillator.g_z_eff_floor_ratio": 0.24,
+      "oscillator.post_smooth_alpha": 0.86,
+      "oscillator.spec_guidance_strength": 0.95,
+      "oscillator.spec_guidance_offset": 0.22,
+      "trust.beta_1": 1.2,
+      "trust.beta_2": 0.85,
+      "trust.gamma_1": 1.9,
+      "trust.w_gate_vis": 1.6,
+      "trust.w_gate_cons": 1.3,
+      "trust.w_gate_nis": 0.45,
+      "trust.gate_bias": 0.72,
+      "trust.freq_jitter_decay": 0.62,
+      "trust.thd_max": 0.52,
+      "trust.w_h_min": 0.38,
+      "trust.g_z_floor": 0.2,
+      "trust.nis_hard_gate": 24.0,
+      "trust.alpha_R_max": 8.0,
+      "trust.alpha_Q_max": 3.2,
+      "gating.profile": "relaxed",
+      "gating.tracker.std_min_bpm": 0.55,
+      "gating.tracker.unique_min": 0.05,
+      "gating.tracker.saturation_max": 0.42,
+      "gating.tracker.std_is_soft": true,
+      "gating.tracker.saturation_margin_hz": 0.02,
+      "gating.spectral.peak_ratio_min": 1.25,
+      "gating.spectral.prominence_min_db": 1.5,
+      "gating.spectral.fwhm_max_hz": 0.55,
+      "gating.spectral.fwhm_df_guard": 1.5,
+      "preproc.robust_zscore.enabled": true,
+      "preproc.robust_zscore.clip": 2.5,
+      "preproc.sign_align.enabled": true,
+      "preproc.sign_align.seconds": 10.0
+    },
+    "robust_ossm_ukf": {
+      "oscillator.predict_method": "ukf",
+      "oscillator.eda_baseline": false,
+      "oscillator.no_autotune": true,
+      "oscillator.em_mode": "off",
+      "oscillator.qx": 0.00035,
+      "oscillator.qf": 8e-05,
+      "oscillator.rv_floor": 0.015,
+      "oscillator.rv_mad_scale": 1.0,
+      "oscillator.tau_env": 56.0,
+      "oscillator.student_t_nu": 10.0,
+      "oscillator.vb_iters": 2,
+      "oscillator.trace_cap": 150.0,
+      "oscillator.lambda_floor": 0.0015,
+      "oscillator.r_eff_max_scale": 50.0,
+      "oscillator.g_z_eff_floor_ratio": 0.16,
+      "oscillator.post_smooth_alpha": 0.84,
+      "oscillator.spec_guidance_strength": 1.15,
+      "oscillator.spec_guidance_offset": 0.32,
+      "oscillator.ukf_alpha": 0.005,
+      "oscillator.ukf_beta": 2.0,
+      "oscillator.ukf_kappa": 0.0,
+      "trust.beta_1": 1.4,
+      "trust.beta_2": 1.1,
+      "trust.gamma_1": 2.2,
+      "trust.w_gate_vis": 1.5,
+      "trust.w_gate_cons": 1.4,
+      "trust.w_gate_nis": 0.7,
+      "trust.gate_bias": 0.85,
+      "trust.freq_jitter_decay": 0.8,
+      "trust.thd_max": 0.4,
+      "trust.w_h_min": 0.25,
+      "trust.g_z_floor": 0.12,
+      "trust.nis_hard_gate": 16.0,
+      "trust.alpha_R_max": 20.0,
+      "trust.alpha_Q_max": 5.0,
+      "preproc.robust_zscore.enabled": true,
+      "preproc.robust_zscore.clip": 2.5,
+      "preproc.sign_align.enabled": true,
+      "preproc.sign_align.seconds": 10.0
+    },
+    "of_farneback__robust_ossm_ekf": {
+      "oscillator.rv_auto": true,
+      "oscillator.qx": 0.00282,
+      "oscillator.qf": 0.000767,
+      "oscillator.rv_floor": 0.01142,
+      "oscillator.rv_mad_scale": 0.883,
+      "oscillator.tau_env": 39.2,
+      "oscillator.student_t_nu": 11.0,
+      "oscillator.g_z_eff_floor_ratio": 0.282,
+      "oscillator.post_smooth_alpha": 0.872,
+      "oscillator.spec_guidance_strength": 1.099,
+      "trust.w_gate_nis": 0.442,
+      "trust.gate_bias": 0.634,
+      "trust.g_z_floor": 0.193,
+      "trust.alpha_R_max": 4.15
+    },
+    "dof__robust_ossm_ekf": {
+      "oscillator.rv_auto": true,
+      "oscillator.qx": 0.0018,
+      "oscillator.qf": 0.00055,
+      "oscillator.rv_floor": 0.028,
+      "oscillator.rv_mad_scale": 0.883,
+      "oscillator.tau_env": 38.0,
+      "oscillator.student_t_nu": 5.2,
+      "oscillator.g_z_eff_floor_ratio": 0.28,
+      "oscillator.post_smooth_alpha": 0.72,
+      "oscillator.spec_guidance_strength": 0.82,
+      "trust.beta_1": 1.55,
+      "trust.beta_2": 0.72,
+      "trust.w_gate_nis": 0.3,
+      "trust.gate_bias": 0.62,
+      "trust.g_z_floor": 0.3,
+      "trust.alpha_R_max": 7.5,
+      "trust.thd_max": 0.38,
+      "trust.w_h_min": 0.26,
+      "trust.nis_hard_gate": 18.0
+    },
+    "profile1d_*__robust_ossm_ekf": {
+      "oscillator.rv_auto": false,
+      "oscillator.rv": 0.04,
+      "oscillator.rv_floor": 0.018,
+      "oscillator.qx": 0.00096,
+      "oscillator.qf": 0.00165,
+      "oscillator.tau_env": 35.0,
+      "oscillator.student_t_nu": 7.5,
+      "oscillator.g_z_eff_floor_ratio": 0.35,
+      "oscillator.post_smooth_alpha": 0.872,
+      "oscillator.spec_guidance_strength": 0.98,
+      "oscillator.spec_guidance_offset": 0.12,
+      "trust.beta_1": 1.11,
+      "trust.beta_2": 0.46,
+      "trust.w_gate_nis": 0.1,
+      "trust.gate_bias": 0.65,
+      "trust.freq_jitter_decay": 0.42,
+      "trust.g_z_floor": 0.27,
+      "trust.alpha_R_max": 3.11
+    }
+  },
+  "objective_weights": {
+    "time_mae": 0.12,
+    "time_dtw": 0.05,
+    "time_rmse": 0.03,
+    "freq_mae": 0.2,
+    "freq_rmse": 0.07,
+    "fail_rate": 0.12,
+    "fail_lock": 0.09,
+    "fail_double": 0.08,
+    "fail_slip": 0.04,
+    "invalid_rate": 0.04,
+    "clip_rate": 0.03,
+    "nis_truefail": 0.04,
+    "nis_overstrict": 0.01,
+    "nis_mean_dev": 0.16,
+    "coverage_dev": 0.07,
+    "alpha_R_excess": 0.06,
+    "g_z_eff_deficit": 0.08,
+    "ccc_penalty": 0.01,
+    "snr_penalty": 0.01,
+    "vs_kfstd_time_mae": 0.22,
+    "vs_kfstd_freq_mae": 0.2,
+    "constraint_penalty": 0.1
+  },
+  "objective_constraints": {
+    "fail_rate_max": 0.45,
+    "fail_lock_max": 0.3,
+    "fail_double_max": 0.18,
+    "fail_slip_max": 0.01,
+    "invalid_rate_max": 0.03,
+    "clip_rate_max": 0.2,
+    "nis_truefail_max": 1.0,
+    "nis_mean_dev_max": 0.5,
+    "alpha_R_mean_max": 2.0,
+    "lambda_low_frac_max": 0.35,
+    "vs_kfstd_time_mae_max": 0.4,
+    "vs_kfstd_freq_mae_max": 0.1,
+    "coverage95_min": 0.83,
+    "g_z_eff_mean_min": 0.18,
+    "coverage95_target": 0.95,
+    "nis_mean_target": 1.0,
+    "alpha_R_target": 1.6,
+    "g_z_eff_target": 0.24
+  },
+  "objective_normalization": {
+    "enabled": false,
+    "mode": "robust_zscore",
+    "min_history": 8,
+    "eps": 1e-06,
+    "clip": 4.0,
+    "fallback": "raw"
+  },
+  "split_cfg": {
+    "mode": "subject_kfold",
+    "n_folds": 5
+  },
+  "pruning_cfg": {
+    "debug_stage": true,
+    "pruner": "percentile",
+    "percentile": 45.0,
+    "n_startup_trials": 22,
+    "n_warmup_steps": 0,
+    "interval_steps": 1,
+    "sampler_startup_trials": 20,
+    "sampler_ei_candidates": 72,
+    "debug_prune_quantile": 0.65,
+    "debug_prune_min_history": 8,
+    "debug_prune_margin": 0.02
+  },
+  "repro_guard": {
+    "enabled": true,
+    "mode": "abort",
+    "tracked_paths": [
+      "components/models/core/base.py",
+      "components/models/heads/robust_ossm.py",
+      "configs/cohface_robust_ossm.json",
+      "core/optimization/run_optuna.py",
+      "core/pipeline/evaluation_step.py",
+      "core/pipeline/runner.py",
+      "core/pipeline/wrapped_method.py",
+      "main.py"
+    ]
+  }
+}

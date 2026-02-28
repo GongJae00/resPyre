@@ -182,21 +182,26 @@
                     "no_autotune": true,
                     "em_mode": "off",
                     "rv_auto": true,
-                    "qx": 0.00200,
-                    "qf": 0.000600,
-                    "rv_floor": 0.025,
+                    "qx": 0.00180,
+                    "qf": 0.000550,
+                    "rv_floor": 0.028,
                     "rv_mad_scale": 0.883,
-                    "tau_env": 35.0,
-                    "student_t_nu": 5.5,
-                    "g_z_eff_floor_ratio": 0.25,
-                    "post_smooth_alpha": 0.75,
-                    "spec_guidance_strength": 0.90
+                    "tau_env": 38.0,
+                    "student_t_nu": 5.2,
+                    "g_z_eff_floor_ratio": 0.28,
+                    "post_smooth_alpha": 0.72,
+                    "spec_guidance_strength": 0.82
                 },
                 "trust": {
-                    "w_gate_nis": 0.20,
-                    "gate_bias": 0.65,
-                    "g_z_floor": 0.28,
-                    "alpha_R_max": 7.0
+                    "beta_1": 1.55,
+                    "beta_2": 0.72,
+                    "w_gate_nis": 0.30,
+                    "gate_bias": 0.62,
+                    "g_z_floor": 0.30,
+                    "alpha_R_max": 7.5,
+                    "thd_max": 0.38,
+                    "w_h_min": 0.26,
+                    "nis_hard_gate": 18.0
                 }
             }
         },
@@ -556,89 +561,107 @@
                 {
                     "path": "oscillator.qx",
                     "kind": "float",
-                    "low": 0.0006,
-                    "high": 0.0055,
+                    "low": 0.0007,
+                    "high": 0.0035,
                     "log": true
                 },
                 {
                     "path": "oscillator.qf",
                     "kind": "float",
-                    "low": 0.0001,
-                    "high": 0.0035,
+                    "low": 0.00018,
+                    "high": 0.0024,
                     "log": true
                 },
                 {
                     "path": "oscillator.rv_floor",
                     "kind": "float",
-                    "low": 0.008,
-                    "high": 0.06,
+                    "low": 0.012,
+                    "high": 0.05,
                     "log": true
                 },
                 {
                     "path": "oscillator.tau_env",
                     "kind": "float",
-                    "low": 20.0,
-                    "high": 65.0
+                    "low": 24.0,
+                    "high": 56.0
                 },
                 {
                     "path": "oscillator.student_t_nu",
                     "kind": "float",
-                    "low": 2.5,
-                    "high": 10.0
+                    "low": 3.2,
+                    "high": 8.5
                 },
                 {
                     "path": "oscillator.post_smooth_alpha",
                     "kind": "float",
-                    "low": 0.45,
-                    "high": 0.92
+                    "low": 0.58,
+                    "high": 0.86
                 },
                 {
                     "path": "oscillator.g_z_eff_floor_ratio",
                     "kind": "float",
-                    "low": 0.14,
-                    "high": 0.45
+                    "low": 0.18,
+                    "high": 0.38
                 },
                 {
                     "path": "oscillator.spec_guidance_strength",
                     "kind": "float",
-                    "low": 0.55,
-                    "high": 1.15
+                    "low": 0.65,
+                    "high": 1.0
                 },
                 {
                     "path": "trust.beta_1",
                     "kind": "float",
-                    "low": 0.80,
-                    "high": 2.0
+                    "low": 1.0,
+                    "high": 1.9
                 },
                 {
                     "path": "trust.beta_2",
                     "kind": "float",
-                    "low": 0.40,
-                    "high": 1.50
+                    "low": 0.35,
+                    "high": 1.10
                 },
                 {
                     "path": "trust.w_gate_nis",
                     "kind": "float",
-                    "low": 0.05,
-                    "high": 0.50
+                    "low": 0.16,
+                    "high": 0.46
                 },
                 {
                     "path": "trust.gate_bias",
                     "kind": "float",
-                    "low": 0.25,
-                    "high": 0.85
+                    "low": 0.42,
+                    "high": 0.80
                 },
                 {
                     "path": "trust.g_z_floor",
                     "kind": "float",
-                    "low": 0.15,
-                    "high": 0.45
+                    "low": 0.18,
+                    "high": 0.36
                 },
                 {
                     "path": "trust.alpha_R_max",
                     "kind": "float",
-                    "low": 4.0,
-                    "high": 12.0
+                    "low": 5.0,
+                    "high": 9.5
+                },
+                {
+                    "path": "trust.thd_max",
+                    "kind": "float",
+                    "low": 0.22,
+                    "high": 0.55
+                },
+                {
+                    "path": "trust.w_h_min",
+                    "kind": "float",
+                    "low": 0.16,
+                    "high": 0.40
+                },
+                {
+                    "path": "trust.nis_hard_gate",
+                    "kind": "float",
+                    "low": 12.0,
+                    "high": 24.0
                 }
             ],
             "profile1d_*__robust_ossm_ekf": [
@@ -889,21 +912,24 @@
             },
             "dof__robust_ossm_ekf": {
                 "oscillator.rv_auto": true,
-                "oscillator.qx": 0.00200,
-                "oscillator.qf": 0.000600,
-                "oscillator.rv_floor": 0.025,
+                "oscillator.qx": 0.00180,
+                "oscillator.qf": 0.000550,
+                "oscillator.rv_floor": 0.028,
                 "oscillator.rv_mad_scale": 0.883,
-                "oscillator.tau_env": 35.0,
-                "oscillator.student_t_nu": 5.5,
-                "oscillator.g_z_eff_floor_ratio": 0.25,
-                "oscillator.post_smooth_alpha": 0.75,
-                "oscillator.spec_guidance_strength": 0.90,
-                "trust.beta_1": 1.5,
-                "trust.beta_2": 0.85,
-                "trust.w_gate_nis": 0.20,
-                "trust.gate_bias": 0.65,
-                "trust.g_z_floor": 0.28,
-                "trust.alpha_R_max": 7.0
+                "oscillator.tau_env": 38.0,
+                "oscillator.student_t_nu": 5.2,
+                "oscillator.g_z_eff_floor_ratio": 0.28,
+                "oscillator.post_smooth_alpha": 0.72,
+                "oscillator.spec_guidance_strength": 0.82,
+                "trust.beta_1": 1.55,
+                "trust.beta_2": 0.72,
+                "trust.w_gate_nis": 0.30,
+                "trust.gate_bias": 0.62,
+                "trust.g_z_floor": 0.30,
+                "trust.alpha_R_max": 7.5,
+                "trust.thd_max": 0.38,
+                "trust.w_h_min": 0.26,
+                "trust.nis_hard_gate": 18.0
             },
             "profile1d_*__robust_ossm_ekf": {
                 "oscillator.rv_auto": false,

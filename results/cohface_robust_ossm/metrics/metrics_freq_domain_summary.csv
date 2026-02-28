@@ -1,0 +1,16 @@
+method,MAE_median,MAE_std,RMSE_median,RMSE_std,MAPE_median,MAPE_std,PearsonR_median,PearsonR_std,SNR_Spec_median,SNR_Spec_std,Bias_median,Bias_std,LoA_Width_median,LoA_Width_std,KL_Div_median,KL_Div_std,Entropy_Err_median,Entropy_Err_std,Method
+of_farneback,0.38,,0.42,,2.29,,0.99,,4.176177641378875,,0.33870968,,0.97437835,,0.18496591,,0.36421347,,of_farneback
+of_farneback__kfstd,0.38,,0.41,,2.27,,0.99,,5.515213043616866,,0.32903215,,0.99783653,,0.14394021,,0.22878838,,of_farneback__kfstd
+of_farneback__robust_ossm_ekf,0.39,,0.46,,2.3,,0.99,,5.699728802316628,,0.36129037,,1.1164668,,0.17013034,,0.2139163,,of_farneback__robust_ossm_ekf
+DoF,4.1,,4.6,,25.24,,-0.58,,0.25670350342273973,,1.8193549,,16.814142,,1.035448,,0.6207905,,DoF
+dof__kfstd,2.93,,3.34,,18.58,,-0.54,,4.299665319870163,,2.53871,,8.677099,,0.76307887,,0.09902859,,dof__kfstd
+dof__robust_ossm_ekf,3.5,,3.67,,21.83,,0.6,,6.1314488952026,,3.5000007,,4.4291964,,1.2129995,,0.0739789,,dof__robust_ossm_ekf
+profile1D linear,0.32,,0.41,,2.0,,0.99,,10.762389783635786,,0.31612897,,1.0176748,,0.15872805,,0.18774128,,profile1D linear
+profile1d_linear__kfstd,0.38,,0.47,,2.41,,0.98,,12.936953326351155,,0.3483868,,1.2473198,,0.32878232,,0.351099,,profile1d_linear__kfstd
+profile1d_linear__robust_ossm_ekf,0.31,,0.4,,1.96,,0.98,,11.030586862830114,,0.30322573,,1.0493302,,0.16041017,,0.20358086,,profile1d_linear__robust_ossm_ekf
+profile1D quadratic,0.34,,0.39,,2.14,,1.0,,10.260921379347625,,0.33870962,,0.8076678,,0.19250666,,0.17267561,,profile1D quadratic
+profile1d_quadratic__kfstd,0.39,,0.47,,2.48,,0.99,,13.041132197776793,,0.37741908,,1.0887425,,0.3698132,,0.37005234,,profile1d_quadratic__kfstd
+profile1d_quadratic__robust_ossm_ekf,0.33,,0.38,,2.09,,0.99,,10.782009688761525,,0.33225805,,0.7255498,,0.22299597,,0.20828152,,profile1d_quadratic__robust_ossm_ekf
+profile1D cubic,0.34,,0.39,,2.14,,1.0,,10.187275555341717,,0.33870962,,0.8076678,,0.19126254,,0.1689024,,profile1D cubic
+profile1d_cubic__kfstd,0.4,,0.47,,2.53,,0.99,,13.07167804186852,,0.3838707,,1.1137985,,0.36835763,,0.37149715,,profile1d_cubic__kfstd
+profile1d_cubic__robust_ossm_ekf,0.34,,0.39,,2.11,,0.99,,10.77741198370944,,0.3354837,,0.75435525,,0.22271767,,0.21025372,,profile1d_cubic__robust_ossm_ekf
