@@ -66,21 +66,21 @@
                     "no_autotune": true,
                     "em_mode": "off",
                     "rv_auto": true,
-                    "qx": 0.00282,
-                    "qf": 0.000767,
-                    "rv_floor": 0.01142,
+                    "qx": 0.00221,
+                    "qf": 0.000863,
+                    "rv_floor": 0.01549,
                     "rv_mad_scale": 0.883,
-                    "tau_env": 39.2,
-                    "student_t_nu": 11.0,
-                    "g_z_eff_floor_ratio": 0.282,
-                    "post_smooth_alpha": 0.872,
-                    "spec_guidance_strength": 1.099
+                    "tau_env": 57.2,
+                    "student_t_nu": 13.9,
+                    "g_z_eff_floor_ratio": 0.327,
+                    "post_smooth_alpha": 0.494,
+                    "spec_guidance_strength": 1.101
                 },
                 "trust": {
-                    "w_gate_nis": 0.442,
-                    "gate_bias": 0.634,
-                    "g_z_floor": 0.193,
-                    "alpha_R_max": 4.15
+                    "w_gate_nis": 0.111,
+                    "gate_bias": 0.519,
+                    "g_z_floor": 0.181,
+                    "alpha_R_max": 7.0
                 }
             }
         },
@@ -107,24 +107,26 @@
                     "no_autotune": true,
                     "em_mode": "off",
                     "rv_auto": false,
-                    "rv": 0.0280,
+                    "rv": 0.01557,
+                    "rv_mad_scale": 1.0131,
                     "rv_floor": 0.018,
-                    "qx": 0.00120,
-                    "qf": 0.00220,
-                    "tau_env": 28.0,
-                    "student_t_nu": 8.0,
-                    "g_z_eff_floor_ratio": 0.42,
-                    "post_smooth_alpha": 0.910,
+                    "qx": 0.001244,
+                    "qf": 0.001437,
+                    "tau_env": 64.68,
+                    "student_t_nu": 13.978,
+                    "g_z_eff_floor_ratio": 0.3419,
+                    "post_smooth_alpha": 0.7499,
+                    "spec_guidance_strength": 0.5725,
                     "spec_guidance_offset": 0.12
                 },
                 "trust": {
-                    "beta_1": 1.00,
-                    "beta_2": 0.430,
-                    "w_gate_nis": 0.18,
-                    "gate_bias": 0.620,
+                    "beta_1": 1.3902,
+                    "beta_2": 0.1476,
+                    "w_gate_nis": 0.1926,
+                    "gate_bias": 0.5258,
                     "freq_jitter_decay": 0.42,
-                    "g_z_floor": 0.220,
-                    "alpha_R_max": 3.50
+                    "g_z_floor": 0.387,
+                    "alpha_R_max": 5.472
                 }
             }
         },
@@ -137,25 +139,26 @@
                     "no_autotune": true,
                     "em_mode": "off",
                     "rv_auto": false,
-                    "rv": 0.04873,
+                    "rv": 0.08588,
+                    "rv_mad_scale": 0.6883,
                     "rv_floor": 0.018,
-                    "qx": 0.00105,
-                    "qf": 0.00123,
-                    "tau_env": 33.5,
-                    "student_t_nu": 8.50,
-                    "g_z_eff_floor_ratio": 0.276,
-                    "post_smooth_alpha": 0.838,
-                    "spec_guidance_strength": 1.035,
+                    "qx": 0.0003246,
+                    "qf": 0.002638,
+                    "tau_env": 63.97,
+                    "student_t_nu": 12.33,
+                    "g_z_eff_floor_ratio": 0.2311,
+                    "post_smooth_alpha": 0.9676,
+                    "spec_guidance_strength": 0.8144,
                     "spec_guidance_offset": 0.12
                 },
                 "trust": {
-                    "beta_1": 1.081,
-                    "beta_2": 0.256,
-                    "w_gate_nis": 0.063,
-                    "gate_bias": 0.698,
+                    "beta_1": 0.8836,
+                    "beta_2": 0.8669,
+                    "w_gate_nis": 0.3227,
+                    "gate_bias": 0.5477,
                     "freq_jitter_decay": 0.42,
-                    "g_z_floor": 0.345,
-                    "alpha_R_max": 2.91
+                    "g_z_floor": 0.3209,
+                    "alpha_R_max": 4.0105
                 }
             }
         },
@@ -182,26 +185,26 @@
                     "no_autotune": true,
                     "em_mode": "off",
                     "rv_auto": true,
-                    "qx": 0.00180,
-                    "qf": 0.000550,
-                    "rv_floor": 0.028,
-                    "rv_mad_scale": 0.883,
-                    "tau_env": 38.0,
-                    "student_t_nu": 5.2,
-                    "g_z_eff_floor_ratio": 0.28,
-                    "post_smooth_alpha": 0.72,
-                    "spec_guidance_strength": 0.82
+                    "qx": 0.003703,
+                    "qf": 0.001413,
+                    "rv_floor": 0.03189,
+                    "rv_mad_scale": 0.5921,
+                    "tau_env": 14.04,
+                    "student_t_nu": 11.29,
+                    "g_z_eff_floor_ratio": 0.123,
+                    "post_smooth_alpha": 0.7623,
+                    "spec_guidance_strength": 0.5558
                 },
                 "trust": {
-                    "beta_1": 1.55,
-                    "beta_2": 0.72,
-                    "w_gate_nis": 0.30,
-                    "gate_bias": 0.62,
-                    "g_z_floor": 0.30,
-                    "alpha_R_max": 7.5,
-                    "thd_max": 0.38,
-                    "w_h_min": 0.26,
-                    "nis_hard_gate": 18.0
+                    "beta_1": 1.3962,
+                    "beta_2": 0.1035,
+                    "w_gate_nis": 0.1475,
+                    "gate_bias": 0.6518,
+                    "g_z_floor": 0.3783,
+                    "alpha_R_max": 5.2819,
+                    "thd_max": 0.263,
+                    "w_h_min": 0.3493,
+                    "nis_hard_gate": 13.559
                 }
             }
         },
@@ -214,25 +217,26 @@
                     "no_autotune": true,
                     "em_mode": "off",
                     "rv_auto": false,
-                    "rv": 0.06308,
+                    "rv": 0.07007,
+                    "rv_mad_scale": 0.7622,
                     "rv_floor": 0.018,
-                    "qx": 0.000754,
-                    "qf": 0.001872,
-                    "tau_env": 57.2,
-                    "student_t_nu": 6.56,
-                    "g_z_eff_floor_ratio": 0.353,
-                    "post_smooth_alpha": 0.869,
-                    "spec_guidance_strength": 0.961,
+                    "qx": 0.001154,
+                    "qf": 0.002446,
+                    "tau_env": 24.19,
+                    "student_t_nu": 3.847,
+                    "g_z_eff_floor_ratio": 0.2306,
+                    "post_smooth_alpha": 0.6717,
+                    "spec_guidance_strength": 1.2008,
                     "spec_guidance_offset": 0.12
                 },
                 "trust": {
-                    "beta_1": 1.247,
-                    "beta_2": 0.699,
-                    "w_gate_nis": 0.095,
-                    "gate_bias": 0.634,
+                    "beta_1": 1.5602,
+                    "beta_2": 0.8601,
+                    "w_gate_nis": 0.4422,
+                    "gate_bias": 0.6885,
                     "freq_jitter_decay": 0.42,
-                    "g_z_floor": 0.244,
-                    "alpha_R_max": 2.93
+                    "g_z_floor": 0.1733,
+                    "alpha_R_max": 6.9091
                 }
             }
         }
@@ -246,6 +250,8 @@
         "track_std_min_bpm": 0.8,
         "track_unique_min": 0.05,
         "track_saturation_max": 0.35,
+        "frame_log_strict": false,
+        "allow_missing": true,
         "calibration": {
             "nis_dof": 1.0,
             "nis_alpha_strict": 0.05,
@@ -346,7 +352,7 @@
             "sampler_ei_candidates": 72,
             "debug_prune_quantile": 0.65,
             "debug_prune_min_history": 8,
-            "debug_prune_margin": 0.020
+            "debug_prune_margin": 0.02
         },
         "search_space": {
             "robust_ossm_ekf": [
@@ -354,14 +360,14 @@
                     "path": "oscillator.qx",
                     "kind": "float",
                     "low": 0.00015,
-                    "high": 0.0050,
+                    "high": 0.005,
                     "log": true
                 },
                 {
                     "path": "oscillator.qf",
                     "kind": "float",
                     "low": 3e-05,
-                    "high": 0.0020,
+                    "high": 0.002,
                     "log": true
                 },
                 {
@@ -444,7 +450,7 @@
                     "path": "trust.gate_bias",
                     "kind": "float",
                     "low": 0.25,
-                    "high": 0.90
+                    "high": 0.9
                 },
                 {
                     "path": "trust.g_z_floor",
@@ -484,7 +490,7 @@
                 {
                     "path": "oscillator.qx",
                     "kind": "float",
-                    "low": 0.0010,
+                    "low": 0.001,
                     "high": 0.0035,
                     "log": true
                 },
@@ -499,7 +505,7 @@
                     "path": "oscillator.rv_floor",
                     "kind": "float",
                     "low": 0.006,
-                    "high": 0.030,
+                    "high": 0.03,
                     "log": true
                 },
                 {
@@ -535,7 +541,7 @@
                 {
                     "path": "trust.gate_bias",
                     "kind": "float",
-                    "low": 0.30,
+                    "low": 0.3,
                     "high": 0.82
                 },
                 {
@@ -619,7 +625,7 @@
                     "path": "trust.beta_2",
                     "kind": "float",
                     "low": 0.35,
-                    "high": 1.10
+                    "high": 1.1
                 },
                 {
                     "path": "trust.w_gate_nis",
@@ -631,7 +637,7 @@
                     "path": "trust.gate_bias",
                     "kind": "float",
                     "low": 0.42,
-                    "high": 0.80
+                    "high": 0.8
                 },
                 {
                     "path": "trust.g_z_floor",
@@ -655,7 +661,7 @@
                     "path": "trust.w_h_min",
                     "kind": "float",
                     "low": 0.16,
-                    "high": 0.40
+                    "high": 0.4
                 },
                 {
                     "path": "trust.nis_hard_gate",
@@ -668,7 +674,10 @@
                 {
                     "path": "oscillator.rv_auto",
                     "kind": "choice",
-                    "choices": [true, false]
+                    "choices": [
+                        true,
+                        false
+                    ]
                 },
                 {
                     "path": "oscillator.rv",
@@ -681,20 +690,20 @@
                     "path": "oscillator.rv_mad_scale",
                     "kind": "float",
                     "low": 0.65,
-                    "high": 1.10
+                    "high": 1.1
                 },
                 {
                     "path": "oscillator.qx",
                     "kind": "float",
                     "low": 0.0004,
-                    "high": 0.0080,
+                    "high": 0.008,
                     "log": true
                 },
                 {
                     "path": "oscillator.qf",
                     "kind": "float",
                     "low": 0.00025,
-                    "high": 0.0050,
+                    "high": 0.005,
                     "log": true
                 },
                 {
@@ -712,7 +721,7 @@
                 {
                     "path": "oscillator.post_smooth_alpha",
                     "kind": "float",
-                    "low": 0.60,
+                    "low": 0.6,
                     "high": 0.97
                 },
                 {
@@ -725,7 +734,7 @@
                     "path": "oscillator.spec_guidance_strength",
                     "kind": "float",
                     "low": 0.55,
-                    "high": 1.20
+                    "high": 1.2
                 },
                 {
                     "path": "trust.beta_1",
@@ -737,7 +746,7 @@
                     "path": "trust.beta_2",
                     "kind": "float",
                     "low": 0.12,
-                    "high": 1.20
+                    "high": 1.2
                 },
                 {
                     "path": "trust.w_gate_nis",
@@ -748,13 +757,13 @@
                 {
                     "path": "trust.gate_bias",
                     "kind": "float",
-                    "low": 0.20,
+                    "low": 0.2,
                     "high": 0.72
                 },
                 {
                     "path": "trust.g_z_floor",
                     "kind": "float",
-                    "low": 0.10,
+                    "low": 0.1,
                     "high": 0.55
                 },
                 {
@@ -774,7 +783,7 @@
                 "time_mae": 0.12,
                 "time_dtw": 0.05,
                 "time_rmse": 0.03,
-                "freq_mae": 0.20,
+                "freq_mae": 0.2,
                 "freq_rmse": 0.07,
                 "fail_rate": 0.12,
                 "fail_lock": 0.09,
@@ -791,8 +800,8 @@
                 "ccc_penalty": 0.01,
                 "snr_penalty": 0.01,
                 "vs_kfstd_time_mae": 0.22,
-                "vs_kfstd_freq_mae": 0.20,
-                "constraint_penalty": 0.10
+                "vs_kfstd_freq_mae": 0.2,
+                "constraint_penalty": 0.1
             },
             "constraints": {
                 "fail_rate_max": 0.45,
@@ -802,11 +811,11 @@
                 "invalid_rate_max": 0.03,
                 "clip_rate_max": 0.2,
                 "nis_truefail_max": 1.0,
-                "nis_mean_dev_max": 0.50,
+                "nis_mean_dev_max": 0.5,
                 "alpha_R_mean_max": 2.0,
                 "lambda_low_frac_max": 0.35,
-                "vs_kfstd_time_mae_max": 0.40,
-                "vs_kfstd_freq_mae_max": 0.10,
+                "vs_kfstd_time_mae_max": 0.4,
+                "vs_kfstd_freq_mae_max": 0.1,
                 "coverage95_min": 0.83,
                 "g_z_eff_mean_min": 0.18,
                 "coverage95_target": 0.95,
@@ -820,7 +829,7 @@
                     "freq_mae": 0.28
                 },
                 "dof": {
-                    "time_mae": 0.60,
+                    "time_mae": 0.6,
                     "freq_mae": 0.35
                 },
                 "profile1d_linear": {
@@ -896,60 +905,61 @@
             },
             "of_farneback__robust_ossm_ekf": {
                 "oscillator.rv_auto": true,
-                "oscillator.qx": 0.00282,
-                "oscillator.qf": 0.000767,
-                "oscillator.rv_floor": 0.01142,
+                "oscillator.qx": 0.00221,
+                "oscillator.qf": 0.000863,
+                "oscillator.rv_floor": 0.01549,
                 "oscillator.rv_mad_scale": 0.883,
-                "oscillator.tau_env": 39.2,
-                "oscillator.student_t_nu": 11.0,
-                "oscillator.g_z_eff_floor_ratio": 0.282,
-                "oscillator.post_smooth_alpha": 0.872,
-                "oscillator.spec_guidance_strength": 1.099,
-                "trust.w_gate_nis": 0.442,
-                "trust.gate_bias": 0.634,
-                "trust.g_z_floor": 0.193,
-                "trust.alpha_R_max": 4.15
+                "oscillator.tau_env": 57.2,
+                "oscillator.student_t_nu": 13.9,
+                "oscillator.g_z_eff_floor_ratio": 0.327,
+                "oscillator.post_smooth_alpha": 0.494,
+                "oscillator.spec_guidance_strength": 1.101,
+                "trust.w_gate_nis": 0.111,
+                "trust.gate_bias": 0.519,
+                "trust.g_z_floor": 0.181,
+                "trust.alpha_R_max": 7.0
             },
             "dof__robust_ossm_ekf": {
                 "oscillator.rv_auto": true,
-                "oscillator.qx": 0.00180,
-                "oscillator.qf": 0.000550,
-                "oscillator.rv_floor": 0.028,
-                "oscillator.rv_mad_scale": 0.883,
-                "oscillator.tau_env": 38.0,
-                "oscillator.student_t_nu": 5.2,
-                "oscillator.g_z_eff_floor_ratio": 0.28,
-                "oscillator.post_smooth_alpha": 0.72,
-                "oscillator.spec_guidance_strength": 0.82,
-                "trust.beta_1": 1.55,
-                "trust.beta_2": 0.72,
-                "trust.w_gate_nis": 0.30,
-                "trust.gate_bias": 0.62,
-                "trust.g_z_floor": 0.30,
-                "trust.alpha_R_max": 7.5,
-                "trust.thd_max": 0.38,
-                "trust.w_h_min": 0.26,
-                "trust.nis_hard_gate": 18.0
+                "oscillator.qx": 0.003703,
+                "oscillator.qf": 0.001413,
+                "oscillator.rv_floor": 0.03189,
+                "oscillator.rv_mad_scale": 0.5921,
+                "oscillator.tau_env": 14.04,
+                "oscillator.student_t_nu": 11.29,
+                "oscillator.g_z_eff_floor_ratio": 0.123,
+                "oscillator.post_smooth_alpha": 0.7623,
+                "oscillator.spec_guidance_strength": 0.5558,
+                "trust.beta_1": 1.3962,
+                "trust.beta_2": 0.1035,
+                "trust.w_gate_nis": 0.1475,
+                "trust.gate_bias": 0.6518,
+                "trust.g_z_floor": 0.3783,
+                "trust.alpha_R_max": 5.2819,
+                "trust.thd_max": 0.263,
+                "trust.w_h_min": 0.3493,
+                "trust.nis_hard_gate": 13.559
             },
             "profile1d_*__robust_ossm_ekf": {
                 "oscillator.rv_auto": false,
-                "oscillator.rv": 0.04000,
+                "oscillator.rv": 0.08588,
+                "oscillator.rv_mad_scale": 0.6883,
                 "oscillator.rv_floor": 0.018,
-                "oscillator.qx": 0.000960,
-                "oscillator.qf": 0.001650,
-                "oscillator.tau_env": 35.0,
-                "oscillator.student_t_nu": 7.5,
-                "oscillator.g_z_eff_floor_ratio": 0.35,
-                "oscillator.post_smooth_alpha": 0.872,
-                "oscillator.spec_guidance_strength": 0.98,
+                "oscillator.qx": 0.0003246,
+                "oscillator.qf": 0.002638,
+                "oscillator.tau_env": 63.97,
+                "oscillator.student_t_nu": 12.33,
+                "oscillator.g_z_eff_floor_ratio": 0.2311,
+                "oscillator.post_smooth_alpha": 0.9676,
+                "oscillator.spec_guidance_strength": 0.8144,
                 "oscillator.spec_guidance_offset": 0.12,
-                "trust.beta_1": 1.11,
-                "trust.beta_2": 0.46,
-                "trust.w_gate_nis": 0.10,
-                "trust.gate_bias": 0.65,
+                "trust.beta_1": 0.8836,
+                "trust.beta_2": 0.8669,
+                "trust.w_gate_nis": 0.3227,
+                "trust.gate_bias": 0.5477,
                 "trust.freq_jitter_decay": 0.42,
-                "trust.g_z_floor": 0.27,
-                "trust.alpha_R_max": 3.11
+                "trust.g_z_floor": 0.3209,
+                "trust.alpha_R_max": 4.0105
             }
         }
     },
@@ -961,8 +971,6 @@
         "device": "cpu"
     },
     "steps": [
-        "estimate",
-        "evaluate",
         "metrics",
         "eda",
         "visualize",

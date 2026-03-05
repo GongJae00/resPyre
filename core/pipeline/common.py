@@ -634,23 +634,14 @@ def resolve_frame_logs_for_run(
 			if cutoff is not None:
 				eligible = [c for c in cands if float(c.get("mtime", 0.0)) >= cutoff]
 				if not eligible:
-					for c in cands:
-						extras.append({
-							"method": method_name,
-							"trial_key": trial_base,
-							"path": c["path"],
-							"filename": c["filename"],
-							"suffix": int(c.get("trial_suffix", c.get("suffix", -1))),
-							"mtime": float(c["mtime"]),
-							"reason": "pre_epoch_stale",
-						})
-						consumed_paths.add(c["path"])
-					missing.append({
-						"method": method_name,
-						"trial_key": trial_base,
-						"reason": "all_candidates_pre_epoch",
-					})
-					continue
+					# All candidates are pre-epoch (e.g. evaluate-only re-run without estimate).
+					# Fall back to latest-mtime selection across all candidates so that
+					# filter diagnostics remain computable.
+					warnings.append(
+						f"all_candidates_pre_epoch for {method_name}/{trial_base}; "
+						f"falling back to latest-mtime selection."
+					)
+					eligible = cands
 
 			chosen = None
 			resolution_mode = "canonical_selected"
