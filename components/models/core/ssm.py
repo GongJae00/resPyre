@@ -185,10 +185,12 @@ class OscillatorPredictor:
     # ------------------------------------------------------------------
 
     def predict_ekf(self, x: np.ndarray, P: np.ndarray,
-                    Q: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
+                    Q: np.ndarray, dt: float,
+                    return_jac: bool = False) -> Tuple:
         """EKF prediction: linearized transition with Jacobian.
 
-        Returns (x_pred, P_pred).
+        Returns (x_pred, P_pred) by default.
+        If return_jac=True, returns (x_pred, P_pred, F_jac) for use in EKS smoother.
         """
         x = self.clamp_state(np.asarray(x, dtype=np.float64).copy())
         P = self.sanitize_covariance(P)
@@ -226,6 +228,8 @@ class OscillatorPredictor:
         x_pred = self.clamp_state(x_pred)
         P_pred = self.sanitize_covariance(P_pred)
 
+        if return_jac:
+            return x_pred, P_pred, F
         return x_pred, P_pred
 
     # ------------------------------------------------------------------
@@ -312,11 +316,12 @@ class OscillatorPredictor:
 
     def predict(self, x: np.ndarray, P: np.ndarray,
                 Q: np.ndarray, dt: float,
-                method: str = "ekf") -> Tuple[np.ndarray, np.ndarray]:
+                method: str = "ekf",
+                return_jac: bool = False) -> Tuple:
         """Dispatch to EKF or UKF prediction."""
         if method == "ukf":
             return self.predict_ukf(x, P, Q, dt)
-        return self.predict_ekf(x, P, Q, dt)
+        return self.predict_ekf(x, P, Q, dt, return_jac=return_jac)
 
     def observe(self, x: np.ndarray) -> float:
         """Predicted observation H·x = x1."""

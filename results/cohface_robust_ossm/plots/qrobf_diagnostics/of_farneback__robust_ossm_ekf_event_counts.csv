@@ -1,2 +1,2 @@
 method,n_trials,n_frames,div,slip,lock,double,gate_collapse_runs,harm_suppress_runs
-of_farneback__robust_ossm_ekf,160,197157,270,103,6516,9405,315,2809
+of_farneback__robust_ossm_ekf,160,197157,40,41,4929,18692,54,54

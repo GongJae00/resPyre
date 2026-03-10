@@ -36,11 +36,11 @@ class OscillatorParams:
     f_min: float = 0.08
     f_max: float = 0.50
     init_margin_hz: float = 0.01  # interior guard in Hz to prevent boundary-locked initialisation
-    rho: float = 0.0  # legacy manual override
+    rho: float = 0.0  # DEPRECATED: legacy manual damping override. Use tau_env instead.
     tau_env: float = 30.0
     qx: float = 1e-4  # baseline state noise (can be overridden if needed)
     qx_scale: float = 0.3
-    rv: float = 0.1  # legacy manual override
+    rv: float = 0.1  # DEPRECATED: legacy manual R override. Use rv_auto=True + rv_floor instead.
     rv_auto: bool = True
     rv_mad_scale: float = 1.2
     rv_floor: float = 0.03  # observation noise floor, typically 0.02-0.05
@@ -84,6 +84,9 @@ class OscillatorParams:
     g_z_eff_floor_ratio: float = 0.08  # floor for harmonic-suppressed frequency gate
     eda_baseline: bool = False     # Phase-0 EDA mode: no trust, Gaussian update (ν→∞)
     no_autotune: bool = False      # skip loading autotune/EM overrides from disk
+    use_eks: bool = True           # Enable EKS backward smoother (EKF only)
+    eks_freq_from_phase: bool = False  # Extract freq from phase derivative of smoothed [x1,x2] (like kfstd)
+    eks_2d_rts: bool = False           # After EKS, run 2D fixed-freq KF + RTS + phase derivative (like kfstd)
     detrend: bool = True
     bandpass: bool = True
     zscore: bool = True

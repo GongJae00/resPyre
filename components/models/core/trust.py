@@ -25,7 +25,27 @@ class TrustParams:
 
 @dataclass
 class TrustConfig:
-    """Tuneable hyper-parameters for trust wiring rules."""
+    """Tuneable hyper-parameters for trust wiring rules.
+
+    REGIME GUIDE — Two distinct operating regimes exist:
+    -------------------------------------------------------
+    [A] Active-Gating Regime (experimental / DoF family):
+        Uses defaults below. All 5 rules active.
+
+    [B] Validated No-Gating Regime (production — OF/Profile1D families):
+        Override in per-method config:
+            gate_bias   = -100.0  → g_t ≈ 1.0 always (Rule 3 disabled)
+            alpha_R_max = 1.0     → alpha_R clamped at 1.0 (Rule 1 disabled)
+            beta_1      = 0.0
+            beta_2      = 0.0
+        Active rules in [B]: Rule 2 (alpha_Q via gamma_1),
+            partial Rule 4 (g_z via freq_jitter_decay), Rule 5 (w_h).
+        Primary accuracy mechanism: EKS (use_eks=True).
+        Primary R-scaling: rv_auto=True (MAD-based), independent of alpha_R.
+
+    WARNING: Default TrustConfig() initialises in regime [A].
+    Always explicitly override gate_bias and alpha_R_max for [B] methods.
+    """
     # R-scale: α_R = 1 + β₁·q_out + β₂·(1−q_vis)
     beta_1: float = 2.0       # outlier sensitivity
     beta_2: float = 1.5       # visibility sensitivity

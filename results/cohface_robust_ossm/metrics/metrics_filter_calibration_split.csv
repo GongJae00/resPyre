@@ -1,6 +1,6 @@
 method,n_trials,calibration_applicable,applicability_reason,strict_pass_rate,relaxed_pass_rate,overstrict_rate,true_fail_rate,nis_mean_median,nis_inband_median
-of_farneback__robust_ossm_ekf,160,True,,0.075,0.40625,0.33125,0.59375,0.8899189266527516,0.936214468472533
+of_farneback__robust_ossm_ekf,160,True,,0.00625,0.05,0.04375,0.95,0.1636895182157126,0.922040863385188
 dof__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.1530243518222668,0.9379139072847682
-profile1d_linear__robust_ossm_ekf,160,True,,0.0375,0.25,0.2125,0.75,1.4970602023741615,0.9130434633512019
-profile1d_quadratic__robust_ossm_ekf,160,True,,0.06875,0.35625,0.2875,0.64375,1.1100712977793048,0.9117282787755872
-profile1d_cubic__robust_ossm_ekf,160,True,,0.08125,0.35625,0.275,0.64375,0.8881839063489891,0.9249434663220805
+profile1d_linear__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.101370036495325,0.8993991340745149
+profile1d_quadratic__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.06692228539326635,0.902665322105759
+profile1d_cubic__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.06872117238575785,0.9038420453761579

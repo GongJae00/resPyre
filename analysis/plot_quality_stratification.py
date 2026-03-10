@@ -81,19 +81,26 @@ KFSTD_COLOR = "#3498db"
 QROBF_COLOR = "#e74c3c"
 BASE_COLOR  = "#95a5a6"
 
-# Publication font sizes
-TITLE_FS  = 12
-LABEL_FS  = 11
-TICK_FS   = 9
-LEGEND_FS = 9
+# Publication font sizes (increased for print quality)
+TITLE_FS  = 13
+LABEL_FS  = 12
+TICK_FS   = 10
+LEGEND_FS = 10
+ANNOT_FS  = 9   # percentage annotations
 
 matplotlib.rcParams.update({
     "font.family":       "DejaVu Sans",
+    "font.size":         10,
+    "axes.titlesize":    TITLE_FS,
+    "axes.labelsize":    LABEL_FS,
+    "xtick.labelsize":   TICK_FS,
+    "ytick.labelsize":   TICK_FS,
+    "legend.fontsize":   LEGEND_FS,
     "axes.spines.top":   False,
     "axes.spines.right": False,
-    "axes.linewidth":    0.8,
-    "xtick.major.width": 0.8,
-    "ytick.major.width": 0.8,
+    "axes.linewidth":    0.9,
+    "xtick.major.width": 0.9,
+    "ytick.major.width": 0.9,
     "legend.framealpha": 0.9,
     "legend.edgecolor":  "0.8",
     "savefig.dpi":       300,
@@ -162,7 +169,7 @@ def _significance_bar(ax: plt.Axes, x0: float, x1: float,
 
 def fig_snr_distribution(df: pd.DataFrame, out: Path) -> None:
     """Histogram of OF-SNR coloured by tier."""
-    fig, ax = plt.subplots(figsize=(6.5, 3.5))
+    fig, ax = plt.subplots(figsize=(7.5, 4.0))
 
     snr = df["snr_of_db"].dropna()
     bins = np.linspace(snr.min() - 0.5, snr.max() + 0.5, 35)
@@ -179,12 +186,15 @@ def fig_snr_distribution(df: pd.DataFrame, out: Path) -> None:
         ax.text(b + 0.15, ax.get_ylim()[1] * 0.92, lbl,
                 fontsize=7.5, color="0.35", va="top")
 
-    ax.set_xlabel("Spectral SNR of OF Signal (dB)", fontsize=LABEL_FS)
+    ax.set_xlabel("Spectral SNR of OF-Farneback Signal at GT Respiratory Frequency (dB)",
+                  fontsize=LABEL_FS)
     ax.set_ylabel("Number of Trials", fontsize=LABEL_FS)
-    ax.set_title("Signal Quality Distribution (N=160 COHFACE Trials)",
+    ax.set_title("Signal Quality Distribution — COHFACE Dataset ($N=160$ trials)",
                  fontsize=TITLE_FS, pad=8)
     ax.tick_params(labelsize=TICK_FS)
     ax.legend(fontsize=LEGEND_FS, ncol=2, loc="upper left")
+    ax.yaxis.grid(True, alpha=0.3, linewidth=0.6)
+    ax.set_axisbelow(True)
 
     counts = _tier_counts(df)
     info = "  ".join(f"{t}: n={counts[t]}" for t in TIER_LABELS)
@@ -252,7 +262,7 @@ def fig_tier_bar_of(df: pd.DataFrame, out: Path) -> None:
 
 def fig_tier_bar_all_families(df: pd.DataFrame, out: Path) -> None:
     """4-panel grouped bar (one per tier), all families, kfstd vs QROBF."""
-    fig, axes = plt.subplots(1, 4, figsize=(12, 3.8), sharey=False)
+    fig, axes = plt.subplots(1, 4, figsize=(14, 4.5), sharey=False)
 
     family_labels = [f[0] for f in FAMILIES]
     x = np.arange(len(FAMILIES))
@@ -283,31 +293,34 @@ def fig_tier_bar_all_families(df: pd.DataFrame, out: Path) -> None:
                 imp = (kf - qr) / kf * 100
                 col = "#27ae60" if imp >= 0 else "#c0392b"
                 ymax = max(kf, qr)
-                ax.text(xi, ymax * 1.05, f"{imp:+.0f}%",
-                        ha="center", va="bottom", fontsize=6.5,
+                ax.text(xi, ymax * 1.06, f"{imp:+.0f}%",
+                        ha="center", va="bottom", fontsize=ANNOT_FS,
                         color=col, fontweight="bold")
 
         ax.set_xticks(x)
-        ax.set_xticklabels(family_labels, fontsize=7, rotation=30, ha="right")
+        ax.set_xticklabels(family_labels, fontsize=TICK_FS - 1, rotation=35, ha="right")
         ax.set_title(f"{tier}", fontsize=LABEL_FS,
                      color=color, fontweight="bold")
         ax.tick_params(axis="y", labelsize=TICK_FS)
-        ax.set_ylim(bottom=0)
+        ax.set_ylim(bottom=0, top=ax.get_ylim()[1] * 1.20)
+        ax.yaxis.grid(True, alpha=0.3, linewidth=0.6)
+        ax.set_axisbelow(True)
         counts = int((df["tier"] == tier).sum())
         ax.text(0.97, 0.97, f"n={counts}", transform=ax.transAxes,
-                ha="right", va="top", fontsize=7.5, color="0.4")
+                ha="right", va="top", fontsize=TICK_FS, color="0.4")
 
     axes[0].set_ylabel("Freq MAE (BPM)", fontsize=LABEL_FS)
     handles = [
-        mpatches.Patch(color=KFSTD_COLOR, label="kfstd"),
-        mpatches.Patch(color=QROBF_COLOR, hatch="//", label="QROBF (ours)"),
+        mpatches.Patch(color=KFSTD_COLOR, label="kfstd (Gaussian oscillator)"),
+        mpatches.Patch(color=QROBF_COLOR, hatch="//", label="QROBF — EKS + Student-$t$ (ours)"),
     ]
     fig.legend(handles=handles, fontsize=LEGEND_FS, ncol=2,
                loc="upper center", bbox_to_anchor=(0.5, 1.02))
-    fig.suptitle("RR Freq MAE per Quality Tier — All Signal Families",
-                 fontsize=TITLE_FS + 0.5, y=1.06)
+    fig.suptitle("RR Freq-Domain MAE per Signal Quality Tier — All Observation Families\n"
+                 r"(COHFACE, 160 trials; mean $\pm$ SEM per tier; $\Delta$\% = QROBF$-$kfstd improvement)",
+                 fontsize=TITLE_FS, y=1.08)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     fig.savefig(out / "fig3_tier_bar_all_families.pdf", bbox_inches="tight")
     fig.savefig(out / "fig3_tier_bar_all_families.png", bbox_inches="tight")
     plt.close(fig)
@@ -379,7 +392,7 @@ def fig_boxplots(df: pd.DataFrame, out: Path) -> None:
         ("P1D-Cub", "freq_mae_P1D-Cubic_kfstd",   "freq_mae_P1D-Cubic_qrobf"),
     ]
 
-    fig, axes = plt.subplots(1, 3, figsize=(11, 4.0), sharey=False)
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.5), sharey=False)
 
     for ax, (fam, kf_col, qr_col) in zip(axes, selected):
         positions_kf, positions_qr = [], []
@@ -423,7 +436,9 @@ def fig_boxplots(df: pd.DataFrame, out: Path) -> None:
         ax.set_xticks(xtick_pos)
         ax.set_xticklabels(xtick_labels, fontsize=TICK_FS)
         ax.tick_params(axis="y", labelsize=TICK_FS)
-        ax.set_title(f"Family: {fam}", fontsize=LABEL_FS, pad=6)
+        ax.set_title(f"Observation family: {fam}", fontsize=LABEL_FS, pad=6)
+        ax.yaxis.grid(True, alpha=0.3, linewidth=0.6)
+        ax.set_axisbelow(True)
         if fam == "OF":
             ax.set_ylabel("Freq MAE (BPM)", fontsize=LABEL_FS)
 

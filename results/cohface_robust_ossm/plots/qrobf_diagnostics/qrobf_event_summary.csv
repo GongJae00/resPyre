@@ -1,6 +1,6 @@
 method,n_trials,n_frames,div,slip,lock,double,gate_collapse_runs,harm_suppress_runs,selection_policy,run_instance_started_at_used,n_orphan_logs_ignored
-of_farneback__robust_ossm_ekf,160,197157,270,103,6516,9405,315,2809,post_epoch_latest_mtime_suffix,2026-03-05T11:03:06.675674Z,800
-dof__robust_ossm_ekf,160,197157,0,28,24714,36526,0,2889,post_epoch_latest_mtime_suffix,2026-03-05T11:03:06.675674Z,800
-profile1d_linear__robust_ossm_ekf,160,197157,832,232,3324,13280,1096,3226,post_epoch_latest_mtime_suffix,2026-03-05T11:03:06.675674Z,800
-profile1d_quadratic__robust_ossm_ekf,160,197157,479,53,2290,20826,1069,3396,post_epoch_latest_mtime_suffix,2026-03-05T11:03:06.675674Z,800
-profile1d_cubic__robust_ossm_ekf,160,197157,341,32,2159,13650,1221,3393,post_epoch_latest_mtime_suffix,2026-03-05T11:03:06.675674Z,800
+of_farneback__robust_ossm_ekf,160,197157,40,41,4929,18692,54,54,post_epoch_latest_mtime_suffix,2026-03-09T23:55:38.951226Z,800
+dof__robust_ossm_ekf,160,197157,0,28,24714,36526,0,2889,post_epoch_latest_mtime_suffix,2026-03-09T23:55:38.951226Z,800
+profile1d_linear__robust_ossm_ekf,160,197157,0,20,9879,22498,0,0,post_epoch_latest_mtime_suffix,2026-03-09T23:55:38.951226Z,800
+profile1d_quadratic__robust_ossm_ekf,160,197157,0,25,3048,18199,0,0,post_epoch_latest_mtime_suffix,2026-03-09T23:55:38.951226Z,800
+profile1d_cubic__robust_ossm_ekf,160,197157,0,25,2929,17996,0,0,post_epoch_latest_mtime_suffix,2026-03-09T23:55:38.951226Z,800

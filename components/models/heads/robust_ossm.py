@@ -22,6 +22,7 @@ from ..core.ssm import OscillatorPredictor, SSMConfig, StateDecoder
 from ..core.robust_update import RobustKalmanUpdater
 from ..core.trust import TrustAllocator, TrustConfig, TrustParams
 from ..core.failure_monitor import FailureMonitor, FailureConfig
+from ..core.smoother import RTSSmoother
 from core.evaluation.frame_logger import FrameLogger
 from core.pipeline.common import (
     derive_trial_identifiers,
@@ -254,11 +255,25 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
         freq_track = np.zeros(n, dtype=np.float64)
         nis_prev = 0.0
 
+        # EKS smoother storage (EKF only)
+        use_eks = (self.predict_method == 'ekf') and bool(getattr(p, 'use_eks', True))
+        if use_eks:
+            x_filt_all = np.zeros((n, 3), dtype=np.float64)
+            P_filt_all = np.zeros((n, 3, 3), dtype=np.float64)
+            x_pred_all = np.zeros((n, 3), dtype=np.float64)
+            P_pred_all = np.zeros((n, 3, 3), dtype=np.float64)
+            F_jac_all = np.zeros((n, 3, 3), dtype=np.float64)
+
         # ── Main filter loop ──
         for t in range(n):
-            # 1. Predict
-            x_pred, P_pred = predictor.predict(x, P, Q, dt,
-                                                method=self.predict_method)
+            # 1. Predict (request Jacobian for EKS)
+            if use_eks:
+                x_pred, P_pred, F_jac = predictor.predict(x, P, Q, dt,
+                                                           method=self.predict_method,
+                                                           return_jac=True)
+            else:
+                x_pred, P_pred = predictor.predict(x, P, Q, dt,
+                                                    method=self.predict_method)
             # P0-3: clamp z after prediction
             predictor.clamp_state(x_pred)
 
@@ -455,6 +470,14 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 x_pred, P_pred = predictor.predict(x, P, Q_scaled, dt,
                                                     method=self.predict_method)
                 predictor.clamp_state(x_pred)
+                # Note: F_jac doesn't depend on Q, so the one from the first
+                # predict is still correct for EKS.
+
+            # Store EKS prediction arrays (final x_pred/P_pred after possible Q_scaled re-predict)
+            if use_eks:
+                x_pred_all[t] = x_pred
+                P_pred_all[t] = P_pred
+                F_jac_all[t] = F_jac
 
             # P1-6: Wire harmonic suppression into frequency gate
             # gate_z_eff = g_z * w_h (structure-preserving: w_h=1 when no harmonic → no change)
@@ -485,6 +508,11 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 x = x_candidate
                 P = P_candidate
                 nis_prev = float(result.nis) if np.isfinite(result.nis) else 0.0
+
+            # Store filtered state for EKS smoother
+            if use_eks:
+                x_filt_all[t] = x
+                P_filt_all[t] = P
 
             # 6. Decode
             state = decoder.decode(x, P)
@@ -555,6 +583,117 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
                 x, P = predictor.init_state(freq0)
                 monitor.reset(f_ref=freq0)
                 trust_alloc.reset()
+
+        # ── EKS Backward Smoother (via RTSSmoother — first-class module) ──
+        eks_fallback_count = 0
+        if use_eks and n >= 2:
+            lo, hi = predictor.cfg.log_f_bounds
+            smoother = RTSSmoother.from_log_f_bounds(lo, hi, clamp=True)
+            x_smooth, P_smooth, eks_fallback_count = smoother.backward(
+                x_filt_all, P_filt_all, x_pred_all, P_pred_all, F_jac_all
+            )
+            # Extract frequency from smoothed states
+            eks_freq_from_phase = bool(getattr(p, 'eks_freq_from_phase', False))
+            if eks_freq_from_phase:
+                # Phase derivative from smoothed [x1, x2] (like kfstd RTS approach)
+                x1_s = x_smooth[:, 0]
+                x2_s = x_smooth[:, 1]
+                amp_s = np.hypot(x1_s, x2_s)
+                valid_amp = amp_s > 1e-6
+                if np.sum(valid_amp) >= 2:
+                    phase_s = np.unwrap(np.arctan2(x2_s, x1_s))
+                    inst_freq = (fs / (2.0 * np.pi)) * np.diff(phase_s)
+                    inst_freq = np.append(inst_freq, inst_freq[-1] if inst_freq.size else p.f_min)
+                    inst_freq = np.clip(inst_freq, p.f_min, p.f_max)
+                    # Replace only where amplitude is reliable
+                    freq_track = inst_freq
+                else:
+                    freq_track = np.exp(np.clip(x_smooth[:, 2],
+                                                *predictor.cfg.log_f_bounds))
+            else:
+                freq_track = np.exp(np.clip(x_smooth[:, 2],
+                                            *predictor.cfg.log_f_bounds))
+            # Update signal_hat with EKS-smoothed x1 (like kfstd RTS smoother)
+            x1_out = x_smooth[:, 0].copy()
+
+        # ── 2D Fixed-Freq KF + RTS (kfstd-style phase extraction) ──
+        # Uses OSSM's estimated f0 as the fixed frequency, then runs a 2D
+        # oscillator KF + RTS smoother + phase derivative extraction.
+        # This combines OSSM's robust adaptive frequency estimation with
+        # kfstd's optimal phase-derivative frequency accuracy.
+        if n >= 2 and bool(getattr(p, 'eks_2d_rts', False)):
+            # Fixed frequency: use signal-only coarse estimate (same as kfstd, no meta candidates)
+            f0_fixed = float(np.clip(self._coarse_freq(y, fs), p.f_min, p.f_max))
+            omega0 = 2.0 * np.pi * f0_fixed
+
+            rho_2d = float(predictor.cfg.compute_rho(dt))
+            cos_w = np.cos(omega0 * dt)
+            sin_w = np.sin(omega0 * dt)
+            F_2d = rho_2d * np.array([[cos_w, -sin_w], [sin_w, cos_w]], dtype=np.float64)
+            C_2d = np.array([[1.0, 0.0]], dtype=np.float64)
+            Q_2d = float(self.ssm_cfg.qx) * np.eye(2, dtype=np.float64)
+            # rv for 2D KF: use rv_auto=True logic (kfstd-style) for best phase estimation
+            rv_floor_2d = float(p.rv_floor)
+            rv_cap_2d = max(50.0 * rv_floor_2d, rv_floor_2d + 1.0)
+            sigma_y = self._last_sigma_y or 1.0
+            rv_2d = float(np.clip(float(p.rv_mad_scale) * sigma_y, rv_floor_2d, rv_cap_2d))
+            R_2d = np.array([[rv_2d]], dtype=np.float64)
+            I2 = np.eye(2, dtype=np.float64)
+
+            # Forward pass
+            x2_filt = np.zeros((n, 2), dtype=np.float64)
+            P2_filt = np.zeros((n, 2, 2), dtype=np.float64)
+            x2_pred = np.zeros((n, 2), dtype=np.float64)
+            P2_pred = np.zeros((n, 2, 2), dtype=np.float64)
+            x2 = np.zeros(2, dtype=np.float64)
+            P2 = Q_2d.copy()
+            for t in range(n):
+                x2 = F_2d @ x2
+                P2 = F_2d @ P2 @ F_2d.T + Q_2d
+                x2_pred[t] = x2
+                P2_pred[t] = P2
+                S2 = float(C_2d @ P2 @ C_2d.T + R_2d)
+                if not np.isfinite(S2) or S2 <= 1e-12:
+                    S2 = 1e-12
+                K2 = (P2 @ C_2d.T) / S2
+                innov2 = float(y[t] - (C_2d @ x2)[0])
+                x2 = x2 + K2[:, 0] * innov2
+                P2 = (I2 - K2 @ C_2d) @ P2
+                P2 = 0.5 * (P2 + P2.T)
+                for i in range(2):
+                    if P2[i, i] < 1e-10:
+                        P2[i, i] = 1e-10
+                x2_filt[t] = x2
+                P2_filt[t] = P2
+
+            # Backward RTS smoother
+            x2_smooth = np.copy(x2_filt)
+            P2_smooth = np.copy(P2_filt)
+            F2_T = F_2d.T
+            for t in range(n - 2, -1, -1):
+                try:
+                    G2 = P2_filt[t] @ F2_T @ np.linalg.pinv(P2_pred[t + 1])
+                except np.linalg.LinAlgError:
+                    continue
+                x2_smooth[t] += G2 @ (x2_smooth[t + 1] - x2_pred[t + 1])
+                P2_smooth[t] += G2 @ (P2_smooth[t + 1] - P2_pred[t + 1]) @ G2.T
+
+            # Phase derivative frequency extraction (like kfstd)
+            s1 = x2_smooth[:, 0]
+            s2 = x2_smooth[:, 1]
+            phase2 = np.unwrap(np.arctan2(s2, s1))
+            dphi = np.diff(phase2)
+            inst_freq2 = (fs / (2.0 * np.pi)) * dphi
+            freq_rts = np.empty(n, dtype=np.float64)
+            if inst_freq2.size > 0:
+                freq_rts[0] = inst_freq2[0]
+                freq_rts[1:] = inst_freq2
+            else:
+                freq_rts[:] = f0_fixed
+            bad2 = ~np.isfinite(freq_rts)
+            if np.any(bad2):
+                freq_rts[bad2] = f0_fixed
+            freq_track = np.clip(freq_rts, p.f_min, p.f_max)
 
         # ── Post-processing ──
         freq_track = np.clip(freq_track, p.f_min, p.f_max)
@@ -635,6 +774,10 @@ class oscillator_RobustOSSM(_BaseOscillatorHead):
             'trial_key_suffix': suffix,
             'post_smooth_alpha_base': alpha_base,
             'post_smooth_alpha_used': alpha_used,
+            # EKS smoother diagnostics
+            'use_eks': use_eks,
+            'eks_fallback_count': eks_fallback_count,
+            'eks_fallback_rate': float(eks_fallback_count) / max(n, 1),
         })
         inherited_unused = meta_payload.get('unused_config_keys', [])
         merged_unused = []

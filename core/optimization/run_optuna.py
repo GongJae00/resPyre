@@ -54,8 +54,8 @@ DEFAULT_OBJECTIVE_WEIGHTS = {
     "time_mae": 0.08,
     "time_dtw": 0.05,
     "time_rmse": 0.03,
-    # Rate fidelity
-    "freq_mae": 0.24,
+    # Rate fidelity — primary objective
+    "freq_mae": 0.30,
     "freq_rmse": 0.10,
     # Stability / failures
     "fail_rate": 0.12,
@@ -64,20 +64,20 @@ DEFAULT_OBJECTIVE_WEIGHTS = {
     "fail_slip": 0.04,
     "invalid_rate": 0.04,
     "clip_rate": 0.03,
-    # Calibration
-    "nis_truefail": 0.19,
+    # Calibration — nis_truefail reduced to avoid rv_auto=False bias
+    "nis_truefail": 0.05,
     "nis_overstrict": 0.01,
-    "nis_mean_dev": 0.10,
-    "coverage_dev": 0.07,
+    "nis_mean_dev": 0.08,
+    "coverage_dev": 0.05,
     # Trust-shaping quality
-    "alpha_R_excess": 0.08,
-    "g_z_eff_deficit": 0.10,
+    "alpha_R_excess": 0.04,
+    "g_z_eff_deficit": 0.06,
     # Auxiliary quality
     "ccc_penalty": 0.01,
     "snr_penalty": 0.01,
     # Baseline-relative (hinge): penalize if robust is worse than kfstd references.
     "vs_kfstd_time_mae": 0.10,
-    "vs_kfstd_freq_mae": 0.18,
+    "vs_kfstd_freq_mae": 0.22,
     # Hard-constraint excess (normalized)
     "constraint_penalty": 0.14,
 }
@@ -118,46 +118,41 @@ class ParamSpec:
 
 
 DEFAULT_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
+    # ── Validated No-Gating Regime (OF/Profile1D families) ──
+    # gate_bias=-100, alpha_R_max=1.0 are FIXED in family_defaults.
+    # Only searches dimensions that are ACTIVE in the validated regime.
+    # Dead dimensions removed: gate_bias, w_gate_vis/cons/nis, nis_hard_gate,
+    #   alpha_R_max, beta_1, beta_2, oscillator.rv (when rv_auto=True).
     "robust_ossm_ekf": [
         # Oscillator core
         ParamSpec("oscillator.qx", "float", 2e-5, 3e-3, log=True),
         ParamSpec("oscillator.qf", "float", 2e-6, 5e-4, log=True),
         ParamSpec("oscillator.rv_floor", "float", 2e-3, 4e-2, log=True),
-        ParamSpec("oscillator.rv_mad_scale", "float", 0.6, 1.8),
+        ParamSpec("oscillator.rv_mad_scale", "float", 0.5, 2.0),
         ParamSpec("oscillator.tau_env", "float", 20.0, 120.0),
         ParamSpec("oscillator.init_margin_hz", "float", 0.0, 0.08),
-        ParamSpec("oscillator.student_t_nu", "float", 4.0, 20.0),
+        ParamSpec("oscillator.student_t_nu", "float", 4.0, 30.0),
         ParamSpec("oscillator.vb_iters", "int", 1, 4),
         ParamSpec("oscillator.trace_cap", "float", 40.0, 260.0),
         ParamSpec("oscillator.lambda_floor", "float", 8e-4, 8e-3, log=True),
         ParamSpec("oscillator.r_eff_max_scale", "float", 20.0, 100.0),
-        ParamSpec("oscillator.g_z_eff_floor_ratio", "float", 0.06, 0.25),
-        ParamSpec("oscillator.post_smooth_alpha", "float", 0.72, 0.94),
-        ParamSpec("oscillator.rv_auto", "choice", choices=[True, False]),
-        ParamSpec("oscillator.rv", "float", 1e-4, 0.2, log=True),
+        ParamSpec("oscillator.g_z_eff_floor_ratio", "float", 0.06, 0.35),
+        ParamSpec("oscillator.post_smooth_alpha", "float", 0.70, 0.95),
         ParamSpec("oscillator.detrend", "choice", choices=[True]),
         ParamSpec("oscillator.bandpass", "choice", choices=[True]),
         ParamSpec("oscillator.zscore", "choice", choices=[True]),
         # Spectral-guidance controls
-        ParamSpec("oscillator.spec_guidance_strength", "float", 0.5, 1.6),
-        ParamSpec("oscillator.spec_guidance_offset", "float", 0.1, 0.45),
+        ParamSpec("oscillator.spec_guidance_strength", "float", 0.3, 1.8),
+        ParamSpec("oscillator.spec_guidance_offset", "float", 0.05, 0.5),
         ParamSpec("oscillator.spec_guidance_confidence_scale", "float", 2.0, 10.0),
         ParamSpec("oscillator.spec_guidance_snr_scale", "float", 2.0, 8.0),
-        # Trust mapping
-        ParamSpec("trust.beta_1", "float", 0.8, 2.6),
-        ParamSpec("trust.beta_2", "float", 0.6, 2.4),
-        ParamSpec("trust.gamma_1", "float", 1.0, 3.2),
-        ParamSpec("trust.w_gate_vis", "float", 0.8, 2.4),
-        ParamSpec("trust.w_gate_cons", "float", 0.8, 2.2),
-        ParamSpec("trust.w_gate_nis", "float", 0.2, 1.2),
-        ParamSpec("trust.gate_bias", "float", 0.6, 1.6),
-        ParamSpec("trust.freq_jitter_decay", "float", 0.6, 1.1),
-        ParamSpec("trust.thd_max", "float", 0.25, 0.5),
-        ParamSpec("trust.w_h_min", "float", 0.15, 0.35),
-        ParamSpec("trust.g_z_floor", "float", 0.06, 0.2),
-        ParamSpec("trust.nis_hard_gate", "float", 10.0, 30.0),
-        ParamSpec("trust.alpha_R_max", "float", 10.0, 30.0),
-        ParamSpec("trust.alpha_Q_max", "float", 2.5, 6.0),
+        # Trust mapping — only active rules in validated regime [B]
+        ParamSpec("trust.gamma_1", "float", 0.5, 4.0),          # Rule 2: alpha_Q
+        ParamSpec("trust.freq_jitter_decay", "float", 0.3, 1.2), # Rule 4: g_z jitter
+        ParamSpec("trust.thd_max", "float", 0.15, 0.8),          # Rule 5: harmonic gate
+        ParamSpec("trust.w_h_min", "float", 0.05, 0.45),          # Rule 5: w_h floor
+        ParamSpec("trust.g_z_floor", "float", 0.03, 0.25),
+        ParamSpec("trust.alpha_Q_max", "float", 2.0, 6.0),
         # Quality estimator
         ParamSpec("quality.vis_eps", "float", 1e-8, 1e-3, log=True),
         ParamSpec("quality.vis_snr_low_db", "float", -12.0, -4.0),
@@ -179,6 +174,30 @@ DEFAULT_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
         ParamSpec("preproc.robust_zscore.eps", "float", 1e-8, 1e-3, log=True),
         ParamSpec("preproc.sign_align.enabled", "choice", choices=[True]),
         ParamSpec("preproc.sign_align.seconds", "float", 8.0, 14.0),
+    ],
+    # ── Active-Gating Regime (DoF / experimental families) ──
+    # Separate space retaining all trust dimensions.
+    "robust_ossm_ekf_active_gating": [
+        ParamSpec("oscillator.qx", "float", 2e-5, 3e-3, log=True),
+        ParamSpec("oscillator.qf", "float", 2e-6, 5e-4, log=True),
+        ParamSpec("oscillator.rv_floor", "float", 2e-3, 4e-2, log=True),
+        ParamSpec("oscillator.rv_mad_scale", "float", 0.5, 2.0),
+        ParamSpec("oscillator.tau_env", "float", 20.0, 120.0),
+        ParamSpec("oscillator.student_t_nu", "float", 4.0, 20.0),
+        ParamSpec("oscillator.post_smooth_alpha", "float", 0.70, 0.95),
+        ParamSpec("trust.beta_1", "float", 0.5, 3.5),
+        ParamSpec("trust.beta_2", "float", 0.3, 2.5),
+        ParamSpec("trust.gamma_1", "float", 0.5, 4.0),
+        ParamSpec("trust.w_gate_vis", "float", 0.5, 3.0),
+        ParamSpec("trust.w_gate_cons", "float", 0.5, 2.5),
+        ParamSpec("trust.w_gate_nis", "float", 0.1, 1.5),
+        ParamSpec("trust.gate_bias", "float", -2.0, 3.0),
+        ParamSpec("trust.freq_jitter_decay", "float", 0.3, 1.2),
+        ParamSpec("trust.thd_max", "float", 0.15, 0.8),
+        ParamSpec("trust.w_h_min", "float", 0.05, 0.45),
+        ParamSpec("trust.nis_hard_gate", "float", 8.0, 35.0),
+        ParamSpec("trust.alpha_R_max", "float", 2.0, 30.0),
+        ParamSpec("trust.alpha_Q_max", "float", 2.0, 6.0),
     ],
     "robust_ossm_ukf": [
         # Oscillator core
@@ -273,15 +292,20 @@ DEFAULT_PARAM_SPACE: Dict[str, List[ParamSpec]] = {
 }
 
 DEFAULT_FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    # Validated No-Gating Regime — matches production cohface_robust_ossm.json.
+    # gate_bias=-100 and alpha_R_max=1.0 disable Rules 1 and 3.
+    # Primary accuracy: EKS (use_eks=True). Primary R-scaling: rv_auto (MAD).
     "robust_ossm_ekf": {
         "oscillator.predict_method": "ekf",
         "oscillator.eda_baseline": False,
         "oscillator.no_autotune": True,
+        "oscillator.use_eks": True,
+        "oscillator.rv_auto": True,
         "oscillator.em_mode": "off",
         "oscillator.qx": 2.2e-4,
         "oscillator.qf": 5e-5,
         "oscillator.rv_floor": 0.012,
-        "oscillator.rv_mad_scale": 0.9,
+        "oscillator.rv_mad_scale": 1.0,
         "oscillator.tau_env": 52.0,
         "oscillator.student_t_nu": 12.0,
         "oscillator.vb_iters": 2,
@@ -292,30 +316,17 @@ DEFAULT_FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "oscillator.post_smooth_alpha": 0.86,
         "oscillator.spec_guidance_strength": 0.95,
         "oscillator.spec_guidance_offset": 0.22,
-        "trust.beta_1": 1.2,
-        "trust.beta_2": 0.85,
+        # Validated regime [B]: beta_1=0, beta_2=0, gate_bias=-100, alpha_R_max=1.0
+        "trust.beta_1": 0.0,
+        "trust.beta_2": 0.0,
         "trust.gamma_1": 1.9,
-        "trust.w_gate_vis": 1.6,
-        "trust.w_gate_cons": 1.3,
-        "trust.w_gate_nis": 0.45,
-        "trust.gate_bias": 0.72,
+        "trust.gate_bias": -100.0,
         "trust.freq_jitter_decay": 0.62,
         "trust.thd_max": 0.52,
         "trust.w_h_min": 0.38,
         "trust.g_z_floor": 0.2,
-        "trust.nis_hard_gate": 24.0,
-        "trust.alpha_R_max": 8.0,
+        "trust.alpha_R_max": 1.0,
         "trust.alpha_Q_max": 3.2,
-        "gating.profile": "relaxed",
-        "gating.tracker.std_min_bpm": 0.55,
-        "gating.tracker.unique_min": 0.05,
-        "gating.tracker.saturation_max": 0.42,
-        "gating.tracker.std_is_soft": True,
-        "gating.tracker.saturation_margin_hz": 0.02,
-        "gating.spectral.peak_ratio_min": 1.25,
-        "gating.spectral.prominence_min_db": 1.5,
-        "gating.spectral.fwhm_max_hz": 0.55,
-        "gating.spectral.fwhm_df_guard": 1.5,
         "preproc.robust_zscore.enabled": True,
         "preproc.robust_zscore.clip": 2.5,
         "preproc.sign_align.enabled": True,
