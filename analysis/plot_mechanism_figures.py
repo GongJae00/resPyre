@@ -10,12 +10,18 @@ Fig 7: Ablation visualization (EKS vs Student-t contributions)
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
+
+_REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO))
+from analysis.paper_asset_specs import ABLATION_ROWS
 
 matplotlib.rcParams.update({
     "font.family":        "DejaVu Sans",
@@ -239,16 +245,16 @@ def fig_robust_update(out_dir: str):
 # ─── Fig 7: Ablation visualization ──────────────────────────────────────────
 def fig_ablation(out_dir: str):
     """EKS ablation results for Profile1D-Cubic."""
-
-    ablation_variants = [
-        "kfstd\n(baseline)",
-        "QROBF\nfwd-only\n$\\nu$=12",
-        "QROBF\nEKS+Gauss\n$\\nu\\to\\infty$",
-        "QROBF\nEKS+Student-t\n$\\nu$=12\n(full)",
-    ]
-    mae_vals = [0.220, 0.270, 0.210, 0.210]
-    ccc_vals = [0.890, np.nan, 0.880, 0.880]  # approx from metrics
-    fail_vals = [np.nan, np.nan, 0.062, 0.062]  # fail_total median
+    rows = list(ABLATION_ROWS)
+    label_map = {
+        "kfstd Gaussian oscillator baseline": "kfstd\n(baseline)",
+        "QROBF: forward EKF only, Student-t nu=12, no EKS": "QROBF\nfwd-only\n$\\nu$=12",
+        "QROBF: EKS + Gaussian (nu->inf) + rv_auto": "QROBF\nEKS+Gauss\n$\\nu\\to\\infty$",
+        "QROBF: EKS + Student-t nu=12 + rv_auto (full)": "QROBF\nEKS+Student-t\n$\\nu$=12\n(full)",
+    }
+    ablation_variants = [label_map.get(row["variant"], row["variant"]) for row in rows]
+    mae_vals = [float(row["freq_mae_bpm"]) for row in rows]
+    ccc_vals = [float(row["time_ccc"]) for row in rows]
 
     colors = ["#3498db", "#e74c3c", "#95a5a6", "#27ae60"]
 
@@ -263,7 +269,7 @@ def fig_ablation(out_dir: str):
         ax.text(bar.get_x() + bar.get_width()/2, v + 0.003,
                 f"{v:.3f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
     # Annotate percent change vs kfstd
-    kfstd_ref = 0.220
+    kfstd_ref = mae_vals[0]
     for i, v in enumerate(mae_vals):
         if i > 0 and np.isfinite(v):
             pct = 100 * (v - kfstd_ref) / kfstd_ref
@@ -295,8 +301,12 @@ def fig_ablation(out_dir: str):
     # Panel 3: Component contribution diagram
     ax = axes[2]
     components = ["kfstd\nforward", "+EKS\n(RTS)", "+Student-t\n($\\nu$=12)"]
-    incremental_mae = [0.220, -0.010, 0.000]  # incremental change
-    cumulative = [0.220, 0.210, 0.210]
+    cumulative = [mae_vals[0], mae_vals[2], mae_vals[3]]
+    incremental_mae = [
+        cumulative[0],
+        cumulative[1] - cumulative[0],
+        cumulative[2] - cumulative[1],
+    ]
     colors3 = ["#3498db", "#27ae60", "#8e44ad"]
 
     x3 = np.arange(len(components))
@@ -313,8 +323,9 @@ def fig_ablation(out_dir: str):
     ax.set_title("(c) Incremental Component Contribution",
                  fontweight="bold")
     ax.set_ylim(0, 0.30)
-    ax.annotate("EKS: primary driver\n($-$4.5% MAE)",
-                xy=(1, 0.210), xytext=(1.5, 0.245),
+    eks_pct = 100 * (cumulative[1] - cumulative[0]) / cumulative[0]
+    ax.annotate(f"EKS: primary driver\n({eks_pct:+.1f}% MAE)",
+                xy=(1, cumulative[1]), xytext=(1.5, max(cumulative) + 0.035),
                 arrowprops=dict(arrowstyle="->", color="#27ae60"),
                 fontsize=8, color="#27ae60", fontweight="bold")
 

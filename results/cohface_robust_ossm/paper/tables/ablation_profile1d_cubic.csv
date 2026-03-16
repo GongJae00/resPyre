@@ -1,0 +1,5 @@
+variant,freq_mae_bpm,time_ccc
+kfstd Gaussian oscillator baseline,0.22,0.89
+"QROBF: forward EKF only, Student-t nu=12, no EKS",0.27,
+QROBF: EKS + Gaussian (nu->inf) + rv_auto,0.21,0.88
+QROBF: EKS + Student-t nu=12 + rv_auto (full),0.21,0.88

@@ -1,0 +1,4 @@
+selection,family,method,video,freq_mae_bpm,time_ccc,lag_sec
+best,Profile1D-Quadratic,profile1d_quadratic__robust_ossm_ekf,cohface_22_3,0.02,0.95,0.906
+median,Profile1D-Quadratic,profile1d_quadratic__robust_ossm_ekf,cohface_33_0,0.21,0.81,-1.25
+worst,Profile1D-Quadratic,profile1d_quadratic__robust_ossm_ekf,cohface_31_3,9.13,0.58,0.906

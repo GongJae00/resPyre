@@ -11,7 +11,9 @@ POST-RUN steps (default, run AFTER main.py has completed):
   3. Instability boundary      — P(QROBF better) vs signal quality decile
   4. Quality stratification    — SNR-based tier assignment + eval metric merge
   5. Quality-stratified figs   — 7 paper figures (PDF+PNG)
+  5b. Paper figure suite       — overview / mechanism / waveform figures
   6. Paper directory assembly  — tables/, figures/, PAPER_INDEX.md
+  7. Manuscript sync           — copy latest paper assets into notes/.../prism_files
 
 Usage:
     # Pre-run (once, before main.py):
@@ -44,6 +46,7 @@ import pandas as pd
 # ─── project root ────────────────────────────────────────────────────────────
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO))
+from analysis.paper_asset_specs import ABLATION_ROWS, FAMILY_SPECS
 
 # ─── local imports (deferred to avoid heavy GPU startup at import time) ───────
 
@@ -52,6 +55,94 @@ def _step_banner(name: str) -> None:
     print(f"\n{'='*60}")
     print(f"  {name}")
     print(f"{'='*60}")
+
+
+MANUSCRIPT_TEMPLATE_DIR = _REPO / "notes" / "Template_for_submissions_to_Scientific_Reports__2_"
+
+MANUSCRIPT_SYNC_ITEMS = (
+    ("run", "plots/paper/fig1_overview.png", "prism_files/06_comparison/fig1_overview.png"),
+    ("run", "plots/paper/fig2_trust_mapping.png", "prism_files/01_prompt/fig2_trust_mapping.png"),
+    ("run", "plots/fig_freq_comparison.png", "prism_files/06_comparison/fig_freq_comparison.png"),
+    ("run", "plots/fig_time_comparison.png", "prism_files/06_comparison/fig_time_comparison.png"),
+    ("run", "plots/paper/waveform_overlay_examples.png", "prism_files/06_comparison/waveform_overlay_examples.png"),
+    ("run", "plots/paper/fig4_robust_update.png", "prism_files/01_prompt/fig4_robust_update.png"),
+    ("repo", "analysis/noise_properties/global_analysis_OF_Farneback.png", "prism_files/02_eda_fig5/global_analysis_OF_Farneback.png"),
+    ("repo", "analysis/noise_properties/global_analysis_Profile1D_Linear.png", "prism_files/02_eda_fig5/global_analysis_Profile1D_Linear.png"),
+    ("repo", "analysis/noise_properties/global_analysis_Profile1D_Quad.png", "prism_files/02_eda_fig5/global_analysis_Profile1D_Quad.png"),
+    ("repo", "analysis/noise_properties/global_analysis_Profile1D_Cubic.png", "prism_files/02_eda_fig5/global_analysis_Profile1D_Cubic.png"),
+    ("repo", "analysis/noise_properties/summary.csv", "prism_files/02_eda_fig5/summary.csv"),
+    ("run", "plots/qrobf_diagnostics/of_farneback__robust_ossm_ekf.png", "prism_files/03_failure_fig6/of_farneback__robust_ossm_ekf.png"),
+    ("run", "plots/qrobf_diagnostics/profile1d_cubic__robust_ossm_ekf.png", "prism_files/03_failure_fig6/profile1d_cubic__robust_ossm_ekf.png"),
+    ("run", "plots/qrobf_diagnostics/qrobf_event_summary.png", "prism_files/03_failure_fig6/qrobf_event_summary.png"),
+    ("run", "plots/qrobf_diagnostics/qrobf_event_summary_rates.csv", "prism_files/03_failure_fig6/qrobf_event_summary_rates.csv"),
+    ("run", "plots/qrobf_diagnostics/profile1d_cubic__robust_ossm_ekf_event_counts.csv", "prism_files/03_failure_fig6/profile1d_cubic__robust_ossm_ekf_event_counts.csv"),
+    ("run", "plots/paper/fig7_ablation.png", "prism_files/06_comparison/fig7_ablation.png"),
+    ("run", "plots/quality_stratification/fig3_tier_bar_all_families.png", "prism_files/06_comparison/fig3_tier_bar_all_families.png"),
+    ("run", "plots/quality_stratification/fig7_improvement_heatmap.png", "prism_files/06_comparison/fig7_improvement_heatmap.png"),
+    ("run", "plots/filter_diagnostics_overview.png", "prism_files/04_calibration_fig8/filter_diagnostics_overview.png"),
+    ("run", "plots/filter_diagnostics_heatmap.png", "prism_files/04_calibration_fig8/filter_diagnostics_heatmap.png"),
+    ("run", "plots/boundary/boundary_prob_curve.png", "prism_files/04_calibration_fig8/boundary_prob_curve.png"),
+    ("run", "plots/boundary/boundary_regime_map.png", "prism_files/04_calibration_fig8/boundary_regime_map.png"),
+    ("run", "plots/boundary/boundary_delta_deciles.png", "prism_files/04_calibration_fig8/boundary_delta_deciles.png"),
+    ("run", "metrics/metrics_freq_domain_summary.csv", "prism_files/06_tables/metrics_freq_domain_summary.csv"),
+    ("run", "metrics/metrics_filter_diagnostics_summary.csv", "prism_files/06_tables/metrics_filter_diagnostics_summary.csv"),
+    ("run", "paper/tables/performance_comprehensive.csv", "prism_files/06_tables/performance_comprehensive.csv"),
+    ("run", "paper/tables/innovation_diagnostics.csv", "prism_files/06_tables/innovation_diagnostics.csv"),
+    ("run", "paper/tables/ablation_profile1d_cubic.csv", "prism_files/06_tables/ablation_profile1d_cubic.csv"),
+    ("run", "paper/tables/quality_tier_freq_mae.csv", "prism_files/06_tables/quality_tier_freq_mae.csv"),
+    ("run", "paper/tables/filter_calibration_summary.csv", "prism_files/06_tables/filter_calibration_summary.csv"),
+    ("run", "paper/tables/waveform_overlay_examples_manifest.csv", "prism_files/06_tables/waveform_overlay_examples_manifest.csv"),
+)
+
+
+def _round_or_nan(value: float, digits: int = 3) -> float:
+    if value is None:
+        return float("nan")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return round(value, digits) if np.isfinite(value) else float("nan")
+
+
+def _metric_value(df: pd.DataFrame, method: str, metric: str, suffix: str = "_median") -> float:
+    if df.empty or "method" not in df.columns:
+        return float("nan")
+    row = df.loc[df["method"] == method]
+    if row.empty:
+        return float("nan")
+    col = f"{metric}{suffix}" if f"{metric}{suffix}" in df.columns else metric
+    if col not in row.columns:
+        return float("nan")
+    return _round_or_nan(pd.to_numeric(row.iloc[0][col], errors="coerce"))
+
+
+def _normalized_family_key(name: str) -> str:
+    key = str(name).strip()
+    key = key.replace("__robust_ossm_ekf", "")
+    key = key.replace("__kfstd", "")
+    key = key.replace("profile1d", "Profile1D")
+    key = key.replace("of_farneback", "OF_Farneback")
+    key = key.replace("dof", "DoF")
+    key = key.replace(" linear", "_Linear")
+    key = key.replace(" quadratic", "_Quad")
+    key = key.replace(" cubic", "_Cubic")
+    key = key.replace("-", "_")
+    key = key.replace(" ", "_")
+    key = key.replace("profile1D", "Profile1D")
+    key = key.replace("_linear", "_Linear")
+    key = key.replace("_quadratic", "_Quad")
+    key = key.replace("_cubic", "_Cubic")
+    return key
+
+
+def _clear_directory(path: Path) -> None:
+    if path.exists():
+        for child in path.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -243,6 +334,234 @@ def step_quality_figures(df: pd.DataFrame, out_dir: str) -> list[Path]:
         return []
 
 
+def step_paper_suite(run_dir: str) -> list[Path]:
+    """Generate the manuscript-oriented figure suite under run_dir/plots/paper."""
+    _step_banner("Step 5b · Paper Figure Suite")
+    out_dir = Path(run_dir) / "plots" / "paper"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    generated: list[Path] = []
+
+    try:
+        from analysis.plot_mechanism_figures import (
+            fig_ablation,
+            fig_robust_update,
+            fig_trust_mapping,
+        )
+        from analysis.plot_paper_figures import (
+            fig_calibration,
+            fig_dual_domain_matrix,
+            fig_freq_primary,
+            fig_overview,
+            fig_paper_summary,
+            fig_tier_breakdown,
+        )
+
+        fig_overview(run_dir, str(out_dir))
+        fig_freq_primary(run_dir, str(out_dir))
+        fig_calibration(run_dir, str(out_dir))
+        fig_tier_breakdown(run_dir, str(out_dir))
+        fig_dual_domain_matrix(run_dir, str(out_dir))
+        fig_paper_summary(run_dir, str(out_dir))
+        fig_trust_mapping(str(out_dir))
+        fig_robust_update(str(out_dir))
+        fig_ablation(str(out_dir))
+        _build_waveform_overlay_examples(run_dir, out_dir / "waveform_overlay_examples")
+
+        generated = sorted(p for p in out_dir.iterdir() if p.is_file())
+        print(f"[paper_figs] {len(generated)} files generated in {out_dir}")
+        return generated
+    except Exception as exc:
+        print(f"[paper_figs] Warning: {exc}")
+        import traceback; traceback.print_exc()
+        return generated
+
+
+def _build_waveform_overlay_examples(run_dir: str, out_stem: Path) -> Optional[list[Path]]:
+    """Build a 3-panel best/median/worst aligned waveform figure for the top QROBF family."""
+    import pickle
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from core.evaluation.metrics import calculate_cross_corr_alignment
+    from core.utils.common import filter_RW
+
+    freq_summary = Path(run_dir) / "metrics" / "metrics_freq_domain_summary.csv"
+    freq_raw = Path(run_dir) / "metrics" / "metrics_freq_domain_raw.csv"
+    time_summary = Path(run_dir) / "metrics" / "metrics_time_domain_summary.csv"
+    time_raw = Path(run_dir) / "metrics" / "metrics_time_domain_raw.csv"
+    if not (freq_summary.exists() and freq_raw.exists() and time_summary.exists() and time_raw.exists()):
+        print("[paper_figs] waveform overlays skipped (missing metrics csvs)")
+        return None
+
+    freq_summary_df = pd.read_csv(freq_summary)
+    time_summary_df = pd.read_csv(time_summary)
+    freq_raw_df = pd.read_csv(freq_raw)
+    time_raw_df = pd.read_csv(time_raw)
+
+    candidates = []
+    for spec in FAMILY_SPECS:
+        if spec["family"] == "DoF":
+            continue
+        freq_mae = _metric_value(freq_summary_df, spec["qrobf_method"], "MAE")
+        time_ccc = _metric_value(time_summary_df, spec["qrobf_method"], "CCC")
+        time_mae = _metric_value(time_summary_df, spec["qrobf_method"], "MAE")
+        if np.isfinite(freq_mae):
+            ccc_key = -time_ccc if np.isfinite(time_ccc) else np.inf
+            time_key = time_mae if np.isfinite(time_mae) else np.inf
+            candidates.append((freq_mae, ccc_key, time_key, spec))
+    if not candidates:
+        print("[paper_figs] waveform overlays skipped (no candidate QROBF family)")
+        return None
+
+    _, _, _, chosen = min(candidates, key=lambda item: item[:3])
+    method = chosen["qrobf_method"]
+    method_freq = freq_raw_df.loc[freq_raw_df["method"] == method].sort_values("MAE").reset_index(drop=True)
+    if method_freq.empty:
+        print(f"[paper_figs] waveform overlays skipped (no trial rows for {method})")
+        return None
+
+    time_lookup = (
+        time_raw_df.loc[time_raw_df["method"] == method, ["video", "CCC", "MAE"]]
+        .rename(columns={"MAE": "time_mae"})
+        .drop_duplicates(subset=["video"])
+        .set_index("video")
+        if {"video", "CCC", "MAE"}.issubset(time_raw_df.columns)
+        else pd.DataFrame()
+    )
+
+    indices = {
+        "Best": 0,
+        "Median": len(method_freq) // 2,
+        "Worst": len(method_freq) - 1,
+    }
+
+    def _normalize(sig: np.ndarray) -> np.ndarray:
+        arr = np.asarray(sig, dtype=np.float64).reshape(-1)
+        if arr.size == 0:
+            return arr
+        arr = arr - np.nanmean(arr)
+        scale = np.nanstd(arr)
+        return arr / scale if scale > 1e-9 else np.zeros_like(arr)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), sharey=True)
+    manifest_rows = []
+    for ax, (rank_label, idx) in zip(axes, indices.items()):
+        row = method_freq.iloc[idx]
+        video = str(row["video"])
+        data_file = str(row.get("data_file", f"data/{video}.pkl"))
+        pkl_path = Path(run_dir) / data_file if not os.path.isabs(data_file) else Path(data_file)
+        if not pkl_path.exists():
+            ax.set_axis_off()
+            ax.set_title(f"{rank_label}\nmissing {video}")
+            continue
+
+        with open(pkl_path, "rb") as fp:
+            trial_payload = pickle.load(fp)
+
+        fps = float(trial_payload.get("fps", 30.0))
+        fs_gt = float(trial_payload.get("fs_gt", fps))
+        gt_raw = np.asarray(trial_payload.get("gt", []), dtype=np.float64).reshape(-1)
+        estimates = trial_payload.get("estimates", [])
+        target_est = next((est for est in estimates if est.get("method") == method), None)
+        if gt_raw.size == 0 or target_est is None:
+            ax.set_axis_off()
+            ax.set_title(f"{rank_label}\nunavailable {video}")
+            continue
+
+        payload = target_est.get("estimate", target_est)
+        est_wave = np.asarray(payload.get("signal_hat", []), dtype=np.float64).reshape(-1)
+        if est_wave.size == 0:
+            ax.set_axis_off()
+            ax.set_title(f"{rank_label}\nno waveform {video}")
+            continue
+
+        gt_filt = np.squeeze(filter_RW(gt_raw, fs_gt, lo=0.08, hi=0.5))
+        est_filt = np.squeeze(filter_RW(est_wave, fps, lo=0.08, hi=0.5))
+        plot_est, plot_gt, lag_sec = calculate_cross_corr_alignment(
+            est_filt,
+            gt_filt,
+            fs_est=fps,
+            fs_gt=fs_gt,
+        )
+        if plot_est.size < 10:
+            ax.set_axis_off()
+            ax.set_title(f"{rank_label}\nshort {video}")
+            continue
+
+        t = np.arange(plot_est.size, dtype=np.float64) / fs_gt
+        ax.plot(t, _normalize(plot_gt), color="#4d4d4d", linestyle="--", linewidth=1.4, label="Ground truth")
+        ax.plot(t, _normalize(plot_est), color="#c0392b", linewidth=1.5, alpha=0.9, label="QROBF")
+        ax.set_title(rank_label, fontweight="bold")
+        ax.set_xlabel("Time (s)")
+        ax.grid(True, alpha=0.22, linewidth=0.6)
+        ax.text(
+            0.02,
+            0.98,
+            "\n".join(
+                part
+                for part in (
+                    video,
+                    f"Freq MAE={float(row['MAE']):.2f} BPM",
+                    (
+                        f"CCC={float(time_lookup.loc[video, 'CCC']):.2f}"
+                        if not time_lookup.empty and video in time_lookup.index
+                        else ""
+                    ),
+                    f"Lag={lag_sec:.2f}s",
+                )
+                if part
+            ),
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=8,
+            bbox={"facecolor": "white", "edgecolor": "0.85", "alpha": 0.92, "pad": 3},
+        )
+        manifest_rows.append(
+            {
+                "selection": rank_label.lower(),
+                "family": chosen["family"],
+                "method": method,
+                "video": video,
+                "freq_mae_bpm": _round_or_nan(row["MAE"], 3),
+                "time_ccc": (
+                    _round_or_nan(time_lookup.loc[video, "CCC"], 3)
+                    if not time_lookup.empty and video in time_lookup.index
+                    else float("nan")
+                ),
+                "lag_sec": _round_or_nan(lag_sec, 3),
+            }
+        )
+
+    axes[0].set_ylabel("Normalized amplitude")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.02))
+    fig.suptitle(
+        f"Representative aligned waveform overlays from the top QROBF family\n"
+        f"{chosen['family']} selected by lowest median frequency-domain MAE",
+        fontsize=12,
+        fontweight="bold",
+        y=1.08,
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+    out_stem.parent.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for ext in ("png", "pdf"):
+        out_path = out_stem.with_suffix(f".{ext}")
+        fig.savefig(out_path)
+        outputs.append(out_path)
+    plt.close(fig)
+
+    if manifest_rows:
+        pd.DataFrame(manifest_rows).to_csv(out_stem.with_name(f"{out_stem.name}_manifest.csv"), index=False)
+
+    print(f"[paper_figs] Waveform examples → {out_stem.with_suffix('.png')}")
+    return outputs
+
+
 def step_build_paper_dir(run_dir: str, df: Optional[pd.DataFrame]) -> Path:
     """Assemble paper/ directory with Tables and Figures."""
     _step_banner("Step 6 · Paper Directory")
@@ -252,47 +571,40 @@ def step_build_paper_dir(run_dir: str, df: Optional[pd.DataFrame]) -> Path:
     tables_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
+    _clear_directory(tables_dir)
+    _clear_directory(figures_dir)
+
     # ── Tables ────────────────────────────────────────────────────────────────
-    # Table 1: overall frequency-domain performance summary
-    freq_csv = Path(run_dir) / "metrics" / "metrics_freq_domain_summary.csv"
-    if freq_csv.exists():
-        _build_table1(freq_csv, tables_dir)
-
-    # Table 2: per-tier performance (from quality stratification)
+    _build_comprehensive_performance_table(run_dir, tables_dir)
+    _build_innovation_diagnostics_table(run_dir, tables_dir)
+    _build_ablation_table(tables_dir)
     if df is not None:
-        _build_table2(df, tables_dir)
-
-    # Table 3: filter diagnostics summary
-    diag_csv = Path(run_dir) / "metrics" / "metrics_filter_diagnostics_summary.csv"
-    if diag_csv.exists():
-        shutil.copy(diag_csv, tables_dir / "table3_filter_diagnostics.csv")
-        print(f"[paper] Table 3 → {tables_dir / 'table3_filter_diagnostics.csv'}")
+        _build_quality_tier_table(df, tables_dir)
+    _build_filter_calibration_table(run_dir, tables_dir)
 
     # ── Figures ───────────────────────────────────────────────────────────────
+    plots_paper_dir = Path(run_dir) / "plots" / "paper"
+    if plots_paper_dir.exists():
+        manifest_csv = plots_paper_dir / "waveform_overlay_examples_manifest.csv"
+        if manifest_csv.exists():
+            shutil.copy(manifest_csv, tables_dir / manifest_csv.name)
+        for src in sorted(plots_paper_dir.glob("*")):
+            if src.is_file() and src.suffix.lower() in {".png", ".pdf"}:
+                shutil.copy(src, figures_dir / src.name)
+
     qs_dir = Path(run_dir) / "plots" / "quality_stratification"
-    fig_map = {
-        "fig1_snr_distribution.pdf":    "fig1_snr_distribution.pdf",
-        "fig2_tier_bar_OF.pdf":         "fig2_tier_bar_OF.pdf",
-        "fig3_tier_bar_all_families.pdf":"fig3_tier_bar_all_families.pdf",
-        "fig4_relative_improvement.pdf": "fig4_relative_improvement.pdf",
-        "fig5_boxplots.pdf":             "fig5_boxplots.pdf",
-        "fig6_scatter_snr_vs_mae.pdf":   "fig6_scatter_snr_vs_mae.pdf",
-        "fig7_improvement_heatmap.pdf":  "fig7_improvement_heatmap.pdf",
-    }
-    for src_name, dst_name in fig_map.items():
-        src = qs_dir / src_name
-        if src.exists():
-            shutil.copy(src, figures_dir / dst_name)
+    for src in sorted(qs_dir.glob("fig*.*")):
+        if src.is_file():
+            shutil.copy(src, figures_dir / src.name)
 
-    # Also copy boundary plots
     boundary_dir = Path(run_dir) / "plots" / "boundary"
-    for png in boundary_dir.glob("*.png"):
-        shutil.copy(png, figures_dir / png.name)
+    for src in sorted(boundary_dir.glob("*")):
+        if src.is_file() and src.suffix.lower() in {".png", ".pdf"}:
+            shutil.copy(src, figures_dir / src.name)
 
-    # Copy overall performance summary
     perf_png = Path(run_dir) / "plots" / "paper_performance_summary.png"
     if perf_png.exists():
-        shutil.copy(perf_png, figures_dir / "fig0_overall_performance.png")
+        shutil.copy(perf_png, figures_dir / "overall_performance_summary.png")
 
     n_tables  = len(list(tables_dir.glob("*.csv")))
     n_figures = len(list(figures_dir.iterdir()))
@@ -300,47 +612,199 @@ def step_build_paper_dir(run_dir: str, df: Optional[pd.DataFrame]) -> Path:
     return paper_dir
 
 
-def _build_table1(freq_csv: Path, tables_dir: Path) -> None:
-    """Table 1: Overall freq-domain performance (MAE, BPM)."""
-    df = pd.read_csv(freq_csv)
-    # Keep only MAE columns
-    cols = ["method"] + [c for c in df.columns if "mae" in c.lower() or "MAE" in c]
-    if "Method" in df.columns:
-        df = df.rename(columns={"Method": "method"})
-    out = df[[c for c in cols if c in df.columns]]
-    out.to_csv(tables_dir / "table1_freq_domain_mae.csv", index=False)
-    print(f"[paper] Table 1 → {tables_dir / 'table1_freq_domain_mae.csv'}")
+def step_sync_manuscript_assets(run_dir: str, manuscript_dir: Optional[Path] = None) -> Optional[Path]:
+    """Copy the latest paper assets into the Scientific Reports template directory."""
+    _step_banner("Step 8 · Manuscript Asset Sync")
+    target_dir = manuscript_dir or MANUSCRIPT_TEMPLATE_DIR
+    if not target_dir.exists():
+        print(f"[manuscript] skipped (template dir not found: {target_dir})")
+        return None
+
+    copied = 0
+    missing: list[str] = []
+    run_root = Path(run_dir)
+    for source_kind, src_rel, dst_rel in MANUSCRIPT_SYNC_ITEMS:
+        src_root = run_root if source_kind == "run" else _REPO
+        src = src_root / src_rel
+        dst = target_dir / dst_rel
+        if not src.exists():
+            missing.append(str(src))
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, dst)
+        copied += 1
+
+    print(f"[manuscript] {copied}/{len(MANUSCRIPT_SYNC_ITEMS)} assets synced → {target_dir}")
+    if missing:
+        for src in missing[:8]:
+            print(f"[manuscript] missing: {src}")
+        if len(missing) > 8:
+            print(f"[manuscript] ... {len(missing) - 8} more missing assets")
+    return target_dir
 
 
-def _build_table2(df: pd.DataFrame, tables_dir: Path) -> None:
-    """Table 2: Per-tier MAE for each method family (base / kfstd / QROBF)."""
-    from analysis.quality_stratification import METHOD_FAMILIES, TIER_LABELS
-    from analysis.plot_quality_stratification import _resolve_families, BASE_COLS_BASE
+def _build_comprehensive_performance_table(run_dir: str, tables_dir: Path) -> None:
+    """Combined family-level performance table including base, kfstd, and QROBF."""
+    freq_csv = Path(run_dir) / "metrics" / "metrics_freq_domain_summary.csv"
+    time_csv = Path(run_dir) / "metrics" / "metrics_time_domain_summary.csv"
+    if not (freq_csv.exists() and time_csv.exists()):
+        print("[paper] performance table skipped (missing summary csvs)")
+        return
 
-    FAMILIES, BASE_COLS = _resolve_families(df)
+    freq_df = pd.read_csv(freq_csv)
+    time_df = pd.read_csv(time_csv)
     rows = []
-    for tier in TIER_LABELS:
-        t = df[df["tier"] == tier]
-        n = len(t)
-        row: dict = {"tier": tier, "n_trials": n}
-        for label, kf_col, qr_col, *_ in FAMILIES:
-            base_col = BASE_COLS.get(label, "")
-            base_vals = pd.to_numeric(t[base_col], errors="coerce").dropna() if base_col and base_col in t.columns else pd.Series([], dtype=float)
-            kf_vals = pd.to_numeric(t[kf_col], errors="coerce").dropna()
-            qr_vals = pd.to_numeric(t[qr_col], errors="coerce").dropna()
-            row[f"{label}_base_mae"]   = round(base_vals.mean(), 3) if len(base_vals) else float("nan")
-            row[f"{label}_kfstd_mae"]  = round(kf_vals.mean(), 3) if len(kf_vals) else float("nan")
-            row[f"{label}_qrobf_mae"]  = round(qr_vals.mean(), 3) if len(qr_vals) else float("nan")
-            if len(kf_vals) and len(qr_vals) and kf_vals.mean() > 0:
-                pct = (qr_vals.mean() - kf_vals.mean()) / kf_vals.mean() * 100.0
-                row[f"{label}_pct_change"] = round(pct, 1)
-            else:
-                row[f"{label}_pct_change"] = float("nan")
+    for spec in FAMILY_SPECS:
+        for variant, method in (
+            ("Base", spec["base_method"]),
+            ("kfstd", spec["kfstd_method"]),
+            ("QROBF", spec["qrobf_method"]),
+        ):
+            rows.append(
+                {
+                    "observation_family": spec["family"],
+                    "variant": variant,
+                    "freq_mae_bpm": _metric_value(freq_df, method, "MAE"),
+                    "freq_rmse_bpm": _metric_value(freq_df, method, "RMSE"),
+                    "freq_snr_db": _metric_value(freq_df, method, "SNR_Spec"),
+                    "time_ccc": _metric_value(time_df, method, "CCC"),
+                    "time_mae_bpm": _metric_value(time_df, method, "MAE"),
+                    "time_rmse_bpm": _metric_value(time_df, method, "RMSE"),
+                }
+            )
+
+    out = pd.DataFrame(rows)
+    out.to_csv(tables_dir / "performance_comprehensive.csv", index=False)
+    print(f"[paper] performance_comprehensive.csv → {tables_dir / 'performance_comprehensive.csv'}")
+
+
+def _build_innovation_diagnostics_table(run_dir: str, tables_dir: Path) -> None:
+    """Innovation diagnostics table merged with THD/ARCH statistics."""
+    eda_csv = Path(run_dir) / "eda" / "innovation_summary.csv"
+    noise_csv = _REPO / "analysis" / "noise_properties" / "summary.csv"
+    if not eda_csv.exists():
+        print("[paper] innovation diagnostics skipped (missing innovation_summary.csv)")
+        return
+
+    eda_df = pd.read_csv(eda_csv)
+    eda_df["family_key"] = eda_df["method"].map(_normalized_family_key)
+    eda_df = eda_df.rename(
+        columns={
+            "kurtosis": "innovation_kurtosis",
+            "t_aic_delta": "delta_aic",
+            "t_fit_nu": "nu_fit",
+        }
+    )
+
+    merged = eda_df[["family_key", "innovation_kurtosis", "delta_aic", "nu_fit", "student_t_justified"]].copy()
+    if noise_csv.exists():
+        noise_df = pd.read_csv(noise_csv)
+        noise_df["family_key"] = noise_df["Method"].map(_normalized_family_key)
+        noise_df = noise_df.rename(columns={"THD": "thd", "ARCH_LM_pval": "arch_lm_p"})
+        merged = merged.merge(
+            noise_df[["family_key", "thd", "arch_lm_p"]],
+            on="family_key",
+            how="left",
+        )
+    else:
+        merged["thd"] = float("nan")
+        merged["arch_lm_p"] = float("nan")
+
+    rows = []
+    for spec in FAMILY_SPECS:
+        family_key = _normalized_family_key(spec["noise_label"])
+        row = merged.loc[merged["family_key"] == family_key]
+        if row.empty:
+            continue
+        r = row.iloc[0]
+        rows.append(
+            {
+                "observation_family": spec["family"],
+                "kurtosis": _round_or_nan(r["innovation_kurtosis"], 3),
+                "delta_aic": _round_or_nan(r["delta_aic"], 3),
+                "nu_fit": _round_or_nan(r["nu_fit"], 3),
+                "thd": _round_or_nan(r.get("thd", np.nan), 3),
+                "arch_lm_p": _round_or_nan(r.get("arch_lm_p", np.nan), 6),
+                "student_t_justified": bool(r["student_t_justified"]),
+            }
+        )
+
+    out = pd.DataFrame(rows)
+    out.to_csv(tables_dir / "innovation_diagnostics.csv", index=False)
+    print(f"[paper] innovation_diagnostics.csv → {tables_dir / 'innovation_diagnostics.csv'}")
+
+
+def _build_ablation_table(tables_dir: Path) -> None:
+    out = pd.DataFrame(ABLATION_ROWS)
+    out.to_csv(tables_dir / "ablation_profile1d_cubic.csv", index=False)
+    print(f"[paper] ablation_profile1d_cubic.csv → {tables_dir / 'ablation_profile1d_cubic.csv'}")
+
+
+def _build_quality_tier_table(df: pd.DataFrame, tables_dir: Path) -> None:
+    """Quality-tier performance table without delta columns, plus overall median row."""
+    from analysis.plot_quality_stratification import _resolve_families
+    from analysis.quality_stratification import TIER_LABELS
+
+    families, base_cols = _resolve_families(df)
+    rows = []
+    for tier in TIER_LABELS + ["Overall"]:
+        if tier == "Overall":
+            subset = df
+            agg = "median"
+        else:
+            subset = df.loc[df["tier"] == tier]
+            agg = "mean"
+
+        row: dict[str, object] = {
+            "tier": tier,
+            "n_trials": int(len(subset)),
+            "statistic": agg,
+        }
+        for label, kf_col, qr_col, *_ in families:
+            base_col = base_cols.get(label, "")
+            base_vals = pd.to_numeric(subset[base_col], errors="coerce").dropna() if base_col and base_col in subset.columns else pd.Series(dtype=float)
+            kf_vals = pd.to_numeric(subset[kf_col], errors="coerce").dropna() if kf_col in subset.columns else pd.Series(dtype=float)
+            qr_vals = pd.to_numeric(subset[qr_col], errors="coerce").dropna() if qr_col in subset.columns else pd.Series(dtype=float)
+            reducer = np.nanmedian if agg == "median" else np.nanmean
+            row[f"{label}_base_mae"] = _round_or_nan(reducer(base_vals) if len(base_vals) else np.nan)
+            row[f"{label}_kfstd_mae"] = _round_or_nan(reducer(kf_vals) if len(kf_vals) else np.nan)
+            row[f"{label}_qrobf_mae"] = _round_or_nan(reducer(qr_vals) if len(qr_vals) else np.nan)
         rows.append(row)
 
-    tbl = pd.DataFrame(rows)
-    tbl.to_csv(tables_dir / "table2_per_tier_mae.csv", index=False)
-    print(f"[paper] Table 2 → {tables_dir / 'table2_per_tier_mae.csv'}")
+    out = pd.DataFrame(rows)
+    out.to_csv(tables_dir / "quality_tier_freq_mae.csv", index=False)
+    print(f"[paper] quality_tier_freq_mae.csv → {tables_dir / 'quality_tier_freq_mae.csv'}")
+
+
+def _build_filter_calibration_table(run_dir: str, tables_dir: Path) -> None:
+    diag_csv = Path(run_dir) / "metrics" / "metrics_filter_diagnostics_summary.csv"
+    if not diag_csv.exists():
+        print("[paper] filter calibration table skipped (missing diagnostics summary)")
+        return
+
+    diag_df = pd.read_csv(diag_csv)
+    rows = []
+    for spec in FAMILY_SPECS:
+        row = diag_df.loc[diag_df["method"] == spec["qrobf_method"]]
+        if row.empty:
+            continue
+        r = row.iloc[0]
+        rows.append(
+            {
+                "observation_family": spec["family"],
+                "variant": "QROBF",
+                "fail_total": _round_or_nan(r.get("Fail_Total_median", np.nan), 6),
+                "fail_double": _round_or_nan(r.get("Fail_Double_median", np.nan), 6),
+                "nis_mean": _round_or_nan(r.get("NIS_Mean_median", np.nan), 6),
+                "lambda_lt1_frac": _round_or_nan(r.get("Lambda_LT1_Frac_median", np.nan), 6),
+                "coverage95_pct": _round_or_nan(r.get("Coverage95_median", np.nan), 3),
+                "stability_sec": _round_or_nan(r.get("Stability_Sec_median", np.nan), 3),
+            }
+        )
+
+    out = pd.DataFrame(rows)
+    out.to_csv(tables_dir / "filter_calibration_summary.csv", index=False)
+    print(f"[paper] filter_calibration_summary.csv → {tables_dir / 'filter_calibration_summary.csv'}")
 
 
 def step_write_paper_index(paper_dir: Path, run_dir: str, df: Optional[pd.DataFrame]) -> None:
@@ -357,8 +821,8 @@ def step_write_paper_index(paper_dir: Path, run_dir: str, df: Optional[pd.DataFr
             from analysis.plot_quality_stratification import _resolve_families
             FAMILIES, BASE_COLS = _resolve_families(df)
 
-            lines = ["| Tier | n | " + " | ".join(f"{f[0]} base | {f[0]} kfstd | {f[0]} QROBF | Δ%" for f in FAMILIES) + " |"]
-            lines.append("|" + "---|" * (2 + 4 * len(FAMILIES)))
+            lines = ["| Tier | n | " + " | ".join(f"{f[0]} base | {f[0]} kfstd | {f[0]} QROBF" for f in FAMILIES) + " |"]
+            lines.append("|" + "---|" * (2 + 3 * len(FAMILIES)))
             for tier in TIER_LABELS:
                 t = df[df["tier"] == tier]
                 n = len(t)
@@ -368,9 +832,8 @@ def step_write_paper_index(paper_dir: Path, run_dir: str, df: Optional[pd.DataFr
                     base = pd.to_numeric(t[base_col], errors="coerce").mean() if base_col and base_col in t.columns else float("nan")
                     kf = pd.to_numeric(t[kf_col], errors="coerce").mean()
                     qr = pd.to_numeric(t[qr_col], errors="coerce").mean()
-                    pct = (qr - kf) / kf * 100 if (kf > 0 and not np.isnan(kf + qr)) else float("nan")
                     base_str = f"{base:.2f}" if not np.isnan(base) else "N/A"
-                    cells += [base_str, f"{kf:.2f}", f"{qr:.2f}", f"{pct:+.1f}%"]
+                    cells += [base_str, f"{kf:.2f}", f"{qr:.2f}"]
                 lines.append("| " + " | ".join(cells) + " |")
             tier_summary = "\n".join(lines)
         except Exception as exc:
@@ -389,9 +852,12 @@ def step_write_paper_index(paper_dir: Path, run_dir: str, df: Optional[pd.DataFr
         "",
     ]
     TABLE_DESCRIPTIONS = {
-        "table1_freq_domain_mae.csv":    "**Table 1** — Overall frequency-domain MAE per method (all 160 trials)",
-        "table2_per_tier_mae.csv":       "**Table 2** — Per quality-tier MAE: kfstd vs QROBF with Δ% (4 tiers × 5 families)",
-        "table3_filter_diagnostics.csv": "**Table 3** — Filter diagnostics summary (NIS, g_t, α_R, fail rates)",
+        "performance_comprehensive.csv":   "**Table 2** — Comprehensive family-level performance table (base, kfstd, QROBF; no delta columns)",
+        "innovation_diagnostics.csv":      "**Table 3** — Innovation diagnostics supporting the heavy-tail model choice",
+        "ablation_profile1d_cubic.csv":    "**Table 4** — Profile1D-Cubic ablation summary (no delta column)",
+        "quality_tier_freq_mae.csv":       "**Table 5** — Quality-tier frequency-domain MAE by family (mean per tier, median overall; no delta columns)",
+        "filter_calibration_summary.csv":  "**Table 6** — QROBF failure and calibration summary",
+        "waveform_overlay_examples_manifest.csv": "**Figure manifest** — Selected best/median/worst trials used in the waveform overlay figure",
     }
     for tbl in tables:
         desc = TABLE_DESCRIPTIONS.get(tbl.name, f"**{tbl.stem}**")
@@ -399,17 +865,19 @@ def step_write_paper_index(paper_dir: Path, run_dir: str, df: Optional[pd.DataFr
 
     md_lines += ["", "## Figures", ""]
     FIGURE_DESCRIPTIONS = {
-        "fig0_overall_performance.png":  "**Fig 0** — Overall performance summary (all methods, time+freq domain)",
-        "fig1_snr_distribution.pdf":     "**Fig 1** — Spectral SNR distribution (OF signal, 160 trials) with tier colour bands",
-        "fig2_tier_bar_OF.pdf":          "**Fig 2** — Per-tier MAE bar chart: OF family (base / kfstd / QROBF)",
-        "fig3_tier_bar_all_families.pdf":"**Fig 3** — Per-tier MAE bar chart: all 5 families (2×2 panel)",
-        "fig4_relative_improvement.pdf": "**Fig 4** — Relative improvement QROBF vs kfstd (%) per tier × family",
-        "fig5_boxplots.pdf":             "**Fig 5** — Box plots (OF, P1D-Linear, P1D-Cubic) per tier",
-        "fig6_scatter_snr_vs_mae.pdf":   "**Fig 6** — Scatter: spectral SNR vs freq MAE (kfstd vs QROBF, P1D-Cubic)",
-        "fig7_improvement_heatmap.pdf":  "**Fig 7** — Heatmap: % improvement tier × family",
-        "boundary_prob_curve.png":       "**Fig 8** — Instability boundary: P(QROBF better) vs signal quality decile",
-        "boundary_delta_deciles.png":    "**Fig 9** — Instability boundary: Δ MAE per quality decile",
-        "boundary_regime_map.png":       "**Fig 10** — Regime map: trial-level quality vs improvement scatter",
+        "fig1_overview.png":                 "**Fig 1** — Frequency/time-domain overview across observation families",
+        "fig2_freq_primary.png":             "**Fig 2** — Primary frequency-domain comparison for kfstd vs QROBF",
+        "waveform_overlay_examples.png":     "**Fig 4** — Representative aligned waveform overlays (best/median/worst trials)",
+        "fig2_trust_mapping.png":            "**Mechanism figure** — Deterministic quality-to-trust mapping",
+        "fig4_robust_update.png":            "**Mechanism figure** — Student-t robust update behavior",
+        "fig7_ablation.png":                 "**Ablation figure** — EKS vs Student-t component contribution",
+        "fig1_snr_distribution.png":         "**Tier figure** — Spectral SNR distribution with tier boundaries",
+        "fig3_tier_bar_all_families.png":    "**Tier figure** — Per-tier MAE bar chart across all families",
+        "fig7_improvement_heatmap.png":      "**Tier figure** — Relative improvement heatmap across tiers",
+        "boundary_prob_curve.png":           "**Boundary figure** — P(QROBF better) vs signal-quality decile",
+        "boundary_delta_deciles.png":        "**Boundary figure** — Mean MAE delta by quality decile",
+        "boundary_regime_map.png":           "**Boundary figure** — Quality/improvement regime map",
+        "overall_performance_summary.png":   "**Overview figure** — Aggregated time/frequency performance summary",
     }
     for fig in figures:
         desc = FIGURE_DESCRIPTIONS.get(fig.name, f"**{fig.stem}**")
@@ -432,8 +900,10 @@ def step_write_paper_index(paper_dir: Path, run_dir: str, df: Optional[pd.DataFr
         "  Step 3: Instability boundary   → <run>/plots/boundary/",
         "  Step 4: Quality stratification → <run>/plots/quality_stratification/",
         "  Step 5: Quality figures        → <run>/plots/quality_stratification/fig*.pdf",
+        "  Step 5b: Paper figure suite    → <run>/plots/paper/",
         "  Step 6: Paper directory        → <run>/paper/{tables,figures}/",
         "  Step 7: This index             → <run>/paper/PAPER_INDEX.md",
+        "  Step 8: Manuscript sync        → notes/.../prism_files/",
         "```",
         "",
         "Generated by `analysis/run_paper_analysis.py`",
@@ -460,6 +930,8 @@ def main() -> None:
     ap.add_argument("--skip-eda",      action="store_true", help="Skip innovation EDA step")
     ap.add_argument("--skip-boundary", action="store_true", help="Skip instability boundary step")
     ap.add_argument("--skip-figs",     action="store_true", help="Skip figure generation")
+    ap.add_argument("--skip-manuscript-sync", action="store_true",
+                    help="Do not copy refreshed figures/tables into the manuscript prism_files directory")
     args = ap.parse_args()
 
     # Resolve config_path and run_dir
@@ -468,7 +940,7 @@ def main() -> None:
         config_path = str(Path(args.config).resolve())
         with open(config_path) as f:
             cfg = json.load(f)
-        run_label    = cfg.get("run_label", Path(args.config).stem)
+        run_label    = cfg.get("run_label") or cfg.get("name") or Path(args.config).stem
         results_root = cfg.get("results_dir", "results")
         run_dir      = os.path.join(results_root, run_label)
     else:
@@ -515,12 +987,18 @@ def main() -> None:
     df = step_quality_stratification(run_dir, plots_dir)
     if df is not None and not args.skip_figs:
         step_quality_figures(df, plots_dir)
+    if not args.skip_figs:
+        step_paper_suite(run_dir)
 
     # Step 6: Assemble paper/ directory
     paper_dir = step_build_paper_dir(run_dir, df)
 
     # Step 7: Write PAPER_INDEX.md
     step_write_paper_index(paper_dir, run_dir, df)
+
+    # Step 8: Sync manuscript assets
+    if not args.skip_manuscript_sync:
+        step_sync_manuscript_assets(run_dir)
 
     print(f"\n{'='*60}")
     print(f"  Done!  Paper assets → {paper_dir}")

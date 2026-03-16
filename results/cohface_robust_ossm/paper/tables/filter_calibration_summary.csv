@@ -1,0 +1,6 @@
+observation_family,variant,fail_total,fail_double,nis_mean,lambda_lt1_frac,coverage95_pct,stability_sec
+OF-Farneback,QROBF,0.051303,0.049686,0.16369,0.020063,98.303,61.2
+DoF,QROBF,0.205065,0.155629,0.153024,0.01048,97.225,61.2
+Profile1D-Linear,QROBF,0.079164,0.061839,0.10137,0.011171,94.754,61.2
+Profile1D-Quadratic,QROBF,0.035611,0.035348,0.066922,0.0,99.145,61.2
+Profile1D-Cubic,QROBF,0.036433,0.036433,0.068721,0.000787,99.096,61.2
