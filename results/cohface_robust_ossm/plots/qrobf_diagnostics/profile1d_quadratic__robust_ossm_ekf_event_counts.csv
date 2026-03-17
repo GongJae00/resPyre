@@ -1,2 +1,2 @@
 method,n_trials,n_frames,div,slip,lock,double,gate_collapse_runs,harm_suppress_runs
-profile1d_quadratic__robust_ossm_ekf,160,197157,0,25,3048,18199,0,0
+profile1d_quadratic__robust_ossm_ekf,160,197157,0,22,8380,33070,0,0

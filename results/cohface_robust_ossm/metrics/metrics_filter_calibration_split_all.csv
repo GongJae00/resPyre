@@ -1,16 +1,16 @@
 method,n_trials,calibration_applicable,applicability_reason,strict_pass_rate,relaxed_pass_rate,overstrict_rate,true_fail_rate,nis_mean_median,nis_inband_median
 of_farneback,160,False,no_finite_nis_metrics,,,,,,
 of_farneback__kfstd,160,False,no_finite_nis_metrics,,,,,,
-of_farneback__robust_ossm_ekf,160,True,,0.00625,0.05,0.04375,0.95,0.1636895182157126,0.922040863385188
+of_farneback__robust_ossm_ekf,160,True,,0.025,0.1375,0.1125,0.8625,0.29065327870441904,0.9359837539655277
 DoF,160,False,no_finite_nis_metrics,,,,,,
 dof__kfstd,160,False,no_finite_nis_metrics,,,,,,
-dof__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.1530243518222668,0.9379139072847682
+dof__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.15098141276705782,0.9360180105036299
 profile1D linear,160,False,no_finite_nis_metrics,,,,,,
 profile1d_linear__kfstd,160,False,no_finite_nis_metrics,,,,,,
-profile1d_linear__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.101370036495325,0.8993991340745149
+profile1d_linear__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.11429291330758415,0.9027397304536922
 profile1D quadratic,160,False,no_finite_nis_metrics,,,,,,
 profile1d_quadratic__kfstd,160,False,no_finite_nis_metrics,,,,,,
-profile1d_quadratic__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.06692228539326635,0.902665322105759
+profile1d_quadratic__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.07626478971376988,0.9070770746616799
 profile1D cubic,160,False,no_finite_nis_metrics,,,,,,
 profile1d_cubic__kfstd,160,False,no_finite_nis_metrics,,,,,,
-profile1d_cubic__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.06872117238575785,0.9038420453761579
+profile1d_cubic__robust_ossm_ekf,160,True,,0.0,0.0,0.0,1.0,0.07916075232474168,0.908755912961211

@@ -1,2 +1,2 @@
 method,n_trials,n_frames,div,slip,lock,double,gate_collapse_runs,harm_suppress_runs
-profile1d_linear__robust_ossm_ekf,160,197157,0,20,9879,22498,0,0
+profile1d_linear__robust_ossm_ekf,160,197157,2,23,9466,22225,0,0

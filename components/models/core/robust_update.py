@@ -99,7 +99,6 @@ class RobustKalmanUpdater:
         lambda_t = 1.0
 
         # If nu is infinite (Gaussian), lambda stays 1.0
-        # If nu is infinite (Gaussian), lambda stays 1.0
         if self.nu > 1e12:
             pass
         else:

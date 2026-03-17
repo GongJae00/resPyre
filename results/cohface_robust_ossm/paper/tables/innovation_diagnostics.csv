@@ -1,6 +1,6 @@
 observation_family,kurtosis,delta_aic,nu_fit,thd,arch_lm_p,student_t_justified
-OF-Farneback,52.043,72259.572,3.647,0.311,0.0,True
-DoF,0.538,1169.913,18.78,0.947,0.0,False
-Profile1D-Linear,5.874,38586.32,2.911,0.404,0.0,True
-Profile1D-Quadratic,2.544,12800.806,5.186,0.211,0.0,True
-Profile1D-Cubic,2.596,12897.868,5.181,0.217,0.0,True
+OF-Farneback,35.646,69260.676,3.434,0.311,0.0,True
+DoF,0.458,917.638,20.917,0.947,0.0,False
+Profile1D-Linear,6.053,42284.047,2.765,0.404,0.0,True
+Profile1D-Quadratic,3.424,19385.245,4.361,0.211,0.0,True
+Profile1D-Cubic,3.247,18475.165,4.453,0.217,0.0,True

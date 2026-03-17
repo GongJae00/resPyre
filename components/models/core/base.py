@@ -551,7 +551,7 @@ class _BaseOscillatorHead:
                 alpha_used = float(target_alpha)
         # Guardrails to prevent runaway variances
         qx = float(np.clip(qx, 1e-7, 1e-1))
-        qf = float(np.clip(qf, 1e-7, 5e-3))
+        qf = float(np.clip(qf, 1e-7, 5e-2))
         rv = float(np.clip(rv, rv_floor, rv_cap))
         qx, qf, rv = self._apply_spectral_guidance(qx, qf, rv, rv_floor, qf_base)
         if not np.isfinite(alpha_used):

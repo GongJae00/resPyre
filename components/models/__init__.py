@@ -6,6 +6,7 @@ from .heads.robust_attention import oscillator_Robust_Attention
 from .heads.head_ensemble import OscillatorHeadEnsemble
 from .heads.ag_akf import oscillator_AGAKF
 from .heads.robust_ossm import oscillator_RobustOSSM
+from .heads.simple_bandpass import oscillator_SimpleBandpass
 
 HEAD_REGISTRY = {
     "kfstd": oscillator_KFstd,
@@ -21,6 +22,7 @@ HEAD_REGISTRY = {
     "robust_bayesian": oscillator_RobustOSSM,
     "robust_ossm_ekf": oscillator_RobustOSSM,
     "robust_ossm_ukf": oscillator_RobustOSSM,
+    "simple_bandpass": oscillator_SimpleBandpass,
 }
 
 def build_head(head_key: str, params: Optional[OscillatorParams] = None):

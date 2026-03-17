@@ -29,22 +29,19 @@ class TrustConfig:
 
     REGIME GUIDE — Two distinct operating regimes exist:
     -------------------------------------------------------
-    [A] Active-Gating Regime (experimental / DoF family):
-        Uses defaults below. All 5 rules active.
+    [A] Active-Gating Regime (burst-aware / OF-Farneback, DoF families):
+        Uses quality-only gate: g_t = σ(w_vis·q_vis + w_cons·q_cons - w_burst·q_burst - gate_bias)
+        NIS is NOT in the gate logit — bistable feedback eliminated.
+        Recommended: gate_bias=0.5, w_gate_burst=1.5
 
-    [B] Validated No-Gating Regime (production — OF/Profile1D families):
-        Override in per-method config:
-            gate_bias   = -100.0  → g_t ≈ 1.0 always (Rule 3 disabled)
-            alpha_R_max = 1.0     → alpha_R clamped at 1.0 (Rule 1 disabled)
-            beta_1      = 0.0
-            beta_2      = 0.0
-        Active rules in [B]: Rule 2 (alpha_Q via gamma_1),
-            partial Rule 4 (g_z via freq_jitter_decay), Rule 5 (w_h).
-        Primary accuracy mechanism: EKS (use_eks=True).
-        Primary R-scaling: rv_auto=True (MAD-based), independent of alpha_R.
+    [B] Pass-Through Regime (high-quality / Profile1D-Quad, Profile1D-Cubic):
+        Use gate_bias=-1.0 to keep g_t ≈ 1.0 for clean frames.
+        Active rules: Rule 2 (alpha_Q), Rule 4 (g_z), Rule 5 (w_h).
+        Primary accuracy mechanism: EKS (use_eks=True) + rv_auto.
 
-    WARNING: Default TrustConfig() initialises in regime [A].
-    Always explicitly override gate_bias and alpha_R_max for [B] methods.
+    NOTE: Legacy gate_bias=-100.0 is no longer needed with this NIS-free design.
+    NIS feedback loop (bistable cause) has been removed from Rule 3.
+    NIS is retained only as a diagnostic output (logged via FrameLogger).
     """
     # R-scale: α_R = 1 + β₁·q_out + β₂·(1−q_vis)
     beta_1: float = 2.0       # outlier sensitivity
@@ -53,11 +50,13 @@ class TrustConfig:
     # Q-scale: α_Q = 1 + γ₁·q_drift
     gamma_1: float = 2.0      # drift sensitivity
 
-    # Observation gate: σ(w₁·q_vis + w₂·q_cons − w₃·NIS − b)
+    # Observation gate: σ(w_vis·q_vis + w_cons·q_cons - w_burst·q_burst - gate_bias)
+    # NIS is NO LONGER in the gate logit (bistable feedback eliminated).
     w_gate_vis: float = 2.0
     w_gate_cons: float = 1.5
-    w_gate_nis: float = 0.5
-    gate_bias: float = 1.0
+    w_gate_burst: float = 1.5  # burst events suppress observation gate
+    w_gate_nis: float = 0.0    # LEGACY: kept at 0.0; NIS no longer in gate logit
+    gate_bias: float = 0.5     # default: gate open for clean frames, closed for burst
 
     # Frequency gate
     freq_jitter_decay: float = 0.8   # how much jitter reduces g_z
@@ -67,7 +66,7 @@ class TrustConfig:
     w_h_min: float = 0.15
     g_z_floor: float = 0.05
 
-    # NIS hard gate threshold
+    # NIS hard gate threshold (safety net for extreme divergence only)
     nis_hard_gate: float = 15.0
 
     # Clamps
@@ -127,15 +126,19 @@ class TrustAllocator:
         alpha_Q = 1.0 + c.gamma_1 * q_drift
         alpha_Q = float(np.clip(alpha_Q, 1.0, c.alpha_Q_max))
 
-        # ── Rule 3: Observation gate ──
-        # g_t = σ(w₁·q_vis + w₂·q_cons − w₃·NIS − b)
+        # ── Rule 3: Observation gate (NIS-free formulation) ──
+        # g_t = σ(w_vis·q_vis + w_cons·q_cons - w_burst·q_burst - gate_bias)
+        # NIS is excluded from the logit to eliminate the bistable feedback loop:
+        #   high NIS → gate closes → filter can't track → NIS stays high (old behavior).
+        # Now gate is determined purely by observable quality signals.
+        # q_burst directly suppresses the gate during motion artifact frames.
         logit = (c.w_gate_vis * q_vis +
                  c.w_gate_cons * q_cons -
-                 c.w_gate_nis * nis -
+                 c.w_gate_burst * q_burst -
                  c.gate_bias)
         g_t = float(_sigmoid(logit))
 
-        # Hard NIS gate
+        # Hard NIS gate: safety net for extreme filter divergence only
         if nis > c.nis_hard_gate:
             g_t = 0.0
 
