@@ -1,9 +1,0 @@
-# Exclude files with no extension, as cmdstanpy generates executables from models
-*
-!*/
-!*.*
-*.hpp
-
-# MacOS Finder 
-.DS_Store
-._.DS_Store

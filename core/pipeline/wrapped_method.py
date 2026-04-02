@@ -53,6 +53,10 @@ def _normalize_head(name: str) -> str:
         return "robust_ossm_ukf"
     if key in ("simple_bandpass", "simplebandpass", "bandpass"):
         return "simple_bandpass"
+    if key in ("narossm", "narossm"):
+        return "narossm"
+    if key in ("parh_ossm", "parhossm", "parh-ossm"):
+        return "parh_ossm"
     raise ValueError(f"Unknown oscillator head '{name}'")
 
 

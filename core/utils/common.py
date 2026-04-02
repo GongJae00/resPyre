@@ -240,6 +240,10 @@ def get_chest_ROI(video_path, dataset, mp_complexity=2, skip_rate=1):
                 fallback_bbox = _fallback_chest_bbox(frame, face_bbox=face_bbox)
             im = Image.fromarray(frame)
             left, right, upper, lower = fallback_bbox[0], fallback_bbox[1], fallback_bbox[2], fallback_bbox[3]
+            if upper >= lower:
+                lower = upper + 1
+            if left >= right:
+                right = left + 1
             chest = im.crop(box=(left, upper, right, lower))
             frames.append(chest)
             i += 1
@@ -290,6 +294,10 @@ def get_chest_ROI(video_path, dataset, mp_complexity=2, skip_rate=1):
                         last_bbox = [left, right, upper, lower]
 
                 im = Image.fromarray(frame)
+                if upper >= lower:
+                    lower = upper + 1
+                if left >= right:
+                    right = left + 1
                 chest = im.crop(box=(left, upper, right, lower))
                 frames.append(chest)
                 i += 1
@@ -332,6 +340,9 @@ def Welch_rpm(resp, fps, winsize, minHz=0.1, maxHz=0.4, fRes=0.1):
     return Pfreqs, Power
 
 def sig_to_RPM(sig, fps, winsize, minHz=0.1, maxHz=0.4):
+    sig = [s for s in sig if np.asarray(s).size > 0]
+    if len(sig) == 0:
+        return np.array([np.nan])
     sig = np.vstack(sig)
 
     Pfreqs, Power = Welch_rpm(sig, fps, winsize, minHz, maxHz)
@@ -397,6 +408,10 @@ def filter_RW(sig, fps, lo=0.08, hi=0.5):
         sig = sig[np.newaxis,:]
 
     b, a = signal.butter(N=2, Wn=[lo, hi], fs=fps, btype='bandpass')
+    padlen = 3 * max(len(a), len(b))
+    if sig.shape[-1] <= padlen:
+        # Signal too short for filtfilt; return zeros
+        return np.zeros_like(sig)
     filtered_sig = signal.filtfilt(b, a, sig)
 
     return filtered_sig

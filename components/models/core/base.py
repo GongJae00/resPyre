@@ -6,10 +6,17 @@ import numpy as np
 from scipy import signal as sps
 from scipy.signal import hilbert
 
-from ..autotune.params_autotune import AutoTuneRepository
-from core.optimization.em_kalman import load_em_params
+try:
+    from ..autotune.params_autotune import AutoTuneRepository
+    _AUTOTUNE_REPO = AutoTuneRepository()
+except (ImportError, ModuleNotFoundError):
+    AutoTuneRepository = None
+    _AUTOTUNE_REPO = None
 
-_AUTOTUNE_REPO = AutoTuneRepository()
+try:
+    from core.optimization.em_kalman import load_em_params
+except (ImportError, ModuleNotFoundError):
+    load_em_params = None
 
 class PLLAdaptiveController:
     """Simple adaptive gain controller driven by SNR."""
@@ -239,6 +246,8 @@ class _BaseOscillatorHead:
 
     def _maybe_apply_autotune(self, meta: Optional[Dict]):
         if getattr(self.params, 'no_autotune', False):
+            return
+        if _AUTOTUNE_REPO is None:
             return
         dataset = self._dataset_from_meta(meta)
         method_id = self._method_identifier(meta)

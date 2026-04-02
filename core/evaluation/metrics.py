@@ -652,3 +652,99 @@ def stability_duration(freq_track, fs, eps_hz=0.02):
         'max_stable_frames': max_frames,
         'total_stable_pct': float(total_pct),
     }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Waveform-level metrics for PARH-OSSM dual-output evaluation
+# ──────────────────────────────────────────────────────────────────────
+
+def waveform_ccc(sig_est, sig_gt):
+    """CCC between estimated and ground-truth waveforms (sample-level).
+
+    This is for z_full evaluation, NOT for rate BPM sequences.
+    Signals should be at the same sampling rate and aligned.
+
+    Returns float CCC in [-1, 1] or NaN.
+    """
+    a = np.asarray(sig_est, dtype=np.float64).flatten()
+    b = np.asarray(sig_gt, dtype=np.float64).flatten()
+    n = min(len(a), len(b))
+    if n < 2:
+        return float('nan')
+    a, b = a[:n], b[:n]
+    mask = np.isfinite(a) & np.isfinite(b)
+    if np.count_nonzero(mask) < 2:
+        return float('nan')
+    return float(concordance_correlation_coefficient(a[mask], b[mask]))
+
+
+def waveform_mae(sig_est, sig_gt):
+    """Sample-level MAE between waveforms.
+
+    For z_full evaluation. Both signals should be normalised
+    (e.g. robust z-scored) before comparison.
+    """
+    a = np.asarray(sig_est, dtype=np.float64).flatten()
+    b = np.asarray(sig_gt, dtype=np.float64).flatten()
+    n = min(len(a), len(b))
+    if n < 1:
+        return float('nan')
+    a, b = a[:n], b[:n]
+    mask = np.isfinite(a) & np.isfinite(b)
+    if np.count_nonzero(mask) < 1:
+        return float('nan')
+    return float(np.mean(np.abs(a[mask] - b[mask])))
+
+
+def waveform_dtw(sig_est, sig_gt):
+    """DTW distance between waveforms. Wrapper around calculate_dtw_distance.
+
+    For z_full evaluation. Returns normalised DTW distance or NaN.
+    """
+    a = np.asarray(sig_est, dtype=np.float64).flatten()
+    b = np.asarray(sig_gt, dtype=np.float64).flatten()
+    if len(a) < 2 or len(b) < 2:
+        return float('nan')
+    mask_a = np.isfinite(a)
+    mask_b = np.isfinite(b)
+    if np.count_nonzero(mask_a) < 2 or np.count_nonzero(mask_b) < 2:
+        return float('nan')
+    try:
+        return float(calculate_dtw_distance(a[mask_a], b[mask_b]))
+    except Exception:
+        return float('nan')
+
+
+def compute_dual_output_metrics(result_dict, gt_signal, fs):
+    """Compute rate metrics (z_osc) and waveform metrics (z_full) from PARH-OSSM result.
+
+    Args:
+        result_dict: dict from PARH-OSSM head containing z_osc, z_full, track_hz, etc.
+        gt_signal: ground-truth respiratory waveform (same fs)
+        fs: sampling rate
+
+    Returns:
+        dict with keys:
+            rate_metrics: {MAE, RMSE, PearsonR} (from z_osc → track_hz → BPM)
+            waveform_metrics: {CCC, wMAE, DTW} (from z_full vs gt_signal)
+            output_type: 'dual' or 'single'
+    """
+    metrics_out = {"output_type": "single", "rate_metrics": {}, "waveform_metrics": {}}
+
+    z_full = result_dict.get("z_full")
+    if z_full is not None and gt_signal is not None:
+        gt = np.asarray(gt_signal, dtype=np.float64).flatten()
+        zf = np.asarray(z_full, dtype=np.float64).flatten()
+
+        # Align via cross-correlation
+        aligned_est, aligned_gt, _ = calculate_cross_corr_alignment(zf, gt, fs, fs)
+
+        if len(aligned_est) > 1:
+            metrics_out["waveform_metrics"] = {
+                "CCC": waveform_ccc(aligned_est, aligned_gt),
+                "wMAE": waveform_mae(aligned_est, aligned_gt),
+                "DTW": waveform_dtw(aligned_est, aligned_gt),
+            }
+            metrics_out["output_type"] = "dual"
+
+    return metrics_out

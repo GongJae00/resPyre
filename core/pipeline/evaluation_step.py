@@ -11,7 +11,7 @@ from scipy.stats import chi2
 from typing import List, Dict, Optional, Tuple
 
 from core.evaluation import metrics as metrics_lib
-from core.evaluation.metrics import getErrors
+from core.evaluation.metrics import getErrors, waveform_ccc, waveform_mae, waveform_dtw
 from core.utils.common import tqdm, filter_RW, sig_windowing, sig_to_RPM
 from core.pipeline.common import (
     resolve_target_run_dirs,
@@ -985,6 +985,7 @@ def run_evaluation(
         all_time_domain_records = []
         all_freq_domain_records = []
         all_filter_diag_records = []
+        all_waveform_records = []   # z_full waveform metrics (PARH-OSSM dual output)
         frame_log_cache: Dict[str, Dict[str, np.ndarray]] = {}
         expected_trials = _collect_expected_method_trials(d_dir)
         expected_trials_for_logs = _filter_expected_trials_for_frame_logs(d_dir, expected_trials)
@@ -1052,6 +1053,8 @@ def run_evaluation(
 
                 sig_hat = payload.get('signal_hat')
                 if sig_hat is None: continue
+                sig_hat = np.asarray(sig_hat).flatten()
+                if sig_hat.size < 2: continue
                 data_file_rel = os.path.relpath(pkl_path, d_dir)
                 est_track_hz = np.asarray(payload.get('track_hz', []), dtype=np.float64)
                 
@@ -1111,6 +1114,67 @@ def run_evaluation(
                         'data_file': data_file_rel,
                     }
                     all_time_domain_records.append(rec_time)
+
+                # =========================================================
+                # Block 1b: Unified Waveform Metrics (T4 comparative)
+                # =========================================================
+                # All methods get waveform CCC/wMAE/DTW via identical protocol:
+                #   bandpass → zscore → cross-corr alignment → metrics
+                # output_type distinguishes the signal source:
+                #   Base/KFstd: signal_hat
+                #   PARH-OSSM:  z_full (primary), z_osc (supplement)
+                _wf_candidates = {}
+
+                # --- signal_hat waveform (all methods) ---
+                if est_norm is not None and est_norm.size >= 10 and gt_signal is not None:
+                    _wf_candidates[('signal_hat', 'smoothed')] = est_norm
+
+                # --- z_full waveform (PARH-OSSM only) ---
+                _zf_smooth = payload.get('z_full_smoothed') if payload.get('z_full_smoothed') is not None else payload.get('z_full')
+                _zf_causal = payload.get('z_full_causal')
+                if _zf_smooth is not None:
+                    _zfs = np.asarray(_zf_smooth, dtype=np.float64).flatten()
+                    if _zfs.size >= 10:
+                        _zfs_filt = filter_RW(_zfs, fps, lo=min_hz, hi=max_hz)
+                        _zfs_norm = (_zfs_filt - np.mean(_zfs_filt)) / (np.std(_zfs_filt) + 1e-9)
+                        _wf_candidates[('z_full', 'smoothed')] = _zfs_norm.flatten()
+                if _zf_causal is not None:
+                    _zfc = np.asarray(_zf_causal, dtype=np.float64).flatten()
+                    if _zfc.size >= 10:
+                        _zfc_filt = filter_RW(_zfc, fps, lo=min_hz, hi=max_hz)
+                        _zfc_norm = (_zfc_filt - np.mean(_zfc_filt)) / (np.std(_zfc_filt) + 1e-9)
+                        _wf_candidates[('z_full', 'causal')] = _zfc_norm.flatten()
+
+                # --- z_osc waveform (PARH-OSSM supplement) ---
+                _zo_smooth = payload.get('z_osc_smoothed') if payload.get('z_osc_smoothed') is not None else payload.get('z_osc')
+                if _zo_smooth is not None and payload.get('z_full') is not None:
+                    _zos = np.asarray(_zo_smooth, dtype=np.float64).flatten()
+                    if _zos.size >= 10:
+                        _zos_filt = filter_RW(_zos, fps, lo=min_hz, hi=max_hz)
+                        _zos_norm = (_zos_filt - np.mean(_zos_filt)) / (np.std(_zos_filt) + 1e-9)
+                        _wf_candidates[('z_osc', 'smoothed')] = _zos_norm.flatten()
+
+                for (_otype, _variant_label), _wf_sig in _wf_candidates.items():
+                    if gt_signal is None:
+                        continue
+                    _wf_aligned, _gt_aligned_w, _lag_w = calculate_cross_corr_alignment(
+                        _wf_sig, gt_norm, fs_est=fps, fs_gt=fs_gt
+                    )
+                    if len(_wf_aligned) > 10:
+                        _w_ccc = waveform_ccc(_wf_aligned, _gt_aligned_w)
+                        _w_mae = waveform_mae(_wf_aligned, _gt_aligned_w)
+                        _w_dtw = waveform_dtw(_wf_aligned, _gt_aligned_w)
+                        rec_wf = {
+                            'video': fname, 'method': method_name,
+                            'output_type': _otype,
+                            'causal_or_smoothed': _variant_label,
+                            'waveform_CCC': _w_ccc,
+                            'waveform_MAE': _w_mae,
+                            'waveform_DTW': _w_dtw,
+                            'latency_ms': _lag_w * 1000.0,
+                            'data_file': data_file_rel,
+                        }
+                        all_waveform_records.append(rec_wf)
 
                 # =========================================================
                 # Block 2: Frequency Domain (Rate Accuracy & Spectral Shape)
@@ -1274,6 +1338,8 @@ def run_evaluation(
                 title = "Freq Domain (Rate Accuracy)"
             elif label == 'filter_diagnostics':
                 title = "Filter Diagnostics (Failure/Calibration)"
+            elif label == 'waveform':
+                title = "z_full Waveform (CCC/wMAE/DTW — PARH-OSSM dual output)"
             else:
                 title = label
             
@@ -1312,6 +1378,12 @@ def run_evaluation(
         _save_domain_v2(all_time_domain_records, 'time_domain', time_metrics_list)
         _save_domain_v2(all_freq_domain_records, 'freq_domain', freq_metrics_list)
         _save_domain_v2(all_filter_diag_records, 'filter_diagnostics', filter_diag_metrics_list)
+
+        # ── Unified waveform metrics (T4 comparative) ──
+        # All methods: signal_hat. PARH-OSSM additionally: z_full, z_osc.
+        if all_waveform_records:
+            wf_metrics_keys = ['waveform_CCC', 'waveform_MAE', 'waveform_DTW', 'latency_ms']
+            _save_domain_v2(all_waveform_records, 'waveform', wf_metrics_keys)
 
         # Explicitly separate strict-test failures from practical miscalibration.
         try:

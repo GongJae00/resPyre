@@ -5,6 +5,8 @@ from ..core.base import _BaseOscillatorHead
 class oscillator_KFstd(_BaseOscillatorHead):
     head_key = "kfstd"
 
+    _REF_FPS: float = 20.0  # reference fps used during original tuning
+
     def run(self, signal: np.ndarray, fs: float, meta: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
         p = self.params
         fs = fs or p.fs
@@ -20,10 +22,17 @@ class oscillator_KFstd(_BaseOscillatorHead):
         omega0 = 2.0 * np.pi * freq0
         eff = self._effective_params(fs, meta)
         rho = eff['rho']
-        qx = eff['qx']
+        # Scale process noise to maintain consistent per-second diffusion
+        dt_ref = 1.0 / self._REF_FPS
+        qx = eff['qx'] * (dt / dt_ref)
         rv = eff['rv']
+        # Convert post_smooth_alpha to fps-invariant form
         alpha_base = float(eff.get('post_smooth_alpha_base', getattr(self.params, 'post_smooth_alpha', 0.0) or 0.0))
-        alpha_used = float(eff.get('post_smooth_alpha_used', alpha_base))
+        if 0.0 < alpha_base < 1.0:
+            _tau_smooth = -1.0 / (np.log(max(alpha_base, 1e-6)) * self._REF_FPS)
+            alpha_used = float(np.exp(-1.0 / max(_tau_smooth * fs, 1e-6)))
+        else:
+            alpha_used = float(eff.get('post_smooth_alpha_used', alpha_base))
 
         cos_w = np.cos(omega0 * dt)
         sin_w = np.sin(omega0 * dt)

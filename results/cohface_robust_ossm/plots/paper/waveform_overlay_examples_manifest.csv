@@ -1,4 +1,0 @@
-selection,family,method,video,freq_mae_bpm,time_ccc,lag_sec
-best,Profile1D-Cubic,profile1d_cubic__robust_ossm_ekf,cohface_22_3,0.02,0.95,0.906
-median,Profile1D-Cubic,profile1d_cubic__robust_ossm_ekf,cohface_16_0,0.21,0.79,1.125
-worst,Profile1D-Cubic,profile1d_cubic__robust_ossm_ekf,cohface_18_1,7.69,0.37,3.125

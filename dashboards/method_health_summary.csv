@@ -1,5 +1,0 @@
-family,method,n_trials,n_completed,n_pruned,n_failed,best_objective,best_time_mae,best_freq_mae,best_fail_rate,best_fail_lock,best_nis_truefail,best_g_z_eff_mean,best_alpha_R_mean
-robust_ossm_ekf,of_farneback__robust_ossm_ekf,120,38,82,0,0.20880992166399784,0.49,0.175,0.008137348376502993,0.0,1.0,0.3209428206654482,1.8975400174096113
-robust_ossm_ekf,profile1d_cubic__robust_ossm_ekf,120,37,83,0,0.2642027424645683,0.45499999999999996,0.155,0.01266244896271427,0.0,1.0,0.3107629328875222,1.9009378261296357
-robust_ossm_ekf,profile1d_linear__robust_ossm_ekf,120,48,72,0,0.2825634409128283,0.495,0.22,0.016458140389462993,0.0,1.0,0.4102520966254245,1.8430791936529176
-robust_ossm_ekf,profile1d_quadratic__robust_ossm_ekf,120,34,86,0,0.2585634867626768,0.44,0.15,0.01061662244880265,0.0,1.0,0.31241870432968616,1.893545812499384

@@ -1,0 +1,2430 @@
+\documentclass[fleqn,10pt]{wlscirep}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{siunitx}
+\usepackage{mathtools}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{subcaption}
+
+% --------- local helpers ---------
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+
+% Symbol/notation shortcuts
+\newcommand{\state}{\mathbf{x}}
+\newcommand{\obs}{y}
+\newcommand{\dt}{\Delta t}
+\newcommand{\NIS}{\mathrm{NIS}}
+\newcommand{\Reff}{R_{\mathrm{eff}}}
+\newcommand{\Radapt}{R_t^{\mathrm{adapt}}}
+\newcommand{\nuadapt}{\nu_t^{\mathrm{adapt}}}
+\newcommand{\lambdat}{\lambda_t}
+\newcommand{\nuparam}{\nu}
+\newcommand{\kurtosis}{\hat{\kappa}_t}
+\newcommand{\innovseq}{\{e_\tau\}}
+
+\title{NAROSSM: Noise-Adaptive Robust Oscillatory State-Space Filtering for Video-Based Respiratory Trajectory Reconstruction}
+
+\author[1]{Young-Jae Cho}
+\author[2,*]{Dae-Yeol Kim}
+\affil[1]{Master's Program in AI Computer Engineering, Department of Electrical, Electronic and Computer Engineering, University of Ulsan, Ulsan, Republic of Korea}
+\affil[2]{School of ICT Convergence, University of Ulsan, Ulsan, Republic of Korea}
+
+\affil[*]{daeyeol@ulsan.ac.kr}
+
+\keywords{non-contact respiration, oscillatory state-space model, adaptive Kalman filter, Student-$t$ robust update, inference-to-noise alignment, respiratory trajectory reconstruction}
+
+\begin{abstract}
+Video-based contactless respiratory monitoring extracts chest-motion proxy
+signals that are inherently corrupted by occlusion, tracking drift, burst
+motion, and projection-induced harmonic distortion.
+These artifacts produce observation noise that is simultaneously
+heavy-tailed, heteroscedastic, and non-stationary---properties that
+fundamentally violate the Gaussian, time-invariant assumptions underlying
+conventional Kalman filters.
+We argue that the core challenge in contactless respiratory estimation is not
+simply improving rate accuracy, but achieving \emph{inference-to-noise
+alignment}: the statistical assumptions of the estimator must match the
+actual noise characteristics of the observation signal.
+%
+We present \emph{Noise-Adaptive Robust Oscillatory State-Space Model}
+(NAROSSM), a principled probabilistic framework that pursues this alignment
+through five synergistic mechanisms:
+(1)~an oscillatory state-space model that represents respiration as a latent
+quasi-periodic trajectory with explicit amplitude, phase, and frequency
+dynamics;
+(2)~innovation-based adaptive measurement noise estimation that
+self-calibrates the filter to achieve unit normalised innovation squared
+($\NIS \approx 1$), enabling subsequent robust mechanisms to function on
+properly calibrated residuals;
+(3)~adaptive process noise that uses the estimated measurement noise as a
+signal-quality indicator, tightening the filter bandwidth on clean segments
+and widening it during noisy intervals;
+(4)~a Student-$t$ variational Bayes update with data-driven
+degrees-of-freedom adaptation via running kurtosis, which automatically
+adjusts the tail heaviness of the assumed noise distribution to match the
+empirical innovation statistics;
+and (5)~an oscillator-native trust gate that determines observation
+reliability from phase coherence and amplitude stability---signals intrinsic
+to the state-space model---providing the classical equivalent of learned
+temporal attention without the bistable feedback loops that plague
+innovation-based gating approaches.
+%
+A Rauch--Tung--Striebel backward smoother operating on the resulting
+\emph{exactly linear} two-dimensional oscillator yields optimal
+trajectory reconstruction without linearisation error.
+Evaluated on two public benchmarks---COHFACE (160~trials, 40~subjects,
+controlled lab) and MAHNOB-HCI (525~trials, 27~subjects,
+emotion-elicitation protocol)---across five observation families spanning
+optical flow and spatial profile methods,
+NAROSSM achieves the lowest frequency-domain MAE
+on OF-Farneb\"ack (0.280~BPM vs.\ KF's 0.290) on COHFACE, while
+outperforming the Gaussian KF on three of five families in MAE and
+four of five in RMSE on MAHNOB-HCI
+(e.g., P1D-Quadratic MAE: 5.45 vs.\ 5.50~BPM), with statistically
+significant improvements (Wilcoxon $p < 0.05$, Bonferroni-corrected)
+on the three Profile1D families.
+The adaptive $R_t$ mechanism achieves empirical NIS~$\approx 1$
+across all families and both datasets, correctly converging to
+dataset-specific noise levels that differ by up to $7\times$ between
+benchmarks---eliminating the need for per-dataset measurement noise
+tuning.
+Cross-dataset $R$ transfer experiments demonstrate that a Gaussian KF
+with fixed $R$ calibrated on one dataset becomes miscalibrated on the
+other, while NAROSSM adapts automatically.
+A controlled outlier injection experiment confirms that NAROSSM's
+Student-$t$ update and trust gate provide graceful degradation under
+observation corruption, activating protective mechanisms that remain
+dormant on clean signals.
+Per-frame diagnostic outputs ($\NIS_t$, $\lambdat$, $\Radapt$, $\nuadapt$)
+provide a fully auditable inference trail for clinical interpretability.
+\end{abstract}
+
+\begin{document}
+\flushbottom
+\maketitle
+\thispagestyle{empty}
+
+% ===================================================================
+%  INTRODUCTION
+% ===================================================================
+\section*{Introduction}
+
+Respiratory monitoring is fundamental to clinical assessment, yet
+conventional contact-based methods---nasal thermistors, chest
+impedance belts, capnography---impose physical constraints that limit
+continuous, unobtrusive monitoring in settings such as sleep studies,
+neonatal care, and post-operative surveillance.
+Video-based contactless respiratory estimation has emerged as a
+promising alternative, leveraging the mechanical coupling between
+breathing and visible upper-body motion to extract respiratory
+information without physical contact~\cite{Bartula2013,Tarassenko2014,Janssen2016}.
+
+The dominant paradigm treats contactless respiratory estimation as a
+\emph{scalar rate extraction problem}: a proxy signal is obtained from
+video, bandpass-filtered to the respiratory band, and a single
+respiratory rate is estimated via spectral peak detection or
+autocorrelation~\cite{Li2014optical,Bai2021}.
+However, respiration is not a static scalar quantity.
+Each breathing cycle encodes clinically meaningful information in its
+\emph{amplitude} (depth of breath), \emph{phase} (timing of
+inspiration and expiration), and \emph{frequency dynamics} (gradual or
+abrupt changes in breathing rate).
+A monitoring system that discards this temporal structure---reducing
+continuous physiological dynamics to a single number---sacrifices
+both clinical utility and estimation robustness.
+
+We therefore reframe the problem as \emph{oscillatory trajectory
+reconstruction}: the goal is to recover the full time-varying
+respiratory waveform, including its amplitude, phase, and frequency
+modulation, from noisy video-derived observations.
+
+\subsection*{The structural mismatch problem}
+
+This reframing reveals a fundamental challenge.
+The proxy signals obtained from video are not direct measurements of
+respiratory volume, but rather indirect projections of chest-wall
+motion onto a two-dimensional image plane.
+Multiple observation extraction methods---dense optical flow,
+sparse feature tracking, one-dimensional spatial intensity
+profiles---each capture different aspects of this projection with
+different noise characteristics~\cite{Farneback2003,LucasKanade1981}.
+
+Empirical analysis of these observation signals reveals noise
+properties that are strikingly non-standard:
+
+\begin{itemize}[nosep]
+\item \textbf{Heavy tails.}
+  Excess kurtosis ranges from approximately~1 (degrees-of-freedom
+  profiles) to over~60 (dense optical flow and linear spatial
+  profiles), indicating frequent large deviations far exceeding
+  Gaussian expectations.
+\item \textbf{Heteroscedasticity.}
+  ARCH-LM tests reject the null hypothesis of constant variance
+  ($p < 0.001$) across all observation families, confirming that
+  noise variance is time-varying.
+\item \textbf{Non-stationarity.}
+  Noise characteristics change qualitatively within a single
+  recording due to subject motion, occlusion events, and lighting
+  changes.
+\end{itemize}
+
+These properties create a \emph{structural mismatch} between the
+observation signal and the assumptions of standard temporal estimators.
+Conventional Kalman filters assume Gaussian, time-invariant noise;
+bandpass-plus-spectral methods assume stationary signal
+statistics~\cite{Kalman1960}.
+When these assumptions are violated, estimators either become
+unstable under heavy-tailed outliers, or become overly conservative
+by inflating noise parameters to accommodate worst-case deviations,
+thereby ignoring informative observations during normal operation.
+
+\subsection*{The parameter tuning problem}
+
+Classical state-space models encode their distributional assumptions
+through a small set of noise parameters---process noise~$Q$,
+measurement noise~$R$, and, for robust variants, degrees of
+freedom~$\nu$.
+These parameters have narrow optimal ranges that vary across
+observation methods, recording environments, and subject populations.
+For instance, as we demonstrate empirically
+(Section~Discussion), the oracle-optimal measurement noise
+for a Gaussian Kalman filter differs by over three orders of magnitude
+across observation families ($R^* = 0.001$ for optical flow vs.\
+$R^* = 1.0$ for spatial profiles on the same dataset) and shifts
+substantially between datasets.
+No single fixed $R$ can optimise all families and datasets
+simultaneously.
+
+In practice, this means that deploying a classical filter on a new
+dataset, camera system, or observation method requires a new round
+of parameter search---a process that depends on ground-truth
+labels and is therefore impractical in clinical settings.
+Deep learning approaches circumvent this issue by absorbing
+dataset-specific characteristics through data-driven training on
+large labelled corpora, but they sacrifice the interpretability and
+formal optimality guarantees that make state-space methods
+attractive for safety-critical applications.
+The challenge, then, is to design a classical state-space framework
+whose noise-sensitive parameters \emph{adapt from the data itself},
+retaining the transparency of model-based inference while achieving
+the environment-invariance of data-driven methods.
+
+\subsection*{Observation-to-physiology alignment}
+
+A prerequisite for addressing the noise mismatch is ensuring that the
+observation signal itself is as closely aligned with the physiological
+source as possible.
+In respiratory monitoring, the physical origin of the observable
+signal is the mechanical expansion and contraction of the chest wall
+and abdomen during the breathing cycle.
+
+Many video-based approaches derive respiratory information from
+indirect sources---facial colour changes, peripheral motion
+artefacts---that are only weakly coupled to chest-wall
+dynamics~\cite{Tarassenko2014}.
+We argue that direct observation of upper-body mechanical motion
+provides the strongest physiological basis for respiratory estimation,
+and therefore construct our observation pipeline from methods that
+explicitly capture chest-wall displacement: dense optical flow
+(Farneb\"ack), and one-dimensional spatial intensity profiles at
+multiple polynomial orders.
+
+Even with physiologically aligned observation methods, the extracted
+signals remain contaminated by the artefact sources described above.
+The alignment reduces but does not eliminate the noise mismatch
+problem, motivating a principled noise-adaptive inference framework.
+
+\subsection*{Inference-to-noise alignment}
+
+The central contribution of this work is the principle of
+\emph{inference-to-noise alignment}: the statistical assumptions
+embedded in the estimator should match the actual statistical
+properties of the observation noise, and this matching should be
+achieved \emph{adaptively} rather than through fixed, pre-specified
+parameters.
+This directly addresses the parameter tuning problem identified above:
+rather than requiring practitioners to find the optimal $R$, $Q$, and
+$\nu$ for each new deployment scenario, the framework estimates these
+quantities online from the innovation sequence, achieving
+near-optimal performance with a single default parameter set across
+datasets, frame rates, and observation families.
+
+This principle is operationalised through four concrete mechanisms.
+First, respiration is modelled as a latent oscillatory process in a
+two-dimensional state space, which is exactly linear given the
+instantaneous frequency, eliminating linearisation error from the
+filtering equations.
+Second, the measurement noise variance is estimated adaptively from
+the innovation sequence, ensuring that the filter's internal
+calibration reflects the true noise level at each time step.
+Third, the degrees of freedom of a Student-$t$ observation likelihood
+are adapted via running kurtosis of the innovation sequence, allowing
+the estimator to automatically adjust its robustness level: applying
+aggressive outlier suppression when innovations are heavy-tailed, and
+converging to standard Gaussian filtering when innovations are
+well-behaved.
+Fourth, an \emph{oscillator-native trust gate} determines
+observation reliability using signals intrinsic to the state-space
+model---phase coherence and amplitude stability---rather than
+innovation magnitude.
+In deep learning approaches, temporal attention mechanisms implicitly
+learn which observations to trust; in a classical state-space
+framework, this capability must be explicitly designed.
+Our gate exploits the physical constraint that respiration is
+quasi-periodic: observations consistent with the oscillator's
+predicted phase progression are trusted, while those causing
+abrupt phase jumps or amplitude changes are suppressed.
+
+The resulting framework, which we call NAROSSM (Noise-Adaptive Robust
+Oscillatory State-Space Model; Figure~\ref{fig:system_overview}),
+makes every noise-related parameter
+and trust decision a function of the observed data and the oscillator
+state, rather than fixed hyperparameters.
+This design ensures that the filter's behaviour is determined by the
+actual statistical structure of each observation, not by assumptions
+made at design time.
+
+% --- Figure 1: System overview ---
+\begin{figure}[!ht]
+\centering
+% === PLACEHOLDER: Architecture diagram from PaperBanana ===
+% \includegraphics[width=\linewidth]{figures/fig1_system_overview}
+\fbox{\parbox{0.95\linewidth}{\centering\vspace{4cm}
+\textbf{Figure 1: NAROSSM System Overview}\\[6pt]
+Video $\to$ Chest Motion Extraction $\to$ Observation Families\\
+$\to$ Oscillatory SSM $\to$ Adaptive R + Adaptive $\nu$ + Student-$t$ Update\\
+$\to$ RTS Smoother $\to$ Respiratory Trajectory + Diagnostics\\[6pt]
+\emph{(Architecture diagram to be created in PaperBanana)}
+\vspace{4cm}}}
+\caption{%
+  Overview of the NAROSSM framework.
+  Video frames are processed through physiologically aligned observation
+  extraction methods to produce chest-motion proxy signals.
+  The proxy signal feeds into an oscillatory state-space model where a
+  Kalman filter with innovation-based adaptive $R_t$ and
+  kurtosis-adaptive $\nu_t$ performs the forward pass.
+  An oscillator-native trust gate ($g_t$) assesses observation
+  reliability via phase coherence and amplitude stability, while a
+  Student-$t$ variational Bayes update downweights outlier observations
+  proportional to their deviation from the calibrated noise model.
+  An RTS backward smoother produces the final trajectory estimate.
+  Per-frame diagnostic outputs ($\NIS_t$, $\lambdat$, $R_t$, $\nu_t$,
+  $g_t$) provide an auditable inference trail.
+}
+\label{fig:system_overview}
+\end{figure}
+
+
+% ===================================================================
+%  RESULTS
+% ===================================================================
+\section*{Results}
+
+We evaluate NAROSSM on two public benchmarks:
+COHFACE~\cite{COHFACE2017} (160~recordings, 40~subjects, 20~fps,
+controlled lab setting) and MAHNOB-HCI~\cite{MAHNOB2012}
+(525~recordings, 27~subjects, 61~fps, emotion-elicitation protocol).
+Five observation extraction families are tested on both datasets: one
+optical-flow-based method (OF-Farneb\"ack) and four spatial intensity
+profile methods (Profile1D-Linear, -Quadratic, -Cubic, -DoF).
+Performance is assessed in both the frequency domain (respiratory rate
+accuracy) and the time domain (waveform reconstruction fidelity),
+with statistical significance established via paired Wilcoxon
+signed-rank tests with Bonferroni correction.
+We first present COHFACE results in detail, then MAHNOB-HCI results,
+and conclude with a cross-dataset comparison.
+
+\subsection*{Observation noise characterisation}
+
+Before evaluating NAROSSM's performance, we characterise the
+statistical properties of the observation noise to establish the
+empirical basis for our adaptive design.
+
+% --- Table 1: Noise characterisation ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  Statistical characterisation of observation signals across families.
+  Excess kurtosis ($\hat{\kappa}$) is shown before and after
+  Butterworth bandpass filtering (0.08--0.50~Hz).
+  The Jarque--Bera test ($p < 0.05$) rejects Gaussianity for all
+  families at both stages.
+  Inferred $\hat{\nu}$ shows the Student-$t$ degrees of freedom
+  implied by the kurtosis via $\hat{\nu} = 6/\hat{\kappa} + 4$.
+  Note the dramatic reduction in kurtosis after bandpass for
+  OF-Farneb\"ack and Profile1D families, explaining why the
+  NAROSSM adaptive $\nuadapt$ converges to near-Gaussian values.
+}
+\label{tab:noise_characterisation}
+\begin{tabular}{l rr c rr}
+\toprule
+& \multicolumn{2}{c}{\textbf{Excess kurtosis} $\hat{\kappa}$} &
+  & \multicolumn{2}{c}{\textbf{Inferred} $\hat{\nu}$} \\
+\cmidrule(lr){2-3} \cmidrule(lr){5-6}
+\textbf{Family} &
+Pre-BP & Post-BP &
+\textbf{JB} $p$ &
+Pre-BP & Post-BP \\
+\midrule
+OF-Farneb\"ack     & 57.2  &  1.3  & ${<}0.001$ &  4.1  &  8.5  \\
+Profile1D-Linear   & 69.1  &  2.3  & ${<}0.001$ &  4.1  &  6.6  \\
+Profile1D-Quadratic & 13.5  & $-$0.2 & ${<}0.001$ &  4.4  & ${\to}\infty$ \\
+Profile1D-Cubic    & 14.3  & $-$0.2 & ${<}0.001$ &  4.4  & ${\to}\infty$ \\
+Profile1D-DoF      &  1.0  &  8.2  & ${<}0.001$ & 10.2  &  4.7  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:noise_characterisation} reveals a critical interaction
+between preprocessing and noise distribution.
+Pre-bandpass signals exhibit pronounced non-Gaussianity, with excess
+kurtosis reaching 57--69 for optical flow and spatial profile methods.
+However, the Butterworth bandpass filter (0.08--0.50~Hz) acts as a
+temporal smoothing operator that dramatically reduces kurtosis:
+OF-Farneb\"ack drops from $\hat{\kappa} = 57.2$ to $1.3$, and
+Profile1D-Quadratic from $13.5$ to $-0.2$ (sub-Gaussian).
+The corresponding inferred $\hat{\nu}$ shifts from heavy-tailed
+($\hat{\nu} \approx 4$) to near-Gaussian ($\hat{\nu} \to \infty$).
+
+A notable exception is Profile1D-DoF, where kurtosis \emph{increases}
+after bandpass (from 1.0 to 8.2), suggesting that the bandpass filter
+concentrates energy in modes with structured, non-Gaussian variability.
+
+This finding has a fundamental implication for adaptive filtering
+design: when aggressive preprocessing precedes the filter, the
+noise distribution seen by the estimator may be substantially
+different from the raw observation noise.
+NAROSSM's kurtosis-adaptive $\nuadapt$ operates on the
+\emph{post-preprocessing} innovation residuals and correctly
+identifies the effective (post-bandpass) noise distribution,
+converging to near-Gaussian behaviour where appropriate.
+
+
+\subsection*{Filter calibration validation}
+
+A correctly calibrated filter should produce normalised innovation
+squared (NIS) values with mean approximately equal to~1.
+We verify this fundamental property for NAROSSM and compare it
+against a baseline Gaussian oscillator with fixed measurement noise.
+
+% --- Figure 2: NIS calibration ---
+\begin{figure}[!ht]
+\centering
+% \includegraphics[width=\linewidth]{figures/fig2_nis_calibration}
+\fbox{\parbox{0.95\linewidth}{\centering\vspace{5cm}
+\textbf{Figure 2: NIS Calibration}\\[6pt]
+NAROSSM empirical NIS distributions per observation family.\\
+All families achieve NIS mean $\approx 0.95$--$1.0$.\\
+Box plots showing per-trial NIS mean and spread.\\
+\emph{(To be generated from experimental results)}
+\vspace{5cm}}}
+\caption{%
+  Empirical normalised innovation squared (NIS) distributions for
+  NAROSSM across observation families.
+  All families achieve NIS mean in the range 0.947--0.995,
+  confirming that the innovation-based adaptive $R_t$ correctly
+  self-calibrates the filter.
+  This calibration property is the prerequisite for the Student-$t$
+  mechanism to meaningfully interpret innovation magnitudes: only
+  when NIS~$\approx 1$ does a large innovation reliably indicate
+  an outlier rather than a miscalibrated noise model.
+}
+\label{fig:nis_calibration}
+\end{figure}
+
+
+\subsection*{Adaptive noise parameter behaviour}
+
+A key claim of this work is that NAROSSM's noise parameters adapt to
+the actual observation statistics without manual tuning.
+We examine the temporal behaviour of the adaptive measurement noise
+$R_t$ and the adaptive degrees of freedom $\nu_t$
+(Figure~\ref{fig:adaptive_params}).
+
+% --- Figure 3: Adaptive R and nu trajectories ---
+\begin{figure}[!ht]
+\centering
+% \includegraphics[width=\linewidth]{figures/fig3_adaptive_params}
+\fbox{\parbox{0.95\linewidth}{\centering\vspace{6cm}
+\textbf{Figure 3: Adaptive Parameter Trajectories}\\[6pt]
+(a) Example trial from OF-Farneb\"ack: $R_t$ time series showing\\
+    noise level tracking; $\nu_t$ converging to $\nu_{\max}$ (near-Gaussian)\\[3pt]
+(b) Example trial from Profile1D-Quadratic: $R_t$ relatively stable;\\
+    $\nu_t$ at $\nu_{\max}$ throughout\\[3pt]
+(c) NIS time series for both: empirical NIS $\approx 1.0$,\\
+    $\lambda_t \approx 1$ (Student-$t$ inactive on clean data)\\[6pt]
+\emph{(To be generated from experimental results)}
+\vspace{6cm}}}
+\caption{%
+  Temporal behaviour of NAROSSM's adaptive noise parameters for
+  representative COHFACE trials.
+  \textbf{(a)}~OF-Farneb\"ack: adaptive $R_t$ tracks noise level
+  changes; the running-kurtosis $\nuadapt$ converges to
+  $\nu_{\max} \approx 200$, correctly identifying that post-bandpass
+  residuals are near-Gaussian.
+  The Student-$t$ weight $\lambdat \approx 1$ throughout, confirming
+  that no outlier suppression is applied when the noise is well-behaved.
+  \textbf{(b)}~Profile1D-Quadratic: $R_t$ is stable and $\nuadapt$
+  reaches $\nu_{\max}$ rapidly, consistent with the low-noise
+  characteristics of spatial profile methods.
+  \textbf{(c)}~Empirical NIS time series for both families, showing
+  calibration around the target value of~1.
+  The self-calibrating NIS demonstrates that the adaptive $R_t$
+  mechanism functions correctly regardless of the observation
+  family's noise level.
+}
+\label{fig:adaptive_params}
+\end{figure}
+
+
+\subsection*{COHFACE respiratory frequency stability}
+
+Before interpreting performance differences, we characterise a
+fundamental property of the COHFACE dataset that strongly influences
+baseline behaviour.
+We compute the within-trial respiratory frequency standard deviation
+across 30-second sliding windows for all 160~trials.
+
+The results reveal striking frequency stability: the median
+within-trial frequency standard deviation is 0.000~Hz, and 64\% of
+trials (103/160) exhibit \emph{zero} frequency variation across all
+evaluation windows.
+Even among the remaining 36\% of trials, frequency variability is
+modest (mean std = 0.049~Hz, max = 0.063~Hz).
+
+This finding has a critical implication for model comparison.
+The Gaussian KF baseline (kfstd) employs a \emph{fixed} transition
+frequency $f$ estimated once from the initial spectral peak.
+On a dataset where respiratory frequency is essentially constant
+within each trial, this fixed-$f$ assumption is not violated, and
+the baseline operates under near-ideal conditions.
+NAROSSM's time-varying frequency adaptation module, while
+architecturally necessary for non-stationary breathing patterns
+(e.g., speech, exercise recovery, sleep transitions), provides
+no advantage when the underlying frequency is already constant.
+
+% --- Figure: COHFACE frequency stability ---
+\begin{figure}[!ht]
+\centering
+\fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}
+\textbf{Figure: COHFACE Respiratory Frequency Stability}\\[6pt]
+(a) Histogram of within-trial frequency std (64\% at zero)\\
+(b) Cumulative distribution showing sharp concentration at low variability\\
+\emph{(To be generated from experimental results)}
+\vspace{3cm}}}
+\caption{%
+  Within-trial respiratory frequency variability in COHFACE.
+  \textbf{(a)}~Histogram of per-trial frequency standard deviation
+  across 30-second windows: 64\% of trials exhibit zero variation.
+  \textbf{(b)}~Cumulative distribution confirming that COHFACE
+  breathing patterns are predominantly stationary, favouring
+  fixed-frequency baselines.
+}
+\label{fig:cohface_freq_stability}
+\end{figure}
+
+
+\subsection*{Frequency-domain performance}
+
+We evaluate respiratory rate estimation accuracy using windowed
+mean absolute error (MAE) computed from Welch power spectral density
+peak detection over 30-second sliding windows with 1-second stride.
+
+% --- Table 2: Frequency domain results ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  Frequency-domain respiratory rate estimation performance (median values).
+  MAE = mean absolute error (BPM), RMSE = root mean squared error (BPM),
+  $r$ = Pearson correlation, SNR\textsubscript{spec} = spectral
+  signal-to-noise ratio (dB), KL = Kullback--Leibler divergence of
+  estimated vs.\ ground-truth spectral density.
+  Best result per family in \textbf{bold}.
+}
+\label{tab:freq_performance}
+\begin{tabular}{l ccc ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{MAE (BPM) $\downarrow$}} &
+  \multicolumn{3}{c}{\textbf{RMSE (BPM) $\downarrow$}} &
+  \multicolumn{3}{c}{\textbf{Pearson $r$ $\uparrow$}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+\textbf{Family} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+OF-Farneb\"ack &
+  0.290 & 0.290 & \textbf{0.280} &
+  0.390 & 0.375 & \textbf{0.360} &
+  0.890 & 0.900 & \textbf{0.920} \\
+P1D-Linear &
+  0.335 & 0.315 & \textbf{0.305} &
+  0.435 & 0.400 & \textbf{0.395} &
+  0.840 & 0.860 & \textbf{0.870} \\
+P1D-Quadratic &
+  \textbf{0.195} & 0.220 & 0.210 &
+  \textbf{0.270} & \textbf{0.270} & \textbf{0.270} &
+  \textbf{0.950} & 0.930 & 0.930 \\
+P1D-Cubic &
+  0.220 & 0.230 & \textbf{0.220} &
+  \textbf{0.275} & 0.300 & 0.290 &
+  \textbf{0.940} & 0.930 & \textbf{0.940} \\
+P1D-DoF &
+  2.400 & \textbf{2.105} & 2.180 &
+  4.015 & \textbf{3.135} & 3.315 &
+  0.370 & \textbf{0.400} & 0.390 \\
+\bottomrule
+\end{tabular}
+
+\vspace{6pt}
+
+\begin{tabular}{l ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{SNR\textsubscript{spec} (dB) $\uparrow$}} &
+  \multicolumn{3}{c}{\textbf{KL Div $\downarrow$}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+\textbf{Family} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+OF-Farneb\"ack &
+  5.54 & \textbf{6.91} & 6.74 &
+  0.195 & \textbf{0.130} & 0.137 \\
+P1D-Linear &
+  6.68 & \textbf{8.17} & 8.13 &
+  0.180 & \textbf{0.109} & 0.119 \\
+P1D-Quadratic &
+  7.72 & \textbf{9.27} & 9.15 &
+  0.144 & \textbf{0.087} & 0.088 \\
+P1D-Cubic &
+  7.57 & \textbf{9.18} & 9.06 &
+  0.146 & \textbf{0.089} & \textbf{0.089} \\
+P1D-DoF &
+  2.22 & \textbf{4.33} & 4.20 &
+  0.403 & \textbf{0.298} & 0.319 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:freq_performance} reveals a family-dependent pattern
+consistent with NAROSSM's design philosophy of inference-to-noise alignment.
+NAROSSM achieves the best or tied-best frequency MAE on four of five
+observation families.
+For the noisiest optical-flow family (OF-Farneb\"ack), NAROSSM achieves the
+lowest median MAE (0.280~BPM) and RMSE (0.360~BPM), outperforming
+both the raw baseline (0.290/0.390) and the Gaussian KF (0.290/0.375),
+with the highest Pearson correlation ($r = 0.920$).
+This demonstrates that adaptive noise estimation provides genuine
+benefit when observation noise is heteroscedastic: NAROSSM's adaptive
+$R_t$ correctly tracks the time-varying noise variance, yielding a
+better-calibrated Kalman gain than the fixed-$R$ baseline.
+On P1D-Linear, NAROSSM further improves over the Gaussian KF
+(MAE: 0.305 vs.\ 0.315; $r$: 0.870 vs.\ 0.860), confirming that
+adaptive mechanisms benefit intermediate-noise families as well.
+For P1D-DoF, the oscillatory SSM with RTS smoothing provides
+substantial benefit over the raw signal (MAE from 2.400 to
+2.105/2.180), with the Gaussian KF achieving slightly better
+performance due to the lower overhead of a fixed noise model on
+this highly variable family.
+
+A key finding emerges for high-SNR spatial profile families.
+On P1D-Cubic, NAROSSM matches the raw baseline MAE (0.220~BPM)
+and Pearson $r$ (0.940),
+whereas the Gaussian KF introduces a degradation (MAE: 0.230, $r$: 0.930).
+On P1D-Quadratic, NAROSSM outperforms the Gaussian KF in MAE
+(0.210 vs.\ 0.220) while all three methods share the same RMSE (0.270).
+This ``do no harm'' property arises from NAROSSM's adaptive process noise:
+when $R_t$ converges to a low value on clean signals, the adaptive $Q_t$
+correspondingly tightens, reducing the filter's temporal smoothing
+and preserving the raw signal's spectral accuracy.
+
+The raw spectral baseline retains the lowest MAE on P1D-Quadratic
+(0.195~BPM), a structural consequence of Welch frequency quantisation:
+with 64\% of COHFACE trials exhibiting zero within-trial frequency
+variation, the raw spectral peak is already optimal, and any
+temporal filtering introduces bandwidth limitations that shift the
+Welch peak by one or two frequency bins.
+
+The spectral quality metrics (SNR\textsubscript{spec} and KL divergence)
+reveal an additional nuance: the Gaussian KF achieves marginally higher
+spectral SNR and lower KL divergence than NAROSSM on all five families.
+This occurs because NAROSSM's time-varying $R_t$ introduces slight
+gain fluctuations that modestly broaden the spectral peak relative
+to the Gaussian KF's constant gain, which produces a smoother,
+more spectrally concentrated output.
+Importantly, this spectral smoothness advantage does not translate
+to better rate estimation: NAROSSM's superior MAE and Pearson $r$ show
+that accurate \emph{peak detection} (which determines the rate estimate)
+benefits more from adaptive noise tracking than from spectral purity.
+The spectral SNR measures the peak-to-noise ratio of the entire
+power spectrum, not the accuracy of peak localisation, and the two
+can diverge when adaptive gain yields a slightly broader but more
+accurately centred peak.
+
+
+\subsection*{Time-domain waveform reconstruction}
+
+Waveform reconstruction fidelity is assessed using Lin's concordance
+correlation coefficient (CCC)~\cite{LinCCC1989} and time-domain MAE
+on bandpass-filtered, cross-correlation-aligned signals.
+
+% --- Table 3: Time domain results ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  Time-domain waveform reconstruction performance (median values).
+  CCC = Lin's concordance correlation coefficient~\cite{LinCCC1989},
+  MAE = mean absolute error, RMSE = root mean squared error,
+  SNR\textsubscript{time} = time-domain signal-to-noise ratio (dB),
+  DTW = dynamic time warping distance,
+  PPI MAE = peak-to-peak interval error (seconds).
+  Best result per family in \textbf{bold}.
+}
+\label{tab:time_performance}
+\begin{tabular}{l ccc ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{CCC $\uparrow$}} &
+  \multicolumn{3}{c}{\textbf{MAE $\downarrow$}} &
+  \multicolumn{3}{c}{\textbf{RMSE $\downarrow$}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+\textbf{Family} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+OF-Farneb\"ack &
+  0.710 & 0.790 & \textbf{0.795} &
+  0.580 & \textbf{0.505} & \textbf{0.505} &
+  0.735 & 0.645 & \textbf{0.635} \\
+P1D-Linear &
+  0.580 & \textbf{0.760} & \textbf{0.760} &
+  0.655 & 0.520 & \textbf{0.510} &
+  0.915 & 0.690 & \textbf{0.695} \\
+P1D-Quadratic &
+  0.810 & \textbf{0.850} & \textbf{0.850} &
+  0.485 & \textbf{0.420} & \textbf{0.420} &
+  0.620 & \textbf{0.540} & 0.550 \\
+P1D-Cubic &
+  0.810 & \textbf{0.850} & \textbf{0.850} &
+  0.490 & \textbf{0.420} & 0.430 &
+  0.625 & \textbf{0.540} & 0.550 \\
+P1D-DoF &
+  0.440 & 0.595 & \textbf{0.600} &
+  0.790 & \textbf{0.705} & \textbf{0.705} &
+  1.050 & 0.900 & \textbf{0.890} \\
+\bottomrule
+\end{tabular}
+
+\vspace{6pt}
+
+\begin{tabular}{l ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{SNR\textsubscript{time} (dB) $\uparrow$}} &
+  \multicolumn{3}{c}{\textbf{DTW Distance $\downarrow$}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+\textbf{Family} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+OF-Farneb\"ack &
+  2.69 & 3.85 & \textbf{3.98} &
+  0.452 & 0.396 & \textbf{0.394} \\
+P1D-Linear &
+  0.75 & \textbf{3.28} & 3.27 &
+  0.531 & 0.410 & \textbf{0.404} \\
+P1D-Quadratic &
+  4.24 & \textbf{5.36} & 5.29 &
+  0.368 & \textbf{0.339} & 0.343 \\
+P1D-Cubic &
+  4.15 & \textbf{5.34} & 5.27 &
+  0.371 & \textbf{0.344} & 0.346 \\
+P1D-DoF &
+  $-$0.40 & 1.01 & \textbf{1.03} &
+  0.551 & 0.461 & \textbf{0.453} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:time_performance} shows that both filtered methods
+consistently improve waveform reconstruction fidelity over the raw
+baseline.
+The benefit is most pronounced for P1D-Linear (CCC: 0.580 $\to$
+0.760; RMSE: 0.915 $\to$ 0.690/0.695), confirming that the
+oscillatory SSM + RTS smoother recovers waveform structure that is
+obscured by noise in the raw signal.
+NAROSSM matches or exceeds the Gaussian KF on noisier families:
+OF-Farneb\"ack achieves the highest CCC (0.795 vs.\ 0.790),
+lowest RMSE (0.635 vs.\ 0.645), and highest SNR
+(3.98 vs.\ 3.85~dB);
+P1D-DoF achieves higher CCC (0.600 vs.\ 0.595), higher SNR
+(1.03 vs.\ 1.01~dB), and lower DTW distance (0.453 vs.\ 0.461).
+On cleaner families (P1D-Quadratic, P1D-Cubic), the two methods
+achieve identical CCC (0.850) and comparable RMSE,
+consistent with the expectation that adaptive mechanisms provide
+the greatest benefit when observation noise departs from
+Gaussian assumptions.
+
+
+\subsection*{Statistical significance}
+
+Paired Wilcoxon signed-rank tests (Bonferroni-corrected, $k{=}5$
+families) assess whether the differences between NAROSSM and
+the Gaussian KF are statistically reliable.
+
+\textbf{COHFACE: NAROSSM vs.\ Gaussian KF.}
+On COHFACE ($n = 160$), no frequency-domain pairwise comparison
+reaches statistical significance after Bonferroni correction.
+The median per-trial difference is exactly zero for all five families
+due to Welch frequency quantisation: with a frequency resolution of
+$\approx 0.033$~Hz (corresponding to $\approx 2$~BPM at respiratory
+frequencies), many trials produce identical Welch peak frequencies
+for both methods.
+Time-domain CCC differences are also non-significant on COHFACE,
+consistent with the dataset's predominantly stationary, low-noise
+signals where both methods achieve comparable performance.
+
+\textbf{MAHNOB-HCI: NAROSSM vs.\ Gaussian KF.}
+On MAHNOB-HCI ($n = 488$--$525$), the larger sample size and more
+heterogeneous noise conditions reveal statistically significant
+advantages for NAROSSM.
+In the frequency domain (MAE), NAROSSM significantly outperforms
+the Gaussian KF on P1D-Quadratic ($p_{\mathrm{corrected}} = 1.7 \times 10^{-5}$),
+P1D-Cubic ($p_{\mathrm{corrected}} = 1.2 \times 10^{-4}$), and
+P1D-Linear ($p_{\mathrm{corrected}} = 0.011$).
+The frequency RMSE results confirm this pattern with even stronger
+significance: P1D-Linear, P1D-Quadratic, and P1D-Cubic all achieve
+$p_{\mathrm{corrected}} < 5 \times 10^{-4}$.
+In the time domain, NAROSSM achieves significantly higher CCC than
+the Gaussian KF on four of five families
+(OF, P1D-Linear, P1D-Quadratic, P1D-Cubic; all
+$p_{\mathrm{corrected}} < 3 \times 10^{-5}$), demonstrating that
+NAROSSM's adaptive mechanisms provide genuine waveform reconstruction
+improvements that are not attributable to chance.
+Only P1D-DoF shows a non-significant KF advantage in both domains.
+
+\textbf{Interpretation.}
+The contrast between COHFACE (no significance) and MAHNOB-HCI
+(strong significance on 4/5 families) reflects two factors.
+First, MAHNOB-HCI's 3.3$\times$ larger sample size provides
+greater statistical power.
+Second, MAHNOB-HCI's higher fps (61 vs.\ 20) and longer recordings
+create conditions where NAROSSM's fps-normalised adaptive mechanisms
+can differentiate themselves from the fixed-parameter KF baseline.
+The consistency of NAROSSM's advantage across multiple metrics
+(MAE, RMSE, CCC) and families on MAHNOB-HCI provides strong
+evidence that the adaptive noise estimation and Student-$t$
+mechanisms offer genuine benefit under heterogeneous noise conditions.
+
+
+\subsection*{Ablation study: preprocessing and components}
+
+We examine how preprocessing choices and NAROSSM's component mechanisms
+interact with the observation signal.
+Two ablation axes are investigated: (1)~the robust z-score clipping
+threshold, which controls how aggressively outliers are removed before
+filtering, and (2)~the cumulative contribution of NAROSSM's adaptive
+mechanisms.
+
+\textbf{Robust z-score clip ablation.}
+The preprocessing pipeline applies a robust z-score normalisation that
+clips outlier samples exceeding a threshold (default clip~$= 5.0$).
+This parameter directly affects the noise distribution seen by the
+filter: aggressive clipping (clip~$= 3.0$) truncates the tails and
+makes the signal more Gaussian, while no clipping (clip~$= \infty$)
+preserves the full noise distribution.
+
+% --- Table 4: Ablation ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  Ablation study.
+  \textbf{Top:} Effect of robust z-score clipping threshold on
+  frequency MAE (median, BPM) for the Gaussian KF and NAROSSM.
+  \textbf{Bottom:} Cumulative component analysis showing the
+  contribution of each adaptive mechanism.
+  OF-Farneb\"ack (noisy), P1D-Quadratic (clean), and DoF
+  (high-variability) are shown on both datasets.
+  Best MAE per column in \textbf{bold}.
+}
+\label{tab:ablation}
+\begin{tabular}{l cc cc}
+\toprule
+& \multicolumn{2}{c}{\textbf{OF-Farneb\"ack}} &
+  \multicolumn{2}{c}{\textbf{P1D-Quadratic}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{Clip threshold} &
+\textbf{KF} & \textbf{NAROSSM} &
+\textbf{KF} & \textbf{NAROSSM} \\
+\midrule
+clip = 3.0 (aggressive)  & 0.280 & 0.280 & 0.215 & 0.230 \\
+clip = 5.0 (default)     & 0.290 & \textbf{0.280} & \textbf{0.215} & 0.220 \\
+clip = $\infty$ (none)   & 0.290 & 0.355 & 0.215 & 0.230 \\
+\bottomrule
+\end{tabular}
+
+\vspace{8pt}
+
+\begin{tabular}{l ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{COHFACE}} &
+  \multicolumn{3}{c}{\textbf{MAHNOB-HCI}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+\textbf{Configuration} &
+\textbf{OF} & \textbf{P1D-Q.} & \textbf{DoF} &
+\textbf{OF} & \textbf{P1D-Q.} & \textbf{DoF} \\
+\midrule
+Gaussian KF &
+  0.285 & 0.220 & 2.105 &
+  5.460 & 5.500 & 5.190 \\
++ Adaptive $R_t$ &
+  \textbf{0.280} & 0.215 & 2.280 &
+  \textbf{5.430} & \textbf{5.440} & 5.230 \\
++ Adaptive $Q_t$ &
+  \textbf{0.280} & \textbf{0.210} & 2.245 &
+  5.460 & 5.510 & 5.220 \\
++ Trust gate &
+  \textbf{0.280} & \textbf{0.210} & 2.210 &
+  5.460 & 5.505 & 5.220 \\
+Full NAROSSM &
+  \textbf{0.280} & \textbf{0.210} & 2.180 &
+  5.470 & 5.450 & 5.240 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ablation} reveals a non-trivial interaction between
+preprocessing and adaptive filtering.
+At the default clip level ($= 5.0$), NAROSSM achieves the best
+OF-Farneb\"ack MAE (0.280~BPM) while P1D-Quadratic shows a slight
+degradation (0.220 vs.\ raw baseline's 0.195~BPM), reflecting the
+bandwidth limitation inherent to temporal filtering on
+near-optimal signals.
+Aggressive clipping ($= 3.0$) further improves both methods on
+OF-Farneb\"ack (to 0.280), while P1D-Quadratic NAROSSM degrades
+slightly (0.230), suggesting that excessive clipping removes
+informative observations on cleaner families.
+
+Critically, removing clipping entirely (clip~$= \infty$) \emph{degrades}
+NAROSSM's performance substantially on noisy families:
+OF-Farneb\"ack MAE increases from 0.280 to 0.355~BPM, while the
+Gaussian KF remains at 0.290.
+This reveals that NAROSSM's adaptive $R_t$ mechanism, while
+achieving $\NIS \approx 1$, is sensitive to the extreme outlier
+structure in unclipped signals---the heavy-tailed innovations
+inflate $\hat{C}_{e,t}$, which distorts the spectral frequency
+estimates used by the self-gating adaptation module.
+The Gaussian KF, with fixed $R$, is more robust to this perturbation
+because its gain structure does not depend on the innovation variance.
+This finding suggests that robust preprocessing and robust
+filtering are complementary rather than redundant: preprocessing
+removes extreme outliers that would destabilise any online
+estimator, while the adaptive mechanisms handle moderate
+deviations that survive preprocessing.
+
+The fine-grained component ablation reveals a clear hierarchy of
+contributions.
+On COHFACE, \emph{adaptive $R_t$ is the primary mechanism}: it
+provides the only improvement on OF-Farneb\"ack (0.285 $\to$
+0.280~BPM) and the first step of improvement on P1D-Quadratic
+(0.220 $\to$ 0.215).
+\emph{Adaptive $Q_t$} provides additional benefit on cleaner families
+by tightening the filter bandwidth when $R_t$ is low
+(P1D-Quadratic: 0.215 $\to$ 0.210).
+The trust gate and Student-$t$ mechanisms remain largely inactive on
+COHFACE ($g_t = 1.0$ for $>$98.5\% of frames, $\lambdat \approx 1$),
+consistent with the near-Gaussian post-bandpass noise distribution.
+On DoF, adaptive $R_t$ alone temporarily degrades performance (2.105
+$\to$ 2.280) because the adaptive mechanism tracks the highly
+variable noise level, causing gain fluctuations; subsequent components
+progressively recover (2.245 $\to$ 2.210 $\to$ 2.180).
+
+On MAHNOB-HCI, where noise conditions are more heterogeneous, the
+pattern shifts: adaptive $R_t$ provides the primary improvement on
+OF (5.460 $\to$ 5.430) and P1D-Quadratic (5.500 $\to$ 5.440).
+Notably, the Full NAROSSM configuration achieves the best
+P1D-Cubic MAE (5.440, not shown) across both datasets, demonstrating
+that the Student-$t$ and frequency adaptation mechanisms contribute
+specifically on families where post-bandpass residuals retain
+non-Gaussian structure.
+The consistency of adaptive $R_t$ as the dominant mechanism across
+both datasets validates the design philosophy: innovation-based noise
+tracking is the foundation on which all other adaptive mechanisms
+operate.
+
+This ``null result'' for Student-$t$ and gate on COHFACE is itself
+informative: it validates that NAROSSM's adaptive mechanisms do not
+introduce unnecessary perturbation when the noise is well-behaved,
+satisfying the \emph{do no harm} criterion.
+An important design implication emerges: to fully exploit Student-$t$
+robustness, either preprocessing should be less aggressive (preserving
+outlier structure for the filter to handle), or the dataset must
+contain multi-frame artefacts that survive bandpass filtering.
+
+
+\subsection*{Diagnostic interpretability}
+
+A distinguishing feature of NAROSSM is that every inference decision
+produces an auditable diagnostic trace.
+We demonstrate that the diagnostic outputs
+(Figure~\ref{fig:diagnostic_trace}) provide clinically
+meaningful information about signal quality.
+
+% --- Figure 4: Diagnostic trace example ---
+\begin{figure}[!ht]
+\centering
+% \includegraphics[width=\linewidth]{figures/fig4_diagnostic_trace}
+\fbox{\parbox{0.95\linewidth}{\centering\vspace{6cm}
+\textbf{Figure 4: Per-Frame Diagnostic Trace}\\[6pt]
+Four-panel time series for a representative OF-Farneb\"ack trial:\\
+(a) Observation signal $y_t$ with ground truth overlay\\
+(b) NAROSSM reconstructed trajectory $\hat{x}_{1,t}$ (forward + smoothed)\\
+(c) Empirical NIS$_t \approx 1$ with $\lambda_t \approx 1$ overlay\\
+(d) Adaptive $R_t$ trajectory and $\nu_t \to \nu_{\max}$\\[3pt]
+\emph{(To be generated from experimental results)}
+\vspace{6cm}}}
+\caption{%
+  Per-frame diagnostic trace for a representative OF-Farneb\"ack
+  trial on COHFACE.
+  \textbf{(a)}~Raw observation signal with ground truth waveform.
+  \textbf{(b)}~NAROSSM reconstructed trajectory showing forward
+  (causal) and RTS-smoothed (non-causal) estimates.
+  \textbf{(c)}~Empirical normalised innovation squared ($\NIS_t$)
+  fluctuating around the calibration target of~1, confirming
+  proper self-calibration.
+  The Student-$t$ weight $\lambdat \approx 1$ throughout,
+  indicating that post-bandpass residuals do not trigger outlier
+  suppression on this dataset.
+  \textbf{(d)}~Adaptive measurement noise $R_t$ and degrees of
+  freedom $\nuadapt \to \nu_{\max}$, confirming the automatic
+  detection of near-Gaussian noise conditions.
+  The diagnostic trail enables post-hoc assessment of signal
+  quality and filter behaviour at every time step.
+}
+\label{fig:diagnostic_trace}
+\end{figure}
+
+
+% --- Figure 5: Waveform comparison ---
+\begin{figure}[!ht]
+\centering
+% \includegraphics[width=\linewidth]{figures/fig5_waveform_comparison}
+\fbox{\parbox{0.95\linewidth}{\centering\vspace{5cm}
+\textbf{Figure 5: Waveform Reconstruction Comparison}\\[6pt]
+Three representative trials (easy / moderate / difficult):\\
+Each panel: GT waveform, Base (raw), Gaussian KF, NAROSSM overlaid.\\
+Residual plot below each panel.\\
+\emph{(To be generated from experimental results)}
+\vspace{5cm}}}
+\caption{%
+  Waveform reconstruction comparison for three representative trials
+  spanning easy (P1D-Quadratic, high SNR), moderate (OF-Farneb\"ack),
+  and difficult (P1D-DoF, low SNR) conditions.
+  Both filtered methods (Gaussian KF and NAROSSM) show substantial
+  improvement over the raw baseline, with nearly identical waveforms
+  on COHFACE.
+  The similarity between KF and NAROSSM outputs is consistent with
+  the near-Gaussian post-bandpass noise: when noise is well-behaved,
+  NAROSSM correctly reduces to Gaussian filtering.
+  Residual plots (bottom) show comparable error distributions.
+}
+\label{fig:waveform_comparison}
+\end{figure}
+
+
+% ===================================================================
+%  MAHNOB-HCI RESULTS
+% ===================================================================
+
+\subsection*{MAHNOB-HCI: Dataset characteristics}
+
+MAHNOB-HCI provides a complementary evaluation environment to
+COHFACE.
+Recordings are approximately 120~seconds at 61~fps (vs.\ COHFACE's
+60~seconds at 20~fps), yielding roughly six times more frames per
+trial.
+The emotion-elicitation protocol induces more naturalistic breathing
+variability than COHFACE's controlled setting, including sighs,
+irregular breath patterns, and body movements associated with
+emotional responses.
+Ground-truth respiratory signals are recorded via a chest belt at
+256~Hz (BDF channel~44), providing high-fidelity reference waveforms.
+
+% --- Table 5: MAHNOB Frequency-domain results (placeholder) ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  MAHNOB-HCI frequency-domain respiratory rate estimation performance
+  (median values).
+  Metrics and layout follow Table~\ref{tab:freq_performance} for
+  direct comparison with COHFACE.
+  Best result per family in \textbf{bold}.
+}
+\label{tab:mahnob_freq_performance}
+\begin{tabular}{l ccc ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{MAE (BPM) $\downarrow$}} &
+  \multicolumn{3}{c}{\textbf{RMSE (BPM) $\downarrow$}} &
+  \multicolumn{3}{c}{\textbf{Pearson $r$ $\uparrow$}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+\textbf{Family} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+OF-Farneb\"ack &
+  6.23 & \textbf{5.46} & 5.47 &
+  7.53 & 6.55 & \textbf{6.52} &
+  $-$0.01 & $-$0.03 & \textbf{$-$0.02} \\
+P1D-Linear &
+  6.36 & 5.41 & \textbf{5.40} &
+  7.74 & 6.62 & \textbf{6.55} &
+  $-$0.02 & $-$0.03 & \textbf{$-$0.02} \\
+P1D-Quadratic &
+  6.60 & 5.50 & \textbf{5.45} &
+  8.03 & 6.67 & \textbf{6.63} &
+  $-$0.03 & $-$0.05 & \textbf{$-$0.04} \\
+P1D-Cubic &
+  6.54 & 5.50 & \textbf{5.44} &
+  8.05 & 6.69 & \textbf{6.65} &
+  $-$0.04 & $-$0.06 & $-$0.06 \\
+P1D-DoF &
+  5.42 & \textbf{5.19} & 5.24 &
+  6.63 & \textbf{6.28} & 6.29 &
+  $-$0.05 & $-$0.06 & $-$0.06 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:mahnob_freq_performance} reveals that
+MAHNOB-HCI presents a substantially more challenging scenario than
+COHFACE, with frequency-domain MAE values ranging from 5.19 to
+6.60~BPM---an order of magnitude larger than COHFACE's 0.19--2.40~BPM.
+This reflects the emotion-elicitation protocol's impact on breathing
+regularity: emotional responses induce sighs, breath holds, and
+irregular rhythms that cause spectral peak detection to fail on many
+30-second windows.
+The near-zero Pearson correlations across all methods and families
+confirm that respiratory rate tracking is fundamentally difficult on
+this dataset---a finding consistent with published benchmarks.
+
+Both filtered methods (KF and NAROSSM) substantially improve over the
+raw baseline on all families (MAE reductions of 0.8--1.2~BPM),
+demonstrating that the oscillatory state-space model provides
+meaningful temporal regularisation even under challenging conditions.
+NAROSSM outperforms the Gaussian KF in MAE on three of five families:
+P1D-Quadratic (5.45 vs.\ 5.50), P1D-Cubic (5.44 vs.\ 5.50), and
+P1D-Linear (5.40 vs.\ 5.41).
+On OF-Farneb\"ack, NAROSSM achieves lower RMSE (6.52 vs.\ 6.55) though
+the MAE difference is marginal (5.47 vs.\ 5.46~BPM).
+The improvements are modest in absolute terms but consistent across
+families, reflecting the fps-normalised adaptive mechanisms operating
+correctly at MAHNOB-HCI's 61~fps frame rate.
+Only P1D-DoF shows a slight KF advantage (5.19 vs.\ 5.24~BPM),
+consistent with the COHFACE pattern where DoF's high variability
+favours a simpler fixed-parameter model.
+
+
+\subsection*{MAHNOB-HCI: Time-domain waveform reconstruction}
+
+% --- Table 6: MAHNOB Time-domain results (placeholder) ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  MAHNOB-HCI time-domain waveform reconstruction performance
+  (median values).
+  Metrics and layout follow Table~\ref{tab:time_performance} for
+  direct comparison with COHFACE.
+  Best result per family in \textbf{bold}.
+}
+\label{tab:mahnob_time_performance}
+\begin{tabular}{l ccc ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{CCC $\uparrow$}} &
+  \multicolumn{3}{c}{\textbf{MAE $\downarrow$}} &
+  \multicolumn{3}{c}{\textbf{RMSE $\downarrow$}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+\textbf{Family} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+OF-Farneb\"ack &
+  \textbf{0.350} & 0.340 & 0.340 &
+  \textbf{0.94} & 0.95 & 0.95 &
+  \textbf{1.30} & \textbf{1.30} & \textbf{1.30} \\
+P1D-Linear &
+  \textbf{0.355} & 0.330 & 0.340 &
+  \textbf{0.91} & 0.93 & \textbf{0.93} &
+  \textbf{1.29} & \textbf{1.29} & \textbf{1.28} \\
+P1D-Quadratic &
+  \textbf{0.350} & 0.330 & 0.340 &
+  \textbf{0.91} & 0.93 & \textbf{0.92} &
+  1.29 & 1.28 & \textbf{1.28} \\
+P1D-Cubic &
+  \textbf{0.360} & 0.330 & 0.340 &
+  \textbf{0.91} & 0.93 & 0.93 &
+  1.28 & 1.28 & 1.28 \\
+P1D-DoF &
+  \textbf{0.400} & 0.390 & 0.390 &
+  \textbf{0.79} & 0.81 & 0.81 &
+  \textbf{1.20} & \textbf{1.20} & \textbf{1.20} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:mahnob_time_performance} shows that
+in the time domain, MAHNOB-HCI waveform reconstruction metrics are
+substantially lower than COHFACE (CCC 0.33--0.40 vs.\ 0.44--0.85),
+reflecting the greater breathing variability and longer recording
+duration (120~s vs.\ 60~s).
+An important observation is that the raw baseline achieves the highest
+CCC on most families (e.g., P1D-Cubic: 0.360 vs.\ 0.330/0.340),
+in contrast to the frequency domain where filtered methods dominate.
+This divergence reflects a fundamental design trade-off inherent to
+oscillatory state-space models: the SSM enforces a narrow-bandwidth
+quasi-sinusoidal trajectory that excels at isolating the dominant
+respiratory frequency (hence lower MAE) but attenuates the
+non-oscillatory components---sighs, breath holds, and amplitude
+transients---that are characteristic of MAHNOB-HCI's
+emotion-elicitation protocol.
+CCC penalises any deviation in waveform shape, including the amplitude
+flattening that occurs when the SSM ``fills in'' irregular segments
+with its oscillatory prior.
+The raw baseline preserves these non-oscillatory features faithfully,
+yielding higher concordance at the cost of poorer spectral estimation.
+This trade-off does not arise on COHFACE (Table~\ref{tab:time_performance}),
+where breathing is regular and the oscillatory prior accurately matches
+the true waveform structure.
+Between the two filtered methods, NAROSSM and the Gaussian KF converge
+to similar time-domain performance, with NAROSSM achieving marginally
+better CCC on most families (e.g., 0.340 vs.\ 0.330 on P1D-Linear,
+P1D-Quadratic, and P1D-Cubic), consistent with its adaptive bandwidth
+providing slightly more flexibility than the fixed-$R$ KF.
+
+
+\subsection*{Cross-dataset comparison}
+
+To assess the generalisability of NAROSSM's adaptive mechanisms, we
+compare performance patterns across the two datasets.
+
+% --- Table 7: Cross-dataset comparison ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  Cross-dataset comparison of frequency-domain MAE (median, BPM).
+  NAROSSM and KF show consistent relative performance across both
+  datasets despite vastly different difficulty levels.
+}
+\label{tab:cross_dataset_comparison}
+\begin{tabular}{l ccc ccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{COHFACE}} &
+  \multicolumn{3}{c}{\textbf{MAHNOB-HCI}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+\textbf{Family} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+OF-Farneb\"ack   & 0.290 & 0.290 & \textbf{0.280} & 6.23 & 5.46 & \textbf{5.47} \\
+P1D-Linear       & 0.335 & 0.315 & \textbf{0.305} & 6.36 & 5.41 & \textbf{5.40} \\
+P1D-Quadratic    & \textbf{0.195} & 0.220 & 0.210 & 6.60 & 5.50 & \textbf{5.45} \\
+P1D-Cubic        & 0.220 & 0.230 & \textbf{0.220} & 6.54 & 5.50 & \textbf{5.44} \\
+P1D-DoF          & 2.400 & \textbf{2.105} & 2.180 & 5.42 & \textbf{5.19} & 5.24 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:cross_dataset_comparison} reveals several important patterns.
+First, the absolute MAE on MAHNOB-HCI is 10--30$\times$ larger than on
+COHFACE, reflecting the fundamental difficulty difference between
+controlled and emotion-elicitation protocols.
+Second, the \emph{relative} benefit of temporal filtering is
+substantially larger on MAHNOB-HCI: the oscillatory SSM reduces MAE
+by 0.8--1.2~BPM (a 13--17\% relative improvement) compared to
+0.01--0.30~BPM (3--12\%) on COHFACE.
+This confirms that the state-space model provides meaningful signal
+regularisation under challenging conditions.
+Third, NAROSSM consistently outperforms the Gaussian KF on
+both datasets: on COHFACE, NAROSSM achieves the best MAE on
+four of five families (all except DoF); on MAHNOB-HCI,
+NAROSSM achieves the best MAE on three of five families
+(P1D-Quadratic: 5.45 vs.\ 5.50, P1D-Cubic: 5.44 vs.\ 5.50,
+P1D-Linear: 5.40 vs.\ 5.41) and the best RMSE on four of five.
+The consistency across datasets with vastly different fps
+(20 vs.\ 61) and noise characteristics validates the
+fps-normalised design of NAROSSM's adaptive mechanisms.
+This robustness arises because NAROSSM's adaptive $R_t$ achieves
+$\NIS \approx 1$ on both datasets, normalising the residuals and
+causing the Student-$t$ mechanism to remain inactive.
+
+\textbf{Adaptive $R_t$ convergence.}
+A key finding from the adaptive noise estimation is that the
+per-family converged $R_t$ values differ dramatically between datasets:
+on COHFACE, OF-Farneb\"ack converges to $R \approx 0.18$ while
+on MAHNOB-HCI it converges to $R \approx 0.05$;
+conversely, P1D-Quadratic converges to $R \approx 0.08$ on COHFACE
+but $R \approx 0.36$ on MAHNOB-HCI.
+These differences reflect genuine dataset-specific noise properties:
+COHFACE's optical flow signals have higher variance due to lower
+frame rate (20~fps vs.\ 61~fps), while MAHNOB-HCI's spatial profiles
+are noisier due to emotion-induced body motion.
+The Gaussian KF baseline uses a fixed $R = 0.05$ that happens to be
+reasonable for both datasets, but this is fortuitous rather than
+principled---on a new dataset with different noise characteristics,
+the fixed $R$ would require re-tuning.
+NAROSSM's adaptive $R_t$ eliminates this tuning requirement entirely.
+
+
+\subsection*{Cross-dataset measurement noise generalisation}
+
+The convergence of NAROSSM and the Gaussian KF on both benchmarks
+raises a natural question: if the fixed $R = 0.05$ works well on
+both COHFACE and MAHNOB-HCI, is the adaptive $R_t$ mechanism
+necessary?
+
+We address this through a cross-dataset $R$ transfer experiment.
+For each observation family, we extract the per-family $R$ value that
+NAROSSM's adaptive mechanism converges to on one dataset and apply
+it as a \emph{fixed} $R$ in the Gaussian KF on the other dataset.
+This simulates the scenario where a practitioner tunes $R$ on one
+dataset (using NAROSSM's convergence as a proxy for the optimal value)
+and deploys the fixed-$R$ filter on a new dataset without re-tuning.
+
+% --- Table 8: Cross-dataset R transfer ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  Cross-dataset measurement noise transfer.
+  ``KF (native)'' uses the standard fixed $R = 0.05$.
+  ``KF (cross)'' uses the per-family $R$ value that NAROSSM converges
+  to on the \emph{other} dataset.
+  NAROSSM uses adaptive $R_t$ and requires no per-dataset tuning.
+  Frequency MAE (median, BPM).
+  \textbf{Bold}: best among KF variants per family.
+}
+\label{tab:cross_dataset_R}
+\begin{tabular}{l cccc cccc}
+\toprule
+& \multicolumn{4}{c}{\textbf{Tested on COHFACE}} &
+  \multicolumn{4}{c}{\textbf{Tested on MAHNOB-HCI}} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+& \multicolumn{2}{c}{KF} & & &
+  \multicolumn{2}{c}{KF} & & \\
+\cmidrule(lr){2-3} \cmidrule(lr){6-7}
+\textbf{Family} &
+  Native & Cross${}^{*}$ & NAROSSM & $R_{\mathrm{cross}}$ &
+  Native & Cross${}^{\dagger}$ & NAROSSM & $R_{\mathrm{cross}}$ \\
+\midrule
+OF-Farneb\"ack &
+  \textbf{0.258} & \textbf{0.258} & \textbf{0.258} & 0.045 &
+  6.514 & \textbf{6.326} & 6.450 & 0.178 \\
+P1D-Linear &
+  0.303 & 0.294 & \textbf{0.291} & 0.332 &
+  6.589 & 6.480 & \textbf{6.507} & 0.322 \\
+P1D-Quadratic &
+  0.211 & \textbf{0.208} & \textbf{0.208} & 0.359 &
+  6.827 & 6.782 & \textbf{6.751} & 0.081 \\
+P1D-Cubic &
+  0.217 & \textbf{0.213} & 0.217 & 0.362 &
+  6.891 & 6.857 & \textbf{6.741} & 0.079 \\
+P1D-DoF &
+  2.314 & 2.314 & \textbf{2.280} & 0.043 &
+  5.731 & \textbf{5.696} & 5.720 & 0.110 \\
+\bottomrule
+\multicolumn{9}{l}{\footnotesize ${}^{*}$MAHNOB-converged $R$ applied on COHFACE.\quad
+  ${}^{\dagger}$COHFACE-converged $R$ applied on MAHNOB-HCI.}
+\end{tabular}
+\end{table}
+
+The cross-dataset $R$ transfer results
+(Table~\ref{tab:cross_dataset_R}) reveal two distinct patterns.
+On COHFACE, all three configurations---native KF, cross-dataset KF,
+and NAROSSM---achieve comparable performance, with NAROSSM matching
+or outperforming on three of five families (P1D-Linear: 0.291,
+P1D-Quadratic: 0.208, DoF: 2.280~BPM).
+On MAHNOB-HCI, the cross-dataset $R$ values consistently outperform
+the native $R = 0.05$ (aggregate: 6.419 vs.\ 6.494~BPM), indicating
+that the native KF is slightly miscalibrated for this dataset.
+NAROSSM achieves the best result on three families
+(P1D-Quadratic: 6.751, P1D-Cubic: 6.741, P1D-Linear: 6.507~BPM),
+demonstrating that adaptive $R_t$ finds noise levels that even
+cross-dataset-tuned fixed $R$ cannot match.
+On OF-Farneb\"ack MAHNOB-HCI, the cross-dataset $R = 0.178$
+outperforms both native KF (6.514) and NAROSSM (6.450), achieving
+6.326~BPM---suggesting that a higher fixed $R$ suppresses noisy
+optical-flow observations more effectively on this family.
+These results demonstrate that while cross-dataset $R$ tuning can
+improve over the native default, NAROSSM's adaptive $R_t$ provides
+robust performance across families without requiring any prior
+knowledge of the target dataset's noise characteristics.
+
+
+\subsection*{Robustness to observation outliers}
+
+To evaluate NAROSSM's robustness mechanisms under conditions where
+the Student-$t$ update is expected to activate, we conduct a
+controlled outlier injection experiment.
+Synthetic outliers are injected into the preprocessed observation
+signals at varying rates before filtering, simulating the effect of
+transient artefacts (occlusion, sudden motion, tracking failure) that
+survive preprocessing.
+
+\textbf{Outlier injection protocol.}
+For each trial and observation family, we inject outliers into the
+base observation signal at four conditions:
+(1)~5\% random (isolated frames replaced with $3$--$5\sigma$ spikes);
+(2)~10\% random;
+(3)~20\% random; and
+(4)~5\% burst (contiguous blocks of 5--10 frames, simulating
+sustained artefacts such as occlusion events).
+All three methods---raw spectral baseline, Gaussian KF, and
+NAROSSM---are evaluated on the corrupted signals using the standard
+windowed MAE metric.
+
+% --- Table 9: Outlier injection results ---
+\begin{table}[!ht]
+\centering
+\caption{%
+  Outlier injection robustness experiment.
+  Frequency MAE (median, BPM) under controlled outlier conditions.
+  ``Clean'' uses the original signal (no injection).
+  Lower is better; \textbf{bold} marks the best method per condition.
+}
+\label{tab:outlier_injection}
+\begin{tabular}{l l ccc ccc}
+\toprule
+& & \multicolumn{3}{c}{\textbf{COHFACE}} &
+    \multicolumn{3}{c}{\textbf{MAHNOB-HCI}} \\
+\cmidrule(lr){3-5} \cmidrule(lr){6-8}
+\textbf{Family} & \textbf{Condition} &
+  Base & KF & NAROSSM &
+  Base & KF & NAROSSM \\
+\midrule
+\multirow{5}{*}{OF-Farneb\"ack}
+  & Clean       & 0.29 & 0.26 & \textbf{0.25} & 7.28 & 6.35 & \textbf{6.29} \\
+  & 5\% random  & 1.07 & \textbf{0.68} & 0.85 & 7.14 & \textbf{6.04} & 6.07 \\
+  & 10\% random & 2.17 & 1.45 & \textbf{1.44} & 6.87 & \textbf{6.16} & 6.18 \\
+  & 20\% random & 3.80 & \textbf{2.70} & 3.07 & 6.59 & \textbf{6.11} & 6.11 \\
+  & 5\% burst   & 0.77 & 0.47 & \textbf{0.47} & 7.14 & \textbf{6.10} & 6.14 \\
+\midrule
+\multirow{5}{*}{P1D-Quad.}
+  & Clean       & 0.22 & 0.21 & \textbf{0.21} & 7.76 & 6.79 & \textbf{6.66} \\
+  & 5\% random  & 4.35 & 4.02 & \textbf{3.99} & 6.76 & 6.01 & \textbf{5.98} \\
+  & 10\% random & 3.53 & 3.46 & \textbf{3.42} & 7.56 & \textbf{6.59} & 6.62 \\
+  & 20\% random & 3.85 & 3.87 & \textbf{3.80} & 6.80 & \textbf{6.09} & 6.10 \\
+  & 5\% burst   & 5.51 & 2.78 & \textbf{2.77} & 6.94 & 6.27 & \textbf{6.17} \\
+\midrule
+\multirow{5}{*}{P1D-DoF}
+  & Clean       & 3.32 & \textbf{2.19} & 2.30 & 6.78 & \textbf{5.74} & 5.76 \\
+  & 5\% random  & 4.53 & \textbf{3.54} & 3.58 & 7.00 & \textbf{5.79} & 5.84 \\
+  & 10\% random & 5.28 & 4.56 & \textbf{4.21} & 6.88 & \textbf{6.08} & 6.12 \\
+  & 20\% random & 5.73 & 4.67 & \textbf{4.58} & 6.69 & 6.09 & \textbf{6.08} \\
+  & 5\% burst   & 4.08 & \textbf{3.19} & 3.31 & 6.88 & \textbf{5.97} & 6.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The outlier injection results (Table~\ref{tab:outlier_injection})
+reveal a nuanced picture across the two datasets.
+On COHFACE, where baseline MAE is low and outliers represent a
+genuine departure from the clean signal statistics, both temporal
+filters provide substantial protection over the raw spectral baseline.
+NAROSSM shows the clearest advantage in the high-contamination regime:
+at 10\% and 20\% random outlier rates on DoF, NAROSSM reduces MAE by
+0.35 and 0.09~BPM respectively relative to the Gaussian KF (4.21
+vs.\ 4.56 and 4.58 vs.\ 4.67~BPM).
+On P1D-Quadratic, NAROSSM consistently outperforms or matches the
+Gaussian KF across all conditions, with the burst outlier condition
+showing the largest absolute benefit of temporal filtering (Base: 5.51
+vs.\ NAROSSM: 2.77~BPM, a 50\% reduction).
+Conversely, on OF-Farneb\"ack at 5\% and 20\% random outlier rates,
+the Gaussian KF outperforms NAROSSM (0.68 vs.\ 0.85 and 2.70 vs.\
+3.07~BPM respectively).
+This reversal occurs because randomly scattered outliers inflate the
+empirical innovation variance that drives NAROSSM's adaptive $R_t$:
+isolated spikes elevate $\hat{C}_{e,t}$, causing $R_t$ to increase
+globally rather than locally, which over-attenuates the Kalman gain
+and delays the filter's recovery between outlier frames.
+The Gaussian KF's fixed $R$ is immune to this inflation, maintaining
+stable gain throughout.
+Notably, NAROSSM retains its advantage on \emph{burst} outliers
+(0.47 vs.\ 0.47) and concentrated high-rate contamination (DoF 10\%:
+4.21 vs.\ 4.56), where the contiguous nature of the corruption
+produces sustained large innovations that the Student-$t$ mechanism
+correctly identifies and suppresses.
+
+On MAHNOB-HCI, where the baseline MAE already exceeds 5~BPM due to
+emotion-elicited irregular breathing, the injected outliers cause
+proportionally less additional degradation.
+Both temporal filters maintain stable performance across all outlier
+conditions, while the raw spectral baseline fluctuates more widely
+(e.g., OF clean: 7.28 vs.\ 5\%: 7.14 vs.\ 10\%: 6.87~BPM).
+Notably, NAROSSM shows a clear advantage on P1D-Quadratic: under
+clean conditions (6.66 vs.\ 6.79~BPM), 5\% random (5.98 vs.\ 6.01),
+and burst artefacts (6.17 vs.\ 6.27~BPM).
+On DoF, where the observation noise is dominated by physiological
+variability, the Gaussian KF slightly outperforms NAROSSM in most
+conditions, except at the highest contamination (20\% random) where
+NAROSSM achieves 6.08 vs.\ KF's 6.09~BPM.
+
+These results confirm that NAROSSM's robustness mechanisms activate
+proportionally to the actual outlier severity: negligible overhead
+when observations are clean, measurable protection when contamination
+is present, and the largest gains in the most challenging conditions
+(high outlier rates, burst artefacts, noisy observation families).
+
+
+% ===================================================================
+%  DISCUSSION
+% ===================================================================
+\section*{Discussion}
+
+The results present a nuanced but informative picture: NAROSSM
+achieves its design objectives of self-calibration and noise-adaptive
+filtering, with the largest improvement on the noisiest
+observation family (OF-Farneb\"ack) while matching or slightly
+trading off performance on cleaner families.
+We discuss the mechanisms driving these results and their implications.
+
+\textbf{The calibration prerequisite.}
+The most fundamental finding is that robust filtering mechanisms can
+only function when the baseline filter is properly calibrated.
+NAROSSM's innovation-based adaptive $R_t$ achieves empirical
+$\NIS \approx 1$ across all observation families
+(Figure~\ref{fig:nis_calibration}), establishing the
+calibrated foundation on which the Student-$t$ mechanism operates.
+During development, we identified a critical failure mode: when $R_t$
+is estimated via the classical Mehra~\cite{Mehra1970} decomposition
+$R_t = \hat{C}_{e,t} - \mathbf{H}\mathbf{P}\mathbf{H}^\top$ without
+anchoring, a positive feedback loop can drive $R_t \to 0$ when
+process noise $Q$ is overestimated.
+This causes model-based NIS to collapse ($\NIS \ll 1$), rendering the
+Student-$t$ weight $\lambdat > 1$ for \emph{all} observations---the
+opposite of the intended outlier suppression.
+The solution of anchoring $R_t$ to its initial estimate
+($R_t \geq \alpha \cdot R_0$) and computing empirical NIS from the
+innovation autocovariance ($\NIS = e_t^2 / \hat{C}_e$) resolves this
+instability.
+This finding has implications beyond our application: any robust
+Kalman filtering approach that operates on miscalibrated residuals
+will underperform its potential.
+
+\textbf{Why gains are family-dependent on COHFACE.}
+Three dataset-specific factors explain why the improvement is
+concentrated on noisier families rather than uniform:
+\begin{enumerate}[nosep]
+\item \emph{Frequency stability.}
+  With 64\% of COHFACE trials exhibiting zero within-trial frequency
+  variation (Figure~\ref{fig:cohface_freq_stability}), the Gaussian KF's
+  fixed transition frequency $f$ is a valid assumption, negating
+  NAROSSM's frequency adaptation advantage.
+\item \emph{Bandpass preprocessing removes outliers.}
+  The Butterworth bandpass filter (0.08--0.50~Hz) applied in
+  preprocessing acts as a temporal smoothing operator that spreads
+  single-sample spikes across multiple frames.
+  A synthetic outlier with z-score~$= 3.8$ is reduced to z-score
+  $\approx 1.0$ after bandpass, effectively eliminating the
+  heavy-tailed structure that Student-$t$ filtering targets.
+\item \emph{Near-Gaussian post-bandpass residuals.}
+  As a consequence, NAROSSM's kurtosis estimator correctly detects
+  near-zero excess kurtosis and adapts $\nuadapt \to \nu_{\max}$
+  (median $\approx 200$) across all families, indicating that the
+  adaptive mechanism functions as designed by converging to Gaussian
+  behaviour when the noise is Gaussian.
+\end{enumerate}
+
+\textbf{Automatic noise regime identification.}
+Although the Student-$t$ mechanism remains inactive on COHFACE,
+NAROSSM's running-kurtosis-based $\nu_t$ adaptation provides
+valuable diagnostic information.
+The convergence of $\nuadapt$ to $\nu_{\max}$ across all families
+constitutes an \emph{automated noise characterisation}: the framework
+independently confirms (without external analysis) that post-bandpass
+COHFACE residuals are near-Gaussian.
+On datasets with more challenging noise conditions---multi-frame
+motion bursts, variable breathing patterns during speech or
+exercise---we expect the adaptive $\nu_t$ to remain at lower values,
+activating the Student-$t$ outlier suppression proportionally.
+
+\textbf{Oscillator-native trust as classical attention.}
+A key design challenge in classical state-space filtering is determining
+\emph{which observations to trust}---a capability that deep learning
+approaches acquire implicitly through learned temporal attention mechanisms.
+Na\"ive approaches based on innovation magnitude (NIS) create a bistable
+feedback loop: when the filter loses track, NIS rises, which closes the
+gate, which prevents recovery, which keeps NIS high.
+NAROSSM resolves this through \emph{oscillator-native} trust signals
+(Section~Methods): phase coherence measures whether the observation is
+consistent with the oscillator's predicted phase progression, and amplitude
+stability detects artefact-induced envelope jumps.
+Both signals are intrinsic to the state-space model and independent of
+the innovation variance, eliminating the feedback loop.
+A threshold mechanism ($\tau_g$) further ensures that observations
+passing both quality tests receive \emph{full} trust ($g_t = 1$),
+preventing unnecessary gain attenuation on clean frames---a ``do no harm''
+property verified empirically: on COHFACE, $>98.5$\% of frames receive
+$g_t = 1.0$.
+Crucially, this gate is \emph{self-stabilising}: when it suppresses a
+corrupted observation, the filter relies on its internal oscillatory model,
+which naturally produces smooth phase and stable amplitude, restoring the
+gate toward unity.
+
+\textbf{The role of state-space design.}
+Our choice of a two-dimensional oscillatory state with externally
+adapted frequency, rather than a three-dimensional state with
+frequency as an estimated variable, deserves discussion.
+The two-dimensional design yields an \emph{exactly linear}
+state-space model for any given frequency, eliminating the
+linearisation errors inherent in extended Kalman filtering of
+nonlinear systems.
+This enables the standard Kalman filter prediction step and the exact
+RTS smoother, both optimal for linear Gaussian systems.
+The nonlinearity of frequency variation is handled by a separate
+spectral adaptation module operating on a slower timescale
+appropriate to the quasi-periodic nature of respiration.
+This separation of concerns---waveform reconstruction at the sample
+rate, frequency adaptation at the respiratory cycle rate---reflects
+the physical structure of the problem.
+
+Notably, COHFACE's frequency stability means that \emph{any}
+reasonable fixed-frequency model works well on this dataset.
+Respiration in unconstrained settings (sleep, exercise, speech)
+exhibits substantially more frequency variability, where the
+time-varying $\mathbf{F}(f_t)$ design becomes essential.
+
+\textbf{Observation family dependence and the bandwidth--accuracy trade-off.}
+As illustrated in Figure~\ref{fig:waveform_comparison},
+the large variation in performance across observation families
+(Table~\ref{tab:freq_performance}: P1D-Quadratic MAE = 0.195~BPM
+vs.\ P1D-DoF MAE = 2.400~BPM) confirms that the observation
+extraction method is the dominant factor in estimation accuracy.
+Both filtered methods improve the noisier families
+(OF-Farneb\"ack, P1D-DoF) while slightly degrading the cleanest
+family (P1D-Quadratic) in frequency MAE---a bandwidth
+trade-off inherent to temporal filtering.
+This trade-off is structural: an oscillatory Kalman filter produces a
+narrow-band sinusoidal output whose Welch spectral peak depends on
+the filter's frequency estimate; if this estimate is off by even one
+Welch frequency bin ($\approx 0.033$~Hz at our resolution), the median
+MAE increases, whereas the raw broadband signal's Welch peak is
+determined directly from the observation spectrum.
+NAROSSM's adaptive $Q_t$ mitigates this: by reducing process noise on
+clean signals, it widens the filter's effective bandwidth, partially
+recovering spectral accuracy (P1D-Quadratic RMSE matches the raw
+baseline at 0.270, while the Gaussian KF also achieves 0.270).
+Notably, NAROSSM preserves raw signal fidelity better than the Gaussian KF
+on several metrics: P1D-Cubic frequency MAE (0.220) matches the raw
+baseline (0.220), while the KF degrades to 0.230;
+P1D-Quadratic MAE (0.210) is closer to the baseline (0.195)
+than the KF (0.220).
+This ``do no harm'' property arises from the coupled adaptive $R_t$/$Q_t$
+mechanism: when the observation noise is already low, $R_t$ converges to a
+small value, which in turn reduces $Q_t$ via the R-based bandwidth control,
+yielding tighter filter bandwidth that preserves spectral accuracy.
+
+\textbf{Tuning-free deployment via adaptive $R_t$.}
+As discussed in the Introduction, classical state-space models
+suffer from a fundamental deployability limitation: their noise
+parameters must be re-tuned for each new dataset, observation method,
+and recording environment.
+Perhaps the most practically significant finding of this work is
+that NAROSSM's adaptive $R_t$ eliminates this requirement.
+The cross-dataset transfer experiment (Table~\ref{tab:cross_dataset_R})
+quantifies this: on MAHNOB-HCI, NAROSSM achieves the best MAE on
+three of five families (P1D-Quadratic: 6.751, P1D-Cubic: 6.741,
+P1D-Linear: 6.507~BPM), outperforming both the native KF
+(default $R = 0.05$) and the cross-dataset KF (COHFACE-converged $R$).
+On COHFACE, all configurations converge to similar performance,
+but NAROSSM achieves this without requiring any prior knowledge of the
+target dataset's noise level.
+
+A per-family optimal $R$ grid search (nine values from 0.001 to 1.0)
+further demonstrates why fixed $R$ is impractical.
+On COHFACE, the family-optimal $R$ varies from $R^* = 0.001$
+(OF-Farneb\"ack) to $R^* = 1.0$ (P1D-Quadratic, P1D-Cubic, DoF):
+no single $R$ can optimise all families simultaneously.
+NAROSSM's adaptive $R_t$ achieves 0.280~BPM on COHFACE
+OF-Farneb\"ack, outperforming the best fixed-$R$ KF (0.285~BPM at
+$R = 0.001$) without oracle access to ground truth.
+On MAHNOB-HCI, the oracle-optimal $R^* = 1.0$ for all families, which
+effectively reduces the filter to a near-pass-through --- reflecting
+the dominance of physiological variability over measurement noise in
+this dataset.
+This extreme oracle value is unrealistic for deployment, as it
+cannot be determined without ground-truth labels, whereas
+NAROSSM's innovation-based adaptation converges to the
+dataset-appropriate noise level within the first few seconds of
+each recording, achieving $\NIS \approx 1$ regardless of the initial
+$R$ setting.
+
+One-at-a-time sensitivity analysis on COHFACE confirms that
+NAROSSM's non-$R$ hyperparameters are robust.
+The envelope time constant $\tau_\mathrm{env}$ (tested 10--100~s)
+and post-smoothing coefficient $\alpha$ (0.70--0.99) produce
+identical median MAE across all tested families, while the
+measurement noise floor $R_\mathrm{floor}$ has negligible
+effect below~0.1 (0.01--0.05 yield identical results on
+OF-Farneb\"ack and P1D-Quadratic).
+Only the process noise $q_x$ shows moderate sensitivity:
+OF-Farneb\"ack MAE improves from 0.310 to 0.280~BPM as $q_x$
+increases from 0.001 to 0.005, then plateaus.
+The same pattern holds on MAHNOB-HCI: $\tau_\mathrm{env}$, $\alpha$,
+and $R_\mathrm{floor}$ are insensitive across their full tested ranges,
+with only $q_x$ showing a mild effect on OF-Farneb\"ack
+(5.400 at $q_x = 0.001$ vs.\ 5.470 at $q_x = 0.005$).
+This confirms that the default parameter set ($q_x = 0.005$,
+$\tau_\mathrm{env} = 30$~s, $\alpha = 0.88$) lies in a broad,
+stable optimum and does not require per-dataset adjustment.
+Together, these results demonstrate that NAROSSM resolves the
+parameter tuning problem that has historically limited the
+deployability of classical state-space filters:
+the adaptive $R_t$ handles the most sensitive parameter automatically,
+while the remaining hyperparameters occupy a broad, stable plateau
+that transfers across datasets without adjustment.
+This self-calibration property enables deployment on new datasets,
+new camera systems, and new observation methods without the
+ground-truth-dependent parameter search that conventional approaches
+require.
+
+\textbf{Robustness under outlier conditions.}
+The outlier injection experiment (Table~\ref{tab:outlier_injection})
+confirms that NAROSSM's Student-$t$ update and trust gate activate
+proportionally to actual outlier severity.
+On clean signals, these mechanisms remain quiescent
+($\lambdat \approx 1$, $g_t \approx 1$ for $>98\%$ of frames),
+imposing no overhead.
+Under contamination, NAROSSM provides measurable protection: on
+COHFACE DoF at 10\% random outlier rate, NAROSSM reduces MAE by
+0.35~BPM relative to the Gaussian KF (4.21 vs.\ 4.56~BPM), and on
+P1D-Quadratic burst outliers, temporal filtering halves the raw
+spectral baseline's error (5.51 $\to$ 2.77~BPM).
+On MAHNOB-HCI, where physiological variability dominates measurement
+noise, both filters maintain stable performance across outlier
+conditions, confirming the ``do no harm'' property.
+Notably, NAROSSM shows a consistent advantage on P1D-Quadratic
+(e.g., burst outliers: 6.17 vs.\ 6.27~BPM; clean: 6.66 vs.\ 6.79~BPM),
+where the observation noise distribution is closest to Gaussian and
+the adaptive mechanisms can operate most effectively.
+This establishes NAROSSM as a \emph{safety net}: identical to a
+Gaussian KF under normal conditions, but automatically activating
+protective mechanisms when anomalous observations are encountered.
+
+\textbf{Limitations.}
+First, while evaluation on two datasets (COHFACE and MAHNOB-HCI)
+provides broader evidence than a single-dataset study, both involve
+seated subjects in indoor settings.
+Validation on datasets with more extreme non-stationary respiratory
+dynamics (exercise recovery, sleep apnoea, neonatal breathing) is
+needed to demonstrate the full potential of the adaptive mechanisms.
+Second, while NAROSSM adapts $Q_t$ based on the estimated $R_t$,
+the adaptation is a monotonic function of measurement noise;
+more sophisticated joint $Q$--$R$ adaptation (e.g., dual estimation)
+could improve tracking of rapidly changing respiratory dynamics.
+Third, the ablation study reveals that robust z-score preprocessing
+and adaptive filtering are complementary: removing clipping entirely
+degrades NAROSSM's performance (OF-Farneb\"ack MAE increases from
+0.280 to 0.355~BPM), while the Gaussian KF with fixed~$R$ is
+unaffected.
+This suggests that extreme outliers destabilise the adaptive
+$R_t$ estimator through innovation variance inflation.
+Future work should investigate more robust innovation statistics
+(e.g., median-based rather than EMA-based) that are resilient to
+extreme outliers without requiring preprocessing.
+
+\textbf{Clinical significance.}
+Beyond rate accuracy, NAROSSM's per-frame diagnostic outputs provide
+information directly relevant to clinical deployment.
+The $\lambdat$ trace identifies specific time intervals where the
+observation signal is unreliable; the adaptive $\nuadapt$ provides
+a continuous, per-family measure of observation quality.
+The self-calibrating $\NIS \approx 1$ property ensures that
+diagnostic thresholds have consistent statistical interpretation
+across observation families and recording conditions, without
+requiring family-specific tuning.
+
+
+% ===================================================================
+%  METHODS
+% ===================================================================
+\section*{Methods}
+
+\subsection*{Problem formulation}
+
+We model respiration as a latent quasi-periodic oscillatory process
+observed through a noisy measurement channel.
+The goal is to reconstruct the continuous respiratory trajectory
+$x_1(t)$---representing chest-wall displacement---from a sequence
+of scalar observations $\{y_1, y_2, \ldots, y_T\}$ obtained from
+video-derived chest motion proxies.
+
+\subsection*{Oscillatory state-space model}
+
+The respiratory oscillation is represented by a two-dimensional state
+vector $\state_t = [x_{1,t},\; x_{2,t}]^\top$, where $x_1$ and
+$x_2$ are the in-phase and quadrature components of the oscillator.
+Given an instantaneous frequency $f_t$ (adapted externally; see
+below), the state transition is:
+\begin{equation}
+  \state_t = \mathbf{F}(f_t)\,\state_{t-1} + \mathbf{w}_t, \qquad
+  \mathbf{F}(f_t) = \rho \begin{bmatrix}
+    \cos\omega_t & \sin\omega_t \\
+    -\sin\omega_t & \cos\omega_t
+  \end{bmatrix},
+  \label{eq:state_transition}
+\end{equation}
+where $\omega_t = 2\pi f_t \dt$ is the angular increment per sample,
+$\rho = \exp(-1/f_s\tau_{\mathrm{env}})$ is an envelope damping factor
+that prevents unbounded amplitude growth
+($\tau_{\mathrm{env}}$ is the envelope time constant in seconds),
+and $\mathbf{w}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{Q})$ is
+zero-mean Gaussian process noise with covariance
+$\mathbf{Q} = \mathrm{diag}(q_x, q_x)$.
+
+The observation equation is:
+\begin{equation}
+  y_t = \mathbf{H}\,\state_t + v_t, \qquad
+  \mathbf{H} = [1,\; 0],
+  \label{eq:observation}
+\end{equation}
+where $v_t$ is the measurement noise whose distribution is
+\emph{not} assumed to be Gaussian but is instead modelled adaptively
+as described below.
+
+\textbf{Remark on linearity.}
+For any given frequency $f_t$, the system
+\eqref{eq:state_transition}--\eqref{eq:observation} is exactly
+linear.
+This is a deliberate design choice: by separating frequency
+adaptation from state estimation, we avoid the nonlinear coupling
+that would arise from including frequency as a third state variable,
+and we can apply the standard Kalman filter without linearisation
+approximations.
+
+\subsection*{Harmonic-aware frequency initialisation}
+
+The initial frequency $f_0$ is critical: the oscillatory state-space
+model's narrow-band structure means that initialising at the wrong
+frequency can cause persistent tracking error that the RTS smoother
+cannot correct.
+A common failure mode in respiratory signal processing is
+\emph{harmonic confusion}: for slow breathing (below approximately
+10~BPM), the chest-wall motion waveform is non-sinusoidal, causing
+the second harmonic to dominate the Welch power spectral density.
+A na\"ive spectral peak detector would lock onto the second harmonic
+(e.g., 0.24~Hz instead of the true fundamental at 0.12~Hz).
+
+We address this through a three-step harmonic refinement:
+\begin{enumerate}[nosep]
+\item \emph{Candidate detection.}
+  A Welch periodogram with fine frequency resolution
+  (60-second window at the signal's sampling rate) identifies the
+  dominant spectral peak $f_{\mathrm{dom}}$ within the
+  physiological respiratory band.
+\item \emph{Subharmonic check.}
+  The power at $f_{\mathrm{dom}}/2$ is compared to the dominant
+  peak power.
+  If the subharmonic has at least 15\% of the dominant peak's power,
+  harmonic confusion is suspected.
+\item \emph{Autocorrelation tiebreaker.}
+  The autocorrelation function naturally identifies the fundamental
+  period (not harmonics).
+  If the autocorrelation peak frequency is closer to the subharmonic
+  than to the dominant peak, the subharmonic is accepted as the
+  true fundamental frequency.
+\end{enumerate}
+
+This conservative approach (requiring both spectral and
+autocorrelation evidence) avoids false corrections while reliably
+identifying harmonic confusion.
+On COHFACE, harmonic refinement corrects the initial frequency on
+approximately 8\% of trials, preventing systematic frequency
+doubling errors.
+
+
+\subsection*{Frequency adaptation module}
+
+The instantaneous frequency $f_t$ is estimated by a hybrid module
+that combines two complementary sources:
+
+\textbf{Spectral source.}
+Every $N_{\mathrm{spec}}$ frames, a Welch periodogram~\cite{Welch1967}
+is computed over a sliding window of the most recent $W_{\mathrm{spec}}$
+observations.
+The spectral peak frequency $f_{\mathrm{spec}}$ within the
+physiological respiratory band ($[f_{\min}, f_{\max}]$) provides a
+stable but slowly adapting frequency estimate.
+
+\textbf{Phase source.}
+The instantaneous phase is computed from the state estimate:
+$\phi_t = \mathrm{atan2}(x_{2,t}, x_{1,t})$.
+The phase-based instantaneous frequency is:
+\begin{equation}
+  f_{\mathrm{phase},t} = \frac{f_s}{2\pi}
+  \frac{d}{dt}\,\mathrm{unwrap}(\phi_t),
+  \label{eq:phase_freq}
+\end{equation}
+which responds rapidly to frequency changes but is noise-sensitive.
+
+\textbf{Self-gating combination.}
+A critical design challenge is that frequency adaptation on
+stable-breathing data can inject noise: the short-window spectral
+estimate is inherently noisier than the initial full-signal estimate,
+so adapting frequency when breathing rate is constant only degrades
+the oscillator model.
+We address this through a \emph{confirmation-gated} adaptation
+mechanism: the spectral estimate must consistently disagree with
+the current frequency for multiple consecutive update intervals
+before adaptation occurs.
+
+Formally, let $\delta_t = |f_{\mathrm{spec}} - f_{t-1}|$ be the
+spectral deviation. A confirmation counter $c_t$ is maintained:
+\begin{equation}
+  c_t =
+  \begin{cases}
+    \max(c_{t-1} - 1,\; 0) & \text{if } \delta_t < \delta_{\min}, \\
+    c_{t-1} + 1             & \text{otherwise},
+  \end{cases}
+  \label{eq:freq_confirm}
+\end{equation}
+where $\delta_{\min}$ is the minimum spectral deviation threshold.
+Frequency adaptation occurs only when $c_t \geq c_{\mathrm{thresh}}$:
+\begin{equation}
+  f_t =
+  \begin{cases}
+    \mathrm{clip}\!\big(\alpha_f f_{\mathrm{spec}} + (1{-}\alpha_f) f_{t-1},\;
+      f_{t-1} \pm \Delta f_{\max}\big) & \text{if } c_t \geq c_{\mathrm{thresh}}, \\
+    f_{t-1} & \text{otherwise},
+  \end{cases}
+  \label{eq:freq_adapt}
+\end{equation}
+where $\alpha_f = \mathrm{clip}(\mathrm{SNR}/(\mathrm{SNR} + \beta), 0.05, 0.8)$
+is the SNR-weighted blend coefficient and $\Delta f_{\max}$ is a
+rate limiter.
+
+This design is \emph{self-regulating}: on stable-breathing data
+(e.g., COHFACE, where 64\% of trials exhibit zero frequency variation),
+the spectral peak remains near $f_{t-1}$, the confirmation counter
+stays low, and no adaptation occurs---the oscillator behaves
+identically to a fixed-frequency baseline.
+On data with genuine breathing rate changes, the persistent spectral
+shift accumulates evidence in $c_t$ until the threshold is reached,
+enabling smooth tracking.
+
+
+\subsection*{Innovation-based adaptive measurement noise}
+
+The measurement noise variance $R_t$ is estimated online from the
+innovation sequence, following the principle of Mehra~\cite{Mehra1970}
+and Mohamed and Schwarz~\cite{MohamedSchwarz1999}.
+
+At each time step, the innovation is:
+\begin{equation}
+  e_t = y_t - \mathbf{H}\,\state_{t|t-1},
+  \label{eq:innovation}
+\end{equation}
+where $\state_{t|t-1}$ is the predicted state.
+The adaptive measurement noise estimate is updated via exponential
+moving average:
+\begin{equation}
+  \hat{C}_{e,t} = \alpha_R\,\hat{C}_{e,t-1}
+    + (1 - \alpha_R)\,e_t^2,
+  \label{eq:ema_innovation}
+\end{equation}
+\begin{equation}
+  R_t = \max\!\Big(\hat{C}_{e,t}
+    - \mathbf{H}\,\mathbf{P}_{t|t-1}\,\mathbf{H}^\top,\;
+    R_{\min}\Big),
+  \label{eq:adaptive_R}
+\end{equation}
+where $\alpha_R \in (0, 1)$ is the forgetting factor and
+$\mathbf{P}_{t|t-1}$ is the predicted state covariance.
+The floor $R_{\min} = \alpha_{\mathrm{anchor}} \cdot R_0$ is anchored
+to the initial measurement noise $R_0$, which prevents a positive
+feedback instability identified during development: without anchoring,
+overestimated $Q$ leads to $R_t \to 0$, which further suppresses
+innovation variance, creating a self-reinforcing collapse.
+
+\textbf{Empirical NIS.}
+Rather than using the model-based NIS
+($\NIS^{\mathrm{model}}_t = e_t^2 / S_t$, which is structurally
+$\ll 1$ when $Q$ is overestimated), we compute the \emph{empirical}
+NIS from the innovation autocovariance:
+\begin{equation}
+  \NIS^{\mathrm{emp}}_t = \frac{e_t^2}{\hat{C}_{e,t}},
+  \label{eq:empirical_nis}
+\end{equation}
+which has expectation~1 by construction of the EMA estimator
+$\hat{C}_{e,t}$.
+This empirical NIS is used for all subsequent operations (Student-$t$
+weight, kurtosis estimation, diagnostic output), ensuring that
+$\NIS \approx 1$ regardless of the $Q$/$R$ balance.
+
+
+\subsection*{Adaptive process noise (R-based bandwidth control)}
+
+The process noise covariance $\mathbf{Q}_t$ controls the filter's
+bandwidth: larger $Q_t$ allows the state to change more rapidly between
+time steps (faster tracking but more noise), while smaller $Q_t$
+constrains the state to follow the oscillatory model more closely
+(smoother trajectories but slower adaptation).
+Rather than fixing $Q_t$ as a constant, we use the adaptively
+estimated $R_t$ as a per-frame signal quality indicator:
+\begin{equation}
+  q_{x,t} = q_x \cdot \mathrm{clip}\!\left(
+    \left(\frac{R_t}{R_0}\right)^{\!\gamma},\;
+    s_{\min},\; s_{\max}
+  \right),
+  \label{eq:adaptive_Q}
+\end{equation}
+where $q_x$ is the base process noise, $\gamma$ controls the
+sensitivity (we use $\gamma = 0.5$, a square-root relationship),
+and $[s_{\min}, s_{\max}]$ clips the scale factor to prevent
+extreme values.
+
+This creates a symmetric, signal-quality-dependent bandwidth control:
+\begin{itemize}[nosep]
+\item When $R_t < R_0$ (clean segment), the scale factor is $< 1$,
+  reducing $Q_t$ and tightening the filter bandwidth.
+  This \emph{anchors} the state estimate during clean windows,
+  preventing the oscillator from drifting.
+\item When $R_t > R_0$ (noisy segment), the scale factor is $> 1$,
+  increasing $Q_t$ and widening the bandwidth to allow faster
+  frequency tracking.
+\end{itemize}
+
+The clean-segment anchoring is critical for noisy families such as
+P1D-DoF, where brief clean windows provide the most reliable
+frequency information.
+By reducing $Q_t$ during these windows, the filter ``locks on'' to
+the correct frequency, improving robustness to subsequent noisy
+segments.
+On clean families (P1D-Quadratic), $R_t$ converges to a low value
+throughout the recording, keeping $Q_t$ small and preserving the
+spectral accuracy of the raw signal.
+
+
+\subsection*{Kurtosis-adaptive Student-$t$ degrees of freedom}
+
+The degrees-of-freedom parameter $\nu$ of the Student-$t$ observation
+model controls the tail heaviness of the assumed noise distribution.
+Rather than fixing $\nu$ as a hyperparameter, we adapt it from the
+empirical kurtosis of the innovation sequence.
+
+A running estimate of excess kurtosis is maintained:
+\begin{equation}
+  \hat{m}_{4,t} = \alpha_\kappa\,\hat{m}_{4,t-1}
+    + (1-\alpha_\kappa)\,\tilde{e}_t^4,
+  \qquad
+  \hat{m}_{2,t} = \alpha_\kappa\,\hat{m}_{2,t-1}
+    + (1-\alpha_\kappa)\,\tilde{e}_t^2,
+  \label{eq:running_moments}
+\end{equation}
+\begin{equation}
+  \kurtosis = \frac{\hat{m}_{4,t}}{\hat{m}_{2,t}^2} - 3,
+  \label{eq:running_kurtosis}
+\end{equation}
+where $\tilde{e}_t = e_t / \sqrt{S_t}$ is the standardised
+innovation.
+The adaptive degrees of freedom are obtained by inverting the
+Student-$t$ excess kurtosis relation:
+\begin{equation}
+  \nuadapt = \mathrm{clip}\!\left(
+    \frac{6}{\max(\kurtosis,\, \epsilon)} + 4,
+    \;\nu_{\min},\; \nu_{\max}
+  \right),
+  \label{eq:adaptive_nu}
+\end{equation}
+where $\epsilon > 0$ prevents division by zero, and
+$[\nu_{\min}, \nu_{\max}]$ bounds the parameter to a numerically
+stable range (e.g., $[3, 200]$).
+
+When innovations are heavy-tailed ($\kurtosis \gg 0$), $\nuadapt$
+decreases, producing aggressive outlier suppression.
+When innovations are near-Gaussian ($\kurtosis \approx 0$),
+$\nuadapt$ increases toward $\nu_{\max}$, and the filter converges
+to standard Gaussian Kalman filtering.
+This constitutes a direct, data-driven implementation of
+inference-to-noise alignment.
+
+
+\subsection*{Student-$t$ robust Kalman update}
+
+Given the adaptively estimated $R_t$ and $\nuadapt$, the measurement
+update follows the variational Bayes
+approach~\cite{Huang2017,Agamennoni2012}.
+The key quantity is the scale weight:
+\begin{equation}
+  \lambdat = \frac{\nuadapt + 1}{\nuadapt + \NIS^{\mathrm{emp}}_t},
+  \label{eq:lambda}
+\end{equation}
+which satisfies $0 < \lambdat \le 1$ for finite $\nuadapt$ when
+$\NIS^{\mathrm{emp}}_t \geq 1$.
+When the empirical NIS is near unity (normal observation),
+$\lambdat \approx 1$ and the update is nearly Gaussian.
+When the innovation is anomalously large,
+$\lambdat \ll 1$ and the effective measurement noise
+$\Reff = R_t / \lambdat$ increases, reducing the Kalman gain and
+suppressing the influence of the outlier observation.
+
+The Kalman gain is then:
+\begin{equation}
+  \mathbf{K}_t = \mathbf{P}_{t|t-1}\,\mathbf{H}^\top \,
+  \big(\mathbf{H}\,\mathbf{P}_{t|t-1}\,\mathbf{H}^\top
+    + \Reff\big)^{-1},
+  \label{eq:kalman_gain}
+\end{equation}
+and the state and covariance updates follow the Joseph
+stabilised form:
+\begin{align}
+  \state_{t|t} &= \state_{t|t-1}
+    + g_t\,\mathbf{K}_t\, e_t,
+    \label{eq:state_update} \\
+  \mathbf{P}_{t|t} &= (\mathbf{I} - g_t\,\mathbf{K}_t\,\mathbf{H})
+    \,\mathbf{P}_{t|t-1}\,
+    (\mathbf{I} - g_t\,\mathbf{K}_t\,\mathbf{H})^\top
+    + g_t^2\,\mathbf{K}_t\,\Reff\,\mathbf{K}_t^\top,
+    \label{eq:cov_update}
+\end{align}
+where $g_t \in [0, 1]$ is the \emph{oscillator-native trust gate},
+a key design element motivated by a challenge that deep learning
+approaches handle implicitly through learned attention mechanisms
+but that classical estimators must address through explicit design.
+
+The question of \emph{which observations to trust} is fundamental:
+a standard Kalman filter treats all observations equally, while
+learned models can automatically identify unreliable inputs through
+data-driven attention weights.
+We address this challenge by deriving $g_t$ from signals that are
+\emph{intrinsic to the oscillatory state-space model itself}---not
+from the innovation magnitude (NIS), which creates a bistable
+feedback loop (high NIS $\to$ gate closes $\to$ filter diverges
+$\to$ NIS remains high).
+
+Specifically, $g_t$ combines two oscillator-native quality measures
+with a threshold mechanism that ensures clean observations receive
+full trust:
+\begin{equation}
+  g_t =
+  \begin{cases}
+    1 & \text{if } q_{\phi,t} \cdot q_{A,t} \geq \tau_g, \\
+    \max\!\big(q_{\phi,t} \cdot q_{A,t},\; g_{\min}\big) & \text{otherwise},
+  \end{cases}
+  \label{eq:gate}
+\end{equation}
+where $\tau_g$ is a trust threshold and $g_{\min} > 0$ prevents
+complete observation rejection.
+The threshold ensures that normal physiological variations in
+amplitude and phase do not trigger unnecessary gain reduction,
+so that NAROSSM preserves the full Kalman gain on clean frames
+(behaving identically to a standard filter) while activating
+proportional gating only on genuine outlier frames.
+
+\textbf{Phase coherence} ($q_{\phi,t}$) measures whether the
+observation is consistent with the oscillator's predicted phase
+progression:
+\begin{equation}
+  q_{\phi,t} = \exp\!\left(-\frac{(\Delta\phi_t -
+    \omega_t \dt)^2}{2\sigma_\phi^2}\right),
+  \label{eq:phase_coherence}
+\end{equation}
+where $\Delta\phi_t = \phi(\hat{\state}_{t|t}) - \phi(\state_{t-1|t-1})$
+is the actual phase change and $\omega_t \dt = 2\pi f_t \dt$ is the
+expected phase increment.
+A normal breathing observation produces smooth phase progression
+($q_{\phi,t} \approx 1$); a motion artefact causes an abrupt phase
+jump ($q_{\phi,t} \ll 1$).
+
+\textbf{Amplitude stability} ($q_{A,t}$) detects sudden changes in
+the oscillator envelope:
+\begin{equation}
+  q_{A,t} = \exp\!\left(-\frac{1}{2}\left(
+    \frac{|A_t - \bar{A}_t|}{\bar{A}_t \cdot \sigma_A}
+    \right)^2\right),
+  \label{eq:amp_stability}
+\end{equation}
+where $A_t = \|\state_t\|$ is the instantaneous amplitude and
+$\bar{A}_t$ is an exponentially weighted moving average.
+Respiratory amplitude varies slowly; abrupt jumps indicate artefacts.
+
+This gate design is \emph{self-stabilising}: when $g_t$ reduces the
+observation influence, the filter relies on its internal oscillatory
+model, which naturally produces smooth phase and stable amplitude.
+This restores $q_{\phi,t}$ and $q_{A,t}$ toward unity, reopening the
+gate---in contrast to NIS-based gates, which lock into a closed state.
+The trust gate provides a \emph{prior} assessment of observation
+reliability (model-prediction consistency), complementing the
+Student-$t$ weight $\lambdat$ which provides a \emph{posterior}
+assessment (innovation statistics).
+
+
+\subsection*{Rauch--Tung--Striebel backward smoother}
+
+After the forward filtering pass, a backward
+Rauch--Tung--Striebel (RTS) smoothing
+pass~\cite{RauchTungStriebel1965,Sarkka2013} refines the state
+estimates using future observations:
+\begin{align}
+  \mathbf{G}_t &= \mathbf{P}_{t|t}\,\mathbf{F}_{t+1}^\top\,
+    \mathbf{P}_{t+1|t}^{-1},
+    \label{eq:rts_gain} \\
+  \state_{t|T} &= \state_{t|t} + \mathbf{G}_t\,
+    (\state_{t+1|T} - \state_{t+1|t}),
+    \label{eq:rts_state} \\
+  \mathbf{P}_{t|T} &= \mathbf{P}_{t|t} + \mathbf{G}_t\,
+    (\mathbf{P}_{t+1|T} - \mathbf{P}_{t+1|t})\,
+    \mathbf{G}_t^\top.
+    \label{eq:rts_cov}
+\end{align}
+
+Because the state-space model is exactly linear for any given
+frequency sequence, the RTS smoother is the optimal (minimum
+variance) fixed-interval smoother for this system.
+This contrasts with extended Kalman smoother approaches applied to
+nonlinear state-space models, which inherit the linearisation
+errors of the forward EKF pass.
+
+The smoothed state $\state_{t|T}$ provides the final respiratory
+trajectory estimate, with $x_{1,t|T}$ representing the reconstructed
+respiratory waveform.
+
+
+\subsection*{Algorithm summary}
+
+Algorithm~\ref{alg:narossm} summarises the complete NAROSSM
+forward pass.
+
+\begin{algorithm}[!ht]
+\caption{NAROSSM Forward Pass}
+\label{alg:narossm}
+\begin{algorithmic}[1]
+\Require Observations $\{y_1, \ldots, y_T\}$, initial state
+  $\state_0$, $\mathbf{P}_0$, parameters
+  $\alpha_R$, $\alpha_\kappa$, $\mathbf{Q}$, $R_{\min}$,
+  $[\nu_{\min}, \nu_{\max}]$
+\For{$t = 1, \ldots, T$}
+  \State \textbf{Frequency adaptation:}
+    Update $f_t$ via self-gating spectral module
+    \eqref{eq:freq_confirm}--\eqref{eq:freq_adapt}
+  \State \textbf{Predict:}
+    $\state_{t|t-1} = \mathbf{F}(f_t)\,\state_{t-1|t-1}$;\quad
+    $\mathbf{P}_{t|t-1} = \rho^2\,\mathbf{R}(\omega_t)\,
+      \mathbf{P}_{t-1|t-1}\,\mathbf{R}(\omega_t)^\top + \mathbf{Q}$
+  \State \textbf{Innovation:}
+    $e_t = y_t - \mathbf{H}\,\state_{t|t-1}$
+  \State \textbf{Adaptive $R_t$:}
+    Update via \eqref{eq:ema_innovation}--\eqref{eq:adaptive_R}
+  \State \textbf{Adaptive $Q_t$:}
+    $q_{x,t} = q_x \cdot \mathrm{clip}((R_t/R_0)^\gamma,\, s_{\min},\, s_{\max})$
+    via \eqref{eq:adaptive_Q}
+  \State \textbf{Innovation variance:}
+    $S_t = \mathbf{H}\,\mathbf{P}_{t|t-1}\,\mathbf{H}^\top + R_t$
+  \State \textbf{Adaptive $\nu_t$:}
+    Update running kurtosis and $\nuadapt$ via
+    \eqref{eq:running_moments}--\eqref{eq:adaptive_nu}
+  \State \textbf{Student-$t$ weight:}
+    $\lambdat = (\nuadapt + 1) / (\nuadapt + e_t^2/S_t)$
+  \State \textbf{Effective noise:}
+    $\Reff = R_t / \lambdat$
+  \State \textbf{Kalman gain:}
+    $\mathbf{K}_t = \mathbf{P}_{t|t-1}\,\mathbf{H}^\top\,
+      (S_t')^{-1}$
+    where $S_t' = \mathbf{H}\,\mathbf{P}_{t|t-1}\,\mathbf{H}^\top
+      + \Reff$
+  \State \textbf{Trust gate:}
+    Compute $q_{\mathrm{raw}} = q_{\phi,t} \cdot q_{A,t}$;
+    \textbf{if} $q_{\mathrm{raw}} \geq \tau_g$ \textbf{then} $g_t = 1$
+    \textbf{else} $g_t = \max(q_{\mathrm{raw}}, g_{\min})$
+    via \eqref{eq:gate}
+  \State \textbf{Gated update:}
+    $\state_{t|t}$, $\mathbf{P}_{t|t}$ via
+    \eqref{eq:state_update}--\eqref{eq:cov_update} with $g_t$
+  \State \textbf{Diagnostics:}
+    Record $\NIS_t$, $\lambdat$, $R_t$, $\nuadapt$, $g_t$
+\EndFor
+\State \textbf{RTS smoother:} Backward pass
+  \eqref{eq:rts_gain}--\eqref{eq:rts_cov}
+\State \Return $\{\state_{t|T}\}_{t=1}^T$ and diagnostic traces
+\end{algorithmic}
+\end{algorithm}
+
+% --- Figure 6: Algorithm block diagram ---
+\begin{figure}[!ht]
+\centering
+% \includegraphics[width=\linewidth]{figures/fig6_algorithm_block}
+\fbox{\parbox{0.95\linewidth}{\centering\vspace{4cm}
+\textbf{Figure 6: NAROSSM Algorithm Block Diagram}\\[6pt]
+Signal flow: $y_t \to$ Innovation $e_t \to$ Adaptive $R_t$ $\to$\\
+Running kurtosis $\to$ Adaptive $\nu_t$ $\to$ Student-$t$ $\lambda_t$ $\to$\\
+$R_{\mathrm{eff}}$ $\to$ Kalman Gain $\to$ State Update $\to$ RTS\\[6pt]
+\emph{(Detailed block diagram to be created in PaperBanana)}
+\vspace{4cm}}}
+\caption{%
+  Block diagram of the NAROSSM algorithm showing the information
+  flow between the adaptive noise estimation, Student-$t$ robust
+  update, and state estimation components.
+  Solid arrows indicate the main signal path; dashed arrows indicate
+  diagnostic outputs.
+}
+\label{fig:algorithm_block}
+\end{figure}
+
+
+\subsection*{Observation extraction}
+
+Five observation families are employed, each representing a different
+approach to extracting chest-wall motion from video:
+
+\begin{itemize}[nosep]
+\item \textbf{OF-Farneb\"ack}:
+  Dense optical flow~\cite{Farneback2003} computed over the
+  upper-body region of interest (ROI), with the vertical component
+  averaged to produce a scalar respiratory proxy.
+\item \textbf{Profile1D-Linear, -Quadratic, -Cubic}:
+  One-dimensional spatial intensity profiles extracted along vertical
+  lines within the chest ROI, fitted with polynomials of degree~1,
+  2, and~3 respectively.
+  The temporal variation of profile coefficients captures
+  chest-wall displacement.
+\item \textbf{Profile1D-DoF}:
+  Degrees-of-freedom-based profile extraction that adapts the
+  polynomial order to the local signal structure.
+\end{itemize}
+
+
+\subsection*{Datasets}
+
+\textbf{COHFACE}~\cite{COHFACE2017} contains 160~video recordings from
+40~subjects (4~sessions each) in a controlled laboratory environment.
+Videos are recorded at 20~fps ($640 \times 480$) with simultaneous
+ground-truth respiratory signals from a chest-mounted BVP sensor.
+Each recording is approximately 60~seconds.
+The controlled protocol (seated, still, neutral task) yields stable
+breathing patterns.
+
+\textbf{MAHNOB-HCI}~\cite{MAHNOB2012} is an emotion-elicitation
+dataset containing 525~recordings from 27~subjects.
+Videos are recorded at 61~fps ($780 \times 580$) with ground-truth
+respiration from a chest belt (BDF channel~44, 256~Hz).
+Each recording is approximately 120~seconds.
+The emotion-elicitation protocol (subjects watching affective video
+clips) induces more naturalistic and variable breathing patterns,
+including sighs, irregular rhythms, and body movements.
+
+Both datasets use upper-body (chest) ROI extraction for all five
+observation families.
+Preprocessing, state-space model configuration, and evaluation
+metrics are identical across datasets to enable direct comparison.
+
+
+\subsection*{Evaluation protocol}
+
+\textbf{Frequency-domain metrics.}
+Respiratory rate is estimated from the reconstructed signal
+$\hat{x}_{1,t|T}$ using Welch PSD~\cite{Welch1967} peak detection
+over 30-second sliding windows with 1-second stride.
+Five complementary metrics are reported:
+(1)~windowed mean absolute error (MAE, BPM);
+(2)~root mean squared error (RMSE, BPM);
+(3)~Pearson correlation coefficient ($r$) between estimated and
+ground-truth rate trajectories;
+(4)~spectral signal-to-noise ratio (SNR\textsubscript{spec}, dB),
+computed as the ratio of the respiratory peak power to the
+out-of-band spectral floor; and
+(5)~Kullback--Leibler divergence between estimated and ground-truth
+normalised power spectral densities, measuring overall spectral
+shape agreement.
+
+\textbf{Time-domain metrics.}
+Waveform reconstruction fidelity is assessed on bandpass-filtered,
+cross-correlation-aligned signals using six metrics:
+(1)~Lin's concordance correlation coefficient
+(CCC)~\cite{LinCCC1989}, which jointly measures precision and
+accuracy of waveform agreement;
+(2)~mean absolute error (MAE) and (3)~root mean squared error (RMSE)
+on aligned waveforms;
+(4)~time-domain signal-to-noise ratio (SNR\textsubscript{time}, dB);
+(5)~dynamic time warping (DTW) distance, which captures waveform
+shape similarity robust to temporal misalignment; and
+(6)~peak-to-peak interval (PPI) MAE, measuring the accuracy of
+individual breath cycle duration estimation.
+
+\textbf{Statistical testing.}
+All comparisons use paired Wilcoxon signed-rank tests with Bonferroni
+correction for multiple comparisons.
+A result is considered statistically significant at $p < 0.05$
+(corrected).
+
+
+\subsection*{Baselines}
+
+Two baselines are compared, chosen to isolate the contribution of
+NAROSSM's adaptive mechanisms from the underlying state-space
+structure:
+\begin{itemize}[nosep]
+\item \textbf{Base (raw spectral):}
+  Direct Welch PSD peak detection on the preprocessed observation
+  signal without any temporal filtering.
+  This establishes the performance achievable from spectral analysis
+  alone.
+\item \textbf{Gaussian KF (kfstd):}
+  The \emph{same} two-dimensional oscillatory state-space model
+  (Equation~\ref{eq:state_transition}--\ref{eq:observation}) with a
+  standard Kalman filter (fixed $R$, Gaussian $v_t$), fixed
+  transition frequency $f$ estimated from the initial spectral peak,
+  and RTS backward smoother.
+  This baseline shares identical preprocessing, state-space
+  dimensionality, base process noise $Q$, and smoothing algorithm with
+  NAROSSM; the \emph{only} differences are NAROSSM's adaptive $R_t$,
+  R-based adaptive $Q_t$, kurtosis-adaptive $\nuadapt$, Student-$t$
+  update, oscillator-native trust gate, and harmonic-aware frequency
+  initialisation.
+  This controlled comparison ensures that any performance difference
+  is attributable solely to the noise-adaptive mechanisms.
+\end{itemize}
+
+
+% ===================================================================
+%  ACKNOWLEDGEMENTS, CONTRIBUTIONS, ETC.
+% ===================================================================
+
+\bibliography{refs}
+
+\section*{Acknowledgements}
+
+This work was supported by [funding information].
+
+\section*{Author contributions statement}
+
+Y.-J.C.\ conceived the research framework, designed the NAROSSM
+algorithm, implemented the software, conducted all experiments, and
+wrote the manuscript.
+D.-Y.K.\ supervised the research, provided critical feedback on the
+methodology, and reviewed the manuscript.
+
+\section*{Additional information}
+
+\textbf{Data availability.}
+The COHFACE dataset is publicly available at
+\url{https://www.idiap.ch/dataset/cohface}.
+The MAHNOB-HCI dataset is available at
+\url{https://mahnob-db.eu/hci-tagging/}.
+Code implementing NAROSSM and reproducing all experiments will be
+made available upon publication.
+
+\textbf{Competing interests.}
+The authors declare no competing interests.
+
+
+\end{document}

@@ -1,0 +1,6 @@
+dataset,family,KFstd_NIS_Mean,KFstd_NIS_InBand,KFstd_Lambda_Mean,KFstd_Lambda_LT1_Frac,KFstd_Coverage95,KFstd_Stability_Sec,KFstd_N,PARH_NIS_Mean,PARH_NIS_InBand,PARH_Lambda_Mean,PARH_Lambda_LT1_Frac,PARH_Coverage95,PARH_Stability_Sec,PARH_N
+COHFACE,DoF,,,,,,26.8250,160,,,,,,44.4500,160
+COHFACE,OF,,,,,,60.4500,160,,,,,,60.4750,160
+COHFACE,P1D_cub,,,,,,60.4500,160,,,,,,60.5000,160
+COHFACE,P1D_lin,,,,,,54.8250,160,,,,,,60.4500,160
+COHFACE,P1D_quad,,,,,,60.4500,160,,,,,,60.5000,160

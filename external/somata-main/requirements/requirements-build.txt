@@ -1,2 +1,0 @@
-# additional runtime dependent packages for building the package
-torch

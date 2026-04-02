@@ -153,7 +153,13 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
                         if not d['chest_rois']:
                             try:
                                 estimate = m.process(d)
-                                success_lazy = True
+                                # Verify non-empty result (empty signal = cache miss)
+                                if isinstance(estimate, np.ndarray) and estimate.size == 0:
+                                    success_lazy = False
+                                elif isinstance(estimate, dict) and estimate.get('signal_hat', np.array([])).size == 0:
+                                    success_lazy = False
+                                else:
+                                    success_lazy = True
                             except Exception:
                                 pass
 

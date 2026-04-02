@@ -92,6 +92,21 @@ def _build_datasets(dataset_configs):
         else:
             raise ValueError(f"Unknown dataset: {name}")
         ds.configure(d_cfg)
+        # Subset filtering: load all then keep only matching trials
+        subset = d_cfg.get('subset')
+        if subset:
+            ds.load_dataset()
+            subset_set = set(str(s) for s in subset)
+            filtered = []
+            for d in ds.data:
+                if 'trial' in d:
+                    key = f"{d['subject']}_{d['trial']}"
+                else:
+                    key = str(d['subject'])
+                if key in subset_set:
+                    filtered.append(d)
+            print(f"  Subset filter: {len(ds.data)} → {len(filtered)} trials (requested: {subset})")
+            ds.data = filtered
         datasets.append(ds)
     return datasets
 
