@@ -19,9 +19,15 @@ No standalone scripts, no temporary directories, no manual calculations.
 
 | Signal | Evaluation Path | Target Table |
 |--------|----------------|--------------|
-| z_osc (= signal_hat) | → track_hz → BPM | T3 (rate accuracy) |
+| z_osc (= signal_hat) | → `track_hz` → windowed BPM | T3 (rate accuracy) |
 | z_full (= z_osc + baseline + residual) | → bandpass → zscore → align → waveform metrics | T4 (waveform fidelity) |
 | diagnostics arrays | → per-trial aggregation | T6 (filter diagnostics) |
+
+## Current routing boundary
+
+- T3 uses `track_hz` when the method saves a frequency track and `eval.use_track=true`.
+- Base observation families without `track_hz` fall back to the legacy signal-spectral rate path.
+- T6 prefers saved payload diagnostics (`diagnostics.nis_empirical_t`, `diagnostics.lambda_t`) and uses frame logs only for supplementary failure/coverage fields when available.
 
 ## Column Requirements
 
@@ -31,11 +37,13 @@ No standalone scripts, no temporary directories, no manual calculations.
 - Paper T4 reports **smoothed** variant as primary, causal as supplementary
 
 ### metrics_freq_domain_raw.csv (T3)
-- Computed from `signal_hat` (= z_osc_smoothed)
+- Primary path: computed from saved `track_hz` when available
+- Fallback path: computed from `signal_hat` only when no `track_hz` exists
 - Paper T3 reports median ± std across trials
 
 ### metrics_filter_diagnostics_raw.csv (T6)
-- NIS calibration, failure modes, lambda stats
+- NIS calibration and lambda stats should come from saved diagnostics arrays when the method stores them
+- Failure modes and future coverage statistics may come from frame logs
 - Paper T6 reports per-method aggregated
 
 ## Figure → CSV Mapping

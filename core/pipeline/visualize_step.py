@@ -177,7 +177,7 @@ def _save_family_overlays(run_dir, metrics_pkl):
         
         # Dynamic Family Grouping: Base model first, then its variants
         all_methods = list(method_metrics.keys())
-        roots = ["dof", "of_farneback", "of_model", "profile1d_linear", "profile1d_quadratic", "profile1d_cubic"]
+        roots = ["dof", "of_farneback", "of_model", "of_disp_bridge", "profile1d_linear", "profile1d_quadratic", "profile1d_cubic"]
         
         FAMILIES = {}
         remaining_methods = set(all_methods)
@@ -1035,6 +1035,8 @@ def _method_sort_key(method_name: str):
 
     if base in ('of_model', 'of', 'of_farneback'):
         family = 10
+    elif base in ('of_disp_bridge', 'of_displacement_bridge', 'of_bridge'):
+        family = 15
     elif base == 'dof':
         family = 20
     elif base.startswith('profile1d_linear'):
@@ -1043,6 +1045,12 @@ def _method_sort_key(method_name: str):
         family = 40
     elif base.startswith('profile1d_cubic'):
         family = 50
+    elif base.startswith('pair_of_p1d_quadratic'):
+        family = 60
+    elif base.startswith('assist_of_p1d_quadratic'):
+        family = 68
+    elif base.startswith('fusion_of_p1d_quadratic'):
+        family = 70
     else:
         family = 99
 

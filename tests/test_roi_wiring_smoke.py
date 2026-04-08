@@ -3,6 +3,7 @@ import tempfile
 
 import numpy as np
 
+from components.observations.methods import OF_Model
 from components.models.core.base import OscillatorParams
 from components.models.heads.robust_ossm import oscillator_RobustOSSM
 from core.pipeline.wrapped_method import OscillatorWrappedMethod, compute_roi_stats_time_series, save_roi_stats_cache
@@ -150,3 +151,54 @@ def test_can_run_without_chest_rois_with_disk_caches():
     save_roi_stats_cache(video_path, 20.0, stats_t)
 
     assert wrapper.can_run_without_chest_rois(data) is True
+
+
+def test_can_run_without_chest_rois_with_of_bridge_disk_caches():
+    tmp = tempfile.mkdtemp(prefix="roi_cacheonly_ofbridge_")
+    video_path = os.path.join(tmp, "sample.avi")
+    with open(video_path, "wb"):
+        pass
+
+    np.save(os.path.join(tmp, "obs_of_bridge.npy"), np.zeros(32, dtype=np.float32))
+    wrapper = OscillatorWrappedMethod("of_disp_bridge", "robust_ossm")
+
+    data = {"video_path": video_path, "chest_rois": []}
+    assert wrapper.can_run_without_chest_rois(data) is False
+
+    rois = [np.ones((8, 8), dtype=np.float32) * 100.0 for _ in range(5)]
+    stats_t, _, _, _ = compute_roi_stats_time_series(rois)
+    save_roi_stats_cache(video_path, 20.0, stats_t)
+
+    assert wrapper.can_run_without_chest_rois(data) is True
+
+
+def test_base_observation_uses_in_memory_cache_after_first_compute(monkeypatch):
+    tmp = tempfile.mkdtemp(prefix="obs_mem_cache_")
+    video_path = os.path.join(tmp, "sample.avi")
+    with open(video_path, "wb"):
+        pass
+
+    calls = {"n": 0}
+
+    def _fake_of(rois, fps):
+        calls["n"] += 1
+        return np.arange(6, dtype=np.float64), {}
+
+    monkeypatch.setattr("components.observations.methods.OF", _fake_of)
+
+    model = OF_Model()
+    data = {
+        "video_path": video_path,
+        "fps": 20.0,
+        "chest_rois": [np.ones((8, 8, 3), dtype=np.uint8) * 10 for _ in range(3)],
+    }
+
+    sig1 = model.process(data)
+    assert calls["n"] == 1
+    assert os.path.exists(os.path.join(tmp, "obs_of.npy"))
+
+    os.remove(os.path.join(tmp, "obs_of.npy"))
+    sig2 = model.process(data)
+
+    assert calls["n"] == 1
+    assert np.allclose(sig1, sig2)

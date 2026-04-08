@@ -6,7 +6,17 @@ import numpy as np
 from scipy import signal as sps
 from .common import _deep_merge_dict, derive_trial_identifiers
 
-from components.observations.methods import OF_Model, DoF_Model, profile1D_Model
+from components.observations.methods import (
+    OF_Model,
+    OFDisplacementBridge_Model,
+    DoF_Model,
+    profile1D_Model,
+    OFP1DQuadraticPair_Model,
+    AssistOFP1DQuadratic_Model,
+    AssistOFBridgeOF_Model,
+    AssistOFBridgeP1DQuadratic_Model,
+    FusionOFP1DQuadratic_Model,
+)
 from components.models import OscillatorParams, build_head
 
 ROI_STATS_CACHE_SCHEMA = "roi_stats_cache.v1"
@@ -26,6 +36,8 @@ def _normalize_base(name: str) -> str:
     key = name.lower()
     if key in ("of_model", "of", "of_farneback"):
         return "of_farneback"
+    if key in ("of_disp_bridge", "of_displacement_bridge", "of_bridge"):
+        return "of_disp_bridge"
     if key == "dof":
         return "dof"
     if key in ("profile1d_linear", "profile1d linear", "profile1d-linear"):
@@ -34,6 +46,36 @@ def _normalize_base(name: str) -> str:
         return "profile1d_quadratic"
     if key in ("profile1d_cubic", "profile1d cubic", "profile1d-cubic"):
         return "profile1d_cubic"
+    if key in (
+        "pair_of_p1d_quadratic",
+        "of_p1d_quadratic_pair",
+        "stack_of_p1d_quadratic",
+    ):
+        return "pair_of_p1d_quadratic"
+    if key in (
+        "fusion_of_p1d_quadratic",
+        "of_p1d_quadratic_fusion",
+        "fused_of_p1d_quadratic",
+    ):
+        return "fusion_of_p1d_quadratic"
+    if key in (
+        "assist_of_p1d_quadratic",
+        "of_p1d_quadratic_assist",
+        "assistant_of_p1d_quadratic",
+    ):
+        return "assist_of_p1d_quadratic"
+    if key in (
+        "assist_ofbridge_of",
+        "of_bridge_assist_of",
+        "assistant_ofbridge_of",
+    ):
+        return "assist_ofbridge_of"
+    if key in (
+        "assist_ofbridge_p1d_quadratic",
+        "of_bridge_assist_p1d_quadratic",
+        "assistant_ofbridge_p1d_quadratic",
+    ):
+        return "assist_ofbridge_p1d_quadratic"
     raise ValueError(f"Unknown base method '{name}' for oscillator wrapper")
 
 
@@ -75,6 +117,10 @@ def _build_base(base_key: str):
         base = OF_Model()
         base.name = "of_farneback"
         return base
+    if base_key == "of_disp_bridge":
+        base = OFDisplacementBridge_Model()
+        base.name = "of_disp_bridge"
+        return base
     if base_key == "dof":
         base = DoF_Model()
         base.name = "dof"
@@ -90,6 +136,26 @@ def _build_base(base_key: str):
     if base_key == "profile1d_cubic":
         base = profile1D_Model("cubic")
         base.name = "profile1d_cubic"
+        return base
+    if base_key == "pair_of_p1d_quadratic":
+        base = OFP1DQuadraticPair_Model()
+        base.name = "pair_of_p1d_quadratic"
+        return base
+    if base_key == "fusion_of_p1d_quadratic":
+        base = FusionOFP1DQuadratic_Model()
+        base.name = "fusion_of_p1d_quadratic"
+        return base
+    if base_key == "assist_of_p1d_quadratic":
+        base = AssistOFP1DQuadratic_Model()
+        base.name = "assist_of_p1d_quadratic"
+        return base
+    if base_key == "assist_ofbridge_of":
+        base = AssistOFBridgeOF_Model()
+        base.name = "assist_ofbridge_of"
+        return base
+    if base_key == "assist_ofbridge_p1d_quadratic":
+        base = AssistOFBridgeP1DQuadratic_Model()
+        base.name = "assist_ofbridge_p1d_quadratic"
         return base
     raise ValueError(f"Unsupported base key '{base_key}'")
 
@@ -407,6 +473,8 @@ class OscillatorWrappedMethod(MethodBase):
         print(f"> Initialized {self.name} with head_params: {self.osc_head.params.__dict__}")
         self.save_payload = save_payload or {"npz": True}
         self._base_meta = {"base_method": base_key}
+        if hasattr(self.base_method, "component_names"):
+            self._base_meta["observation_families"] = list(getattr(self.base_method, "component_names"))
         self.preproc_cfg = copy.deepcopy(preproc_cfg) if isinstance(preproc_cfg, dict) else {}
         self.gating_cfg = copy.deepcopy(gating_cfg) if isinstance(gating_cfg, dict) else {}
         self.quality_cfg = copy.deepcopy(quality_cfg) if isinstance(quality_cfg, dict) else {}
@@ -431,6 +499,8 @@ class OscillatorWrappedMethod(MethodBase):
             return None
         if self.base_key == "of_farneback":
             return os.path.join(trial_dir, "obs_of.npy")
+        if self.base_key == "of_disp_bridge":
+            return os.path.join(trial_dir, "obs_of_bridge.npy")
         if self.base_key == "dof":
             return os.path.join(trial_dir, "obs_dof.npy")
         if self.base_key == "profile1d_linear":
@@ -439,6 +509,16 @@ class OscillatorWrappedMethod(MethodBase):
             return os.path.join(trial_dir, "obs_p1d_quad.npy")
         if self.base_key == "profile1d_cubic":
             return os.path.join(trial_dir, "obs_p1d_cubic.npy")
+        if self.base_key == "pair_of_p1d_quadratic":
+            return None
+        if self.base_key == "fusion_of_p1d_quadratic":
+            return None
+        if self.base_key == "assist_of_p1d_quadratic":
+            return None
+        if self.base_key == "assist_ofbridge_of":
+            return None
+        if self.base_key == "assist_ofbridge_p1d_quadratic":
+            return None
         return None
 
     def can_run_without_chest_rois(self, data: Dict) -> bool:
@@ -546,8 +626,11 @@ class OscillatorWrappedMethod(MethodBase):
 
     def process(self, data: Dict) -> np.ndarray:
         # Execute base method first to obtain motion proxy y(t).
-        base_signal = self.base_method.process(data)
-        base_signal = np.asarray(base_signal, dtype=np.float64).reshape(-1)
+        base_signal = np.asarray(self.base_method.process(data), dtype=np.float64)
+        if base_signal.ndim == 0:
+            base_signal = base_signal.reshape(1)
+        elif base_signal.ndim > 2:
+            base_signal = np.asarray(base_signal, dtype=np.float64).reshape(-1)
         fs = float(data.get("fps", self.osc_head.params.fs))
         dataset_label = data.get("dataset_name") or data.get("dataset") or data.get("dataset_slug") or "unknown"
         if not str(data.get("trial_key") or "").strip():
@@ -556,6 +639,17 @@ class OscillatorWrappedMethod(MethodBase):
             data["trial_key_full"] = full_key
             data["trial_uid"] = full_key
         meta = dict(self._base_meta)
+        if hasattr(self.base_method, "get_runtime_meta"):
+            try:
+                runtime_meta = self.base_method.get_runtime_meta()
+                if isinstance(runtime_meta, dict) and runtime_meta:
+                    meta.update(copy.deepcopy(runtime_meta))
+                    primary_family = runtime_meta.get("primary_observation_family_runtime")
+                    if isinstance(primary_family, str) and primary_family.strip():
+                        meta["base_method"] = primary_family.strip()
+                        meta["assistant_base_method"] = self.base_key
+            except Exception:
+                pass
         trial_key = data.get("trial_key")
         meta.update({
             "head": self.head_key,
@@ -582,17 +676,40 @@ class OscillatorWrappedMethod(MethodBase):
             meta["trust"] = copy.deepcopy(self.trust_cfg)
         # Base-signal diagnostics passed to oscillator heads
         if base_signal.size:
-            abs_sig = np.abs(base_signal)
-            meta.update({
-                "signal_mean": float(np.nanmean(base_signal)),
-                "signal_std": float(np.nanstd(base_signal)),
-                "signal_ptp": float(np.nanmax(base_signal) - np.nanmin(base_signal)),
-                "signal_energy": float(np.nanmean(base_signal ** 2)),
-                "signal_abs_mean": float(np.nanmean(abs_sig)),
-                "signal_abs_std": float(np.nanstd(abs_sig)),
-                "signal_pos_fraction": float(np.mean(base_signal >= 0.0)),
-            })
-            meta.update(self._signal_spectral_meta(base_signal, fs, getattr(self.osc_head.params, "f_min", 0.08), getattr(self.osc_head.params, "f_max", 0.5)))
+            if base_signal.ndim == 1:
+                abs_sig = np.abs(base_signal)
+                meta.update({
+                    "signal_mean": float(np.nanmean(base_signal)),
+                    "signal_std": float(np.nanstd(base_signal)),
+                    "signal_ptp": float(np.nanmax(base_signal) - np.nanmin(base_signal)),
+                    "signal_energy": float(np.nanmean(base_signal ** 2)),
+                    "signal_abs_mean": float(np.nanmean(abs_sig)),
+                    "signal_abs_std": float(np.nanstd(abs_sig)),
+                    "signal_pos_fraction": float(np.mean(base_signal >= 0.0)),
+                })
+                meta.update(self._signal_spectral_meta(base_signal, fs, getattr(self.osc_head.params, "f_min", 0.08), getattr(self.osc_head.params, "f_max", 0.5)))
+            elif base_signal.ndim == 2:
+                channel_stats = []
+                obs_families = list(meta.get("observation_families") or [])
+                for idx in range(base_signal.shape[0]):
+                    sig_i = np.asarray(base_signal[idx], dtype=np.float64).reshape(-1)
+                    abs_sig = np.abs(sig_i)
+                    rec = {
+                        "channel_index": int(idx),
+                        "family": obs_families[idx] if idx < len(obs_families) else f"ch{idx}",
+                        "signal_mean": float(np.nanmean(sig_i)) if sig_i.size else float("nan"),
+                        "signal_std": float(np.nanstd(sig_i)) if sig_i.size else float("nan"),
+                        "signal_ptp": float(np.nanmax(sig_i) - np.nanmin(sig_i)) if sig_i.size else float("nan"),
+                        "signal_energy": float(np.nanmean(sig_i ** 2)) if sig_i.size else float("nan"),
+                        "signal_abs_mean": float(np.nanmean(abs_sig)) if sig_i.size else float("nan"),
+                        "signal_abs_std": float(np.nanstd(abs_sig)) if sig_i.size else float("nan"),
+                        "signal_pos_fraction": float(np.mean(sig_i >= 0.0)) if sig_i.size else float("nan"),
+                    }
+                    rec.update(self._signal_spectral_meta(sig_i, fs, getattr(self.osc_head.params, "f_min", 0.08), getattr(self.osc_head.params, "f_max", 0.5)))
+                    channel_stats.append(rec)
+                meta["signal_channels"] = channel_stats
+                meta["signal_ndim"] = 2
+                meta["signal_shape"] = [int(base_signal.shape[0]), int(base_signal.shape[1])]
         roi_stats_source = "computed"
         cache_path_used: Optional[str] = None
         roi_stats_t = data.get("roi_stats_t")
@@ -656,7 +773,7 @@ class OscillatorWrappedMethod(MethodBase):
         meta["em_iters"] = np.nan
         meta["em_converged"] = False
         run_head = self.osc_head
-        if em_enabled and base_signal.size > 0:
+        if em_enabled and base_signal.size > 0 and base_signal.ndim == 1:
             try:
                 from core.optimization.em_kalman import EMKalmanTrainer, EMConfig
                 # Per-trial head instance prevents cross-trial parameter leakage.
@@ -688,6 +805,8 @@ class OscillatorWrappedMethod(MethodBase):
             except Exception as e:
                 meta["em_mode_used"] = f"{em_mode_norm}_failed"
                 meta["em_error"] = str(e)
+        elif em_enabled and base_signal.ndim != 1:
+            meta["em_mode_used"] = f"{em_mode_norm}_unsupported_multichannel"
 
         result = run_head.run(base_signal, fs, meta)
         if self.save_payload.get("npz", True):

@@ -20,6 +20,11 @@
 | MAPE (%) | Mean absolute percentage error | z_osc → track_hz → windowed BPM |
 | SNR_Spec (dB) | Spectral signal-to-noise ratio | z_osc spectrum |
 
+**Current implementation note (2026-04-02):**
+- When `eval.use_track=true` and `track_hz` exists, `evaluation_step.py` routes RR metrics through windowed `track_hz`.
+- Base observation families that do not save `track_hz` fall back to the legacy signal-spectral rate path.
+- Spectral-shape metrics (`SNR_Spec`, `KL_Div`, `Entropy_Err`) still use the bandpassed `signal_hat` spectrum.
+
 ### Waveform metrics (Table T4: Unified Waveform Comparison)
 **Policy (locked 2026-04-02):** Option A — Unified Comparison.
 All methods evaluated under identical protocol; output_type distinguishes signal source.
@@ -37,6 +42,16 @@ All methods evaluated under identical protocol; output_type distinguishes signal
 | wMAE | Waveform mean absolute error | signal vs GT waveform (sample-level) |
 | DTW | Dynamic time warping distance (normalised) | signal vs GT waveform |
 
+Interpretation boundary:
+
+- T4 is not an absolute raw-amplitude reconstruction metric.
+- T4 is a band-limited, normalised, alignment-tolerant respiratory-motion
+  fidelity metric.
+- This is intentional because camera proxies and belt signals do not share a
+  physically identical offset and gain space.
+- Therefore T4 supports claims about respiratory morphology fidelity under the
+  observation gap, not claims of exact belt cloning.
+
 **T4 Main Table filter:**
 ```python
 df_main = df[(df["causal_or_smoothed"] == "smoothed") &
@@ -47,11 +62,11 @@ df_main = df[(df["causal_or_smoothed"] == "smoothed") &
 ### Filter diagnostics (Table T6: Calibration)
 | Metric | Description | Source |
 |--------|-------------|--------|
-| NIS mean | Mean normalised innovation squared | Forward pass diagnostics |
-| NIS in-band % | Fraction of NIS within chi-sq bounds | Forward pass diagnostics |
-| pi_t mean | Mean prior trust | q_obs → pi_t mapping |
-| lambda_t < 1 % | Fraction of Student-t downweighted | VB update |
-| nu median | Median degrees of freedom | Kurtosis adaptation |
+| NIS mean | Mean normalised innovation squared | Saved `diagnostics` arrays first, frame logs second |
+| NIS in-band % | Fraction of NIS within chi-sq bounds | Saved `diagnostics` arrays first, frame logs second |
+| pi_t mean | Mean prior trust | Saved `diagnostics` arrays |
+| lambda_t < 1 % | Fraction of Student-t downweighted | Saved `diagnostics` arrays first, frame logs second |
+| nu median | Median degrees of freedom | Saved `diagnostics` arrays |
 
 ## Hard Rules (MUST NOT violate)
 
@@ -71,6 +86,21 @@ df_main = df[(df["causal_or_smoothed"] == "smoothed") &
 - Both z_full and GT are bandpass filtered (`filter_RW`, [0.08, 0.5] Hz) before comparison.
 - Both are then standard z-scored: `(x - mean(x)) / (std(x) + 1e-9)`.
 - This is implemented in `evaluation_step.py` Block 1b (lines ~1127-1135).
+
+Why this is reasonable:
+
+- the time-domain table is meant to compare respiratory waveform structure
+  rather than absolute sensor units
+- baseline/offset mismatch between camera and belt is observation-side, not a
+  failure of the oscillatory morphology itself
+- sample-level CCC/wMAE/DTW therefore assess morphology after removing trivial
+  affine mismatch
+
+What this does not resolve:
+
+- family-specific gain mismatch
+- family-specific lag mismatch beyond the chosen cross-correlation alignment
+- observation semantics that preprocessing cannot fix
 
 ### 3. Alignment
 - Max-lag cross-correlation via `calculate_cross_corr_alignment(est_norm, gt_norm, fs_est, fs_gt)`.
@@ -102,6 +132,14 @@ Block 1b: Unified waveform metrics for ALL methods (CCC/wMAE/DTW).
 - Base/KFstd: output_type='signal_hat' (smoothed)
 - PARH-OSSM: output_type='z_full' (smoothed + causal), 'z_osc' (smoothed supplement)
 - Outputs: `metrics_waveform_raw.csv` with columns: video, method, output_type, causal_or_smoothed, waveform_CCC, waveform_MAE, waveform_DTW, latency_ms
+
+Block 2: Rate metrics route through `track_hz` when available and `eval.use_track=true`.
+- KFstd/PARH-OSSM: windowed `track_hz` vs windowed GT instantaneous frequency
+- Base methods: legacy signal-spectral fallback when no `track_hz` exists
+
+Block 3: Filter diagnostics prefer saved payload diagnostics.
+- PARH-OSSM: `diagnostics.nis_empirical_t`, `diagnostics.lambda_t`, `track_hz`
+- Frame logs remain supplementary for failure flags and any future `freq_std_hz`
 
 ### components/models/heads/parh_ossm.py
 Result dict now contains:

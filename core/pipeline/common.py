@@ -81,6 +81,8 @@ def _method_token(method_name):
 	lname = name.lower()
 	if lname in ('of_model', 'of', 'of_farneback'):
 		return 'of_farneback'
+	if lname in ('of_disp_bridge', 'of_displacement_bridge', 'of_bridge'):
+		return 'of_disp_bridge'
 	if lname == 'dof':
 		return 'dof'
 	if lname.startswith('profile1d'):

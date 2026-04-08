@@ -14,7 +14,17 @@ if os.getcwd() not in sys.path:
 
 from core.utils.config import load_config
 from components.datasets.impl import BP4D, COHFACE, MAHNOB
-from components.observations.methods import OF_Model, DoF_Model, profile1D_Model
+from components.observations.methods import (
+    OF_Model,
+    OFDisplacementBridge_Model,
+    DoF_Model,
+    profile1D_Model,
+    OFP1DQuadraticPair_Model,
+    AssistOFP1DQuadratic_Model,
+    AssistOFBridgeOF_Model,
+    AssistOFBridgeP1DQuadratic_Model,
+    FusionOFP1DQuadratic_Model,
+)
 from core.pipeline.wrapped_method import create_wrapped_method
 from core.pipeline.runner import extract_respiration
 
@@ -29,6 +39,12 @@ def _method_family_key(name: str):
 
     if base in ('of_model', 'of', 'of_farneback'):
         return 10
+    if base in ('of_disp_bridge', 'of_displacement_bridge', 'of_bridge'):
+        return 15
+    if base.startswith('assist_ofbridge_of'):
+        return 18
+    if base.startswith('assist_ofbridge_p1d_quadratic'):
+        return 69
     if base == 'dof':
         return 20
     if base.startswith('profile1d_linear'):
@@ -37,6 +53,12 @@ def _method_family_key(name: str):
         return 40
     if base.startswith('profile1d_cubic'):
         return 50
+    if base.startswith('pair_of_p1d_quadratic'):
+        return 60
+    if base.startswith('assist_of_p1d_quadratic'):
+        return 68
+    if base.startswith('fusion_of_p1d_quadratic'):
+        return 70
     return 99
 
 
@@ -138,6 +160,8 @@ def _build_methods(method_configs, global_cfg=None):
         # Base methods
         elif name.lower() in ('of_model', 'of_farneback', 'of'):
             methods.append(OF_Model())
+        elif name.lower() in ('of_disp_bridge', 'of_displacement_bridge', 'of_bridge'):
+            methods.append(OFDisplacementBridge_Model())
         elif name.lower() == 'dof':
             methods.append(DoF_Model())
         elif name.lower().startswith('profile1d'):
@@ -148,6 +172,20 @@ def _build_methods(method_configs, global_cfg=None):
             else:
                 interp = 'quadratic'
             methods.append(profile1D_Model(interp))
+        elif name.lower() in ('pair_of_p1d_quadratic', 'of_p1d_quadratic_pair', 'stack_of_p1d_quadratic'):
+            methods.append(OFP1DQuadraticPair_Model())
+        elif name.lower() in ('fusion_of_p1d_quadratic', 'of_p1d_quadratic_fusion', 'fused_of_p1d_quadratic'):
+            methods.append(FusionOFP1DQuadratic_Model())
+        elif name.lower() in ('assist_of_p1d_quadratic', 'of_p1d_quadratic_assist', 'assistant_of_p1d_quadratic'):
+            methods.append(AssistOFP1DQuadratic_Model())
+        elif name.lower() in ('assist_ofbridge_of', 'of_bridge_assist_of', 'assistant_ofbridge_of'):
+            methods.append(AssistOFBridgeOF_Model())
+        elif name.lower() in (
+            'assist_ofbridge_p1d_quadratic',
+            'of_bridge_assist_p1d_quadratic',
+            'assistant_ofbridge_p1d_quadratic',
+        ):
+            methods.append(AssistOFBridgeP1DQuadratic_Model())
         else:
             print(f"Warning: Unknown method {name}")
     return methods

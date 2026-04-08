@@ -1,0 +1,7 @@
+family,construction,domain,primary_information,secondary_information,nuisance_risk,current_parh_role,current_strength,PARH_rate_MAE,PARH_rate_R,PARH_waveform_CCC,PARH_waveform_DTW,Base_rate_MAE,Base_waveform_CCC,rate_gap_vs_base,waveform_gap_vs_base
+OF,raw vertical optical-flow surrogate,velocity,oscillatory motion,local phase frequency,medium,helper-heavy rate family,rate-primary,0.510,0.740,0.791,0.403,0.290,0.711,0.220,0.080
+OF_bridge,OF-derived displacement-compatible bridge,displacement,bridged oscillatory displacement,rate plus waveform,medium,rate-oriented constructed family,rate-primary,0.295,0.850,0.777,0.399,0.245,0.685,0.050,0.092
+P1D_lin,linear 1D profile shift surrogate,displacement,fundamental displacement,smooth shift surrogate,medium,conservative displacement family,mixed,0.465,0.715,0.727,0.424,0.335,0.578,0.130,0.150
+P1D_quad,quadratic 1D profile shift surrogate,displacement,harmonic morphology,inhale exhale asymmetry,low,waveform-primary harmonic family,waveform-primary,0.295,0.890,0.855,0.344,0.195,0.811,0.100,0.043
+P1D_cub,cubic 1D profile shift surrogate,displacement,harmonic morphology,inhale exhale asymmetry,low,waveform-primary harmonic family,waveform-primary,0.300,0.870,0.849,0.347,0.220,0.806,0.080,0.043
+DoF,thresholded frame-difference count,energy,thresholded motion energy,burst sensitivity,high,nuisance-limited auxiliary family,nuisance-limited,2.110,0.390,0.571,0.459,2.400,0.438,-0.290,0.134

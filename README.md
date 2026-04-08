@@ -1,151 +1,310 @@
-# ResPyre: 비접촉 호흡 추정 프레임워크 (V3)
+# ResPyre
 
-**ResPyre**는 구조화된 연구를 위한 비접촉 호흡 추정 프레임워크입니다.
-**Components(정의)**와 **Core(실행)**가 분리된 **V3 아키텍처**를 따릅니다.
+ResPyre is a research-oriented framework for contactless respiration estimation from video.
+The codebase is organized around two layers:
 
-## 1. 프로젝트 구조 (Directory Structure)
+- `components/`: dataset adapters, observation extractors, oscillator heads
+- `core/`: pipeline orchestration, evaluation, visualization, metadata/reporting
+
+The current repository is centered on chest-motion respiration experiments and the
+Base / KFstd / PARH-OSSM comparison workflow used in the paper artifacts.
+
+## What Is In Scope
+
+- Datasets: `BP4D`, `COHFACE`, `MAHNOB`
+- Base observation methods: `of_farneback`, `dof`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`
+- Oscillator-wrapped methods via `<base>__<head>` naming
+- Main wired heads: `kfstd`, `parh_ossm`, `simple_bandpass`, `narossm`
+- End-to-end steps from one CLI: `estimate`, `evaluate`/`metrics`, `eda`, `visualize`, `metadata`
+
+Two production configs currently in the repo:
+
+- `configs/cohface_parh_ossm_prod.json`
+- `configs/mahnob_parh_ossm_prod.json`
+
+## Repository Layout
 
 ```text
-/home/gongjae/Projects/resPyre/
-├── components/          # [연구 작업 공간] 모델/데이터 추가
-│   ├── datasets/        # 데이터셋 코드 (BP4D.py, COHFACE.py...)
-│   ├── observations/    # 관측 기법 (OF.py, DoF.py...)
-│   └── models/          # 호흡 추정 알고리즘
-│       ├── heads/       # (Logic) KF, UKF, PLL 등 실제 구현체
-│       ├── core/        # (Base) OscillatorParams, BaseClass
-│       └── autotune/    # (Util) 파라미터 자동 튜닝 로직
-├── core/                # [엔진 구동 공간] 파이프라인 엔진
-│   ├── pipeline/        # Runner, Wrapper
-│   ├── evaluation/      # Metrics, Logging
-│   └── utils/           # Config loader 등
-├── dataset/             # [Data] 원본 데이터셋 루트
-├── setup/               # [Setup] 설치 및 보조 스크립트
-│   ├── setup.sh         # 설치 스크립트
-│   ├── run_optuna.py    # (New) Optuna 최적화 러너
-│   └── generate_metadata.py # (New) 메타데이터 생성기
-├── configs/             # [Config] 실험 파라미터 파일 (*.json)
-└── main.py              # [Main] 통합 실행기
+resPyre/
+├── components/
+│   ├── datasets/          # Dataset loaders and ROI extraction entry points
+│   ├── observations/      # Base motion / profile observation methods
+│   └── models/
+│       ├── core/          # Shared oscillator parameters and base helpers
+│       └── heads/         # KFstd, PARH-OSSM, and other oscillator heads
+├── core/
+│   ├── evaluation/        # Metrics, plotting, frame-log utilities
+│   ├── pipeline/          # Runner, wrapper, evaluation, visualization, metadata
+│   └── utils/             # Config loader and shared utilities
+├── configs/               # Experiment configs
+├── dataset/               # Default dataset root
+├── results/               # Generated run artifacts
+├── setup/                 # Environment bootstrap
+├── tests/                 # Regression and pipeline tests
+└── main.py                # Primary CLI entry point
 ```
 
----
+## Installation
 
-## 2. 실행 흐름 (Execution Flow)
+`setup/setup.sh` creates a minimal paper-build environment for the motion + oscillator stack.
 
 ```bash
-python main.py --config configs/cohface_motion_oscillator.json
-```
-실행 시, 아래 순서로 내부 동작이 진행됩니다.
-
-### 1. 설정 로드 (Configuration)
-`configs/cohface_motion_oscillator.json` 파일을 읽어 실험 이름(`name`), 데이터셋(`COHFACE`), 사용할 방법론(`OF_Farneback__KFstd`)을 파싱합니다.
-
-**Tip: 빠르게 검증하고 싶다면?**
-전체 데이터셋 대신 첫 번째 비디오만 처리하여 동작을 확인하려면 `--debug` 옵션을 사용하세요.
-```bash
-python main.py --config configs/cohface_motion_oscillator.json --debug
+./setup/setup.sh -n resPyre --verify
+conda activate resPyre
 ```
 
-### 2. 추정 단계 (Estimation Phase)
-`core.pipeline.runner`가 구동되며 데이터셋의 각 비디오에 대해 다음 처리를 수행합니다.
-1.  **관측 (Observation)**:
-    *   `components.observations.OF`: 비디오에서 Optical Flow를 추출하여 호흡 관련 수직 움직임 신호 $y(t)$ 생성.
-2.  **전처리 (Preprocessing)**:
-    *   대역 통과 필터 (0.08~0.5Hz), Detrending, Robust Z-score 정규화 수행.
-3.  **공진자 모델링 (Oscillator Modeling)**:
-    *   `components.models.heads.kf_std`: $y(t)$를 입력받아 공진자 상태공간(State-Space)에 매핑.
-    *   **Kalman Filter Update**: 매 프레임마다 관측값과 예측값의 오차(Innovation)를 계산하고, Kalman Gain을 통해 공진자 상태(위상, 진폭)를 실시간 보정.
-4.  **결과 저장**:
-    *   추정된 호흡 파형($\hat{s}$), 호흡률($f$), 상태 변수 등을 `results/.../data/`에 `.pkl` 형태로 저장.
+Installed dependencies include NumPy/SciPy/Pandas/Matplotlib/HDF5 plus the motion stack
+(`opencv`, `mediapipe`, `scikit-image`, `plotly`, `optuna`).
 
-### 3. 평가 단계 (Evaluation Phase)
-`core.pipeline.evaluation_step`이 저장된 `.pkl` 파일을 로드합니다.
-1.  **Ground Truth 로딩**: 데이터셋 원본의 생체 신호(GT)를 로드하고 동기화(Synchronization).
-2.  **지표 산출**:
-    *   **Time Domain**: RMSE, MAE, Pearson Correlation (파형 유사도).
-    *   **Freq Domain**: 호흡률(BPM) 오차.
-3.  **결과 집계**: 모든 비디오의 성능 평균을 `results/.../metrics/`에 저장.
+Additional setup notes are in `setup/README_setup.md`.
 
-### 4. 리포트 (Reporting)
-1.  **시각화 (Visualization)**: `results/.../plots/`에 파형 비교 HTML 그래프 생성.
-2.  **메타데이터 (Metadata)**: 실험 환경(Git Commit, 명령어, 파일 경로 등)을 기록한 `metadata.json` 생성.
-3.  최종 성능 요약(`summary.json`) 저장 후 종료.
+## Dataset Root
 
-### 자주 묻는 질문 (FAQ)
+By default, dataset loaders read from:
 
-**Q. 설정 파일에는 `of_farneback__kfstd`만 있는데 다른 것도 실행되나요?**
-A. 네, `methods` 리스트에 있는 **모든 조합이 순차적으로 실행**됩니다. 예시 설정 파일에는 `dof`, `profile1d` 계열 등 약 15개 알고리즘이 정의되어 있어 전부 수행됩니다.
-
-**Q. "재측정(Re-measurement)"을 하나요?**
-A. Kalman Filter의 **"Update (Correction)" 단계**를 의미합니다. 비디오를 다시 찍는 것이 아니라, 매 프레임 관측값($y_t$)이 들어올 때마다 내부 상태(위상, 주파수)를 보정하는 과정입니다. ResPyre의 모든 모델은 실시간 프레임 단위 Update를 수행합니다.
-
-**Q. 결과 그래프(Plot)는 어디 있나요?**
-A. `configs/*.json`의 `steps`에 `"visualize"`가 포함되어 있다면, 다음 경로에 **HTML 인터랙티브 그래프**가 자동 생성됩니다.
 ```text
-results/experiment_name/<dataset>/plots/
-├── <video_name>_<method>.html
-...
+<repo>/dataset
 ```
-이를 브라우저로 열어 파형과 호흡수 추이(BPM Trace)를 상세히 비교 분석할 수 있습니다.
 
-**Q. 결과 폴더 구조는 어떻게 되나요?**
+To use another dataset root, set:
+
+```bash
+export RESPIRE_DATA_DIR=/path/to/datasets
+```
+
+The expected dataset subdirectories are:
+
+- `dataset/BP4Ddef`
+- `dataset/COHFACE`
+- `dataset/MAHNOB`
+
+## Quick Start
+
+Run a production config:
+
+```bash
+python main.py --config configs/cohface_parh_ossm_prod.json
+python main.py --config configs/mahnob_parh_ossm_prod.json
+```
+
+Run only the first sample from each configured dataset:
+
+```bash
+python main.py --config configs/cohface_parh_ossm_prod.json --debug
+```
+
+Override the results root at runtime:
+
+```bash
+python main.py \
+  --config configs/cohface_parh_ossm_prod.json \
+  --results /tmp/respyre_runs
+```
+
+CLI options currently exposed by `main.py`:
+
+- `--config, -c`: config JSON path
+- `--results, -r`: results directory override
+- `--debug`: limit each dataset to one sample
+
+## Config Model
+
+Configs are loaded through `core/utils/config.py`.
+Relative `results_dir` values are resolved relative to the project root, not the config file directory.
+
+A minimal config looks like this:
+
+```json
+{
+  "name": "cohface_parh_ossm_prod",
+  "results_dir": "results/cohface_parh_ossm_prod",
+  "datasets": [
+    {
+      "name": "COHFACE",
+      "roi": {
+        "chest": {
+          "mp_complexity": 1,
+          "skip_rate": 10
+        }
+      }
+    }
+  ],
+  "methods": [
+    "of_farneback",
+    {
+      "name": "of_farneback__parh_ossm",
+      "params": {
+        "oscillator": {
+          "no_autotune": true,
+          "em_mode": "off",
+          "rv_auto": false,
+          "rv_floor": 0.05,
+          "qx": 0.005,
+          "tau_env": 30.0,
+          "post_smooth_alpha": 0.88
+        }
+      }
+    }
+  ],
+  "preproc": {
+    "robust_zscore": {
+      "enabled": true,
+      "clip": 5.0
+    }
+  },
+  "eval": {
+    "win_size": 30,
+    "stride": 1,
+    "min_hz": 0.08,
+    "max_hz": 0.5
+  },
+  "steps": ["estimate", "metrics", "metadata"]
+}
+```
+
+Key conventions:
+
+- `datasets` entries can be strings or dicts
+- `methods` entries can be strings or dicts
+- Wrapped methods use `<base>__<head>`
+- Method-level oscillator overrides can be passed under `params.oscillator`
+- Global oscillator defaults live in the top-level `oscillator` block
+- Supported step labels are `estimate`, `evaluate`, `metrics`, `eda`, `visualize`, `metadata`
+
+## Execution Flow
+
+### 1. Config load
+
+`main.py` loads the config, normalizes dataset/method entries, resolves `results_dir`,
+builds dataset objects, and instantiates methods.
+
+### 2. Estimation
+
+`core/pipeline/runner.py` loops over each trial and each method:
+
+- dataset loader provides video path and ground truth
+- ROI extraction is triggered lazily per region
+- base observation methods produce a 1D respiratory proxy
+- wrapped methods forward that proxy into an oscillator head
+- results are merged into one per-trial pickle under `data/`
+
+For wrapped methods, `core/pipeline/wrapped_method.py` also attaches:
+
+- ROI-derived quality metadata
+- method/config metadata
+- optional cache-based observation loading
+- optional per-method `.npz` payloads under `aux/`
+
+### 3. Evaluation
+
+`core/pipeline/evaluation_step.py` computes four artifact families:
+
+- time-domain metrics: waveform fidelity on aligned normalized signals
+- frequency-domain metrics: windowed RPM accuracy and spectral-shape statistics
+- filter diagnostics: NIS/failure/calibration summaries from frame logs
+- waveform comparison metrics: unified output comparison for Base / KFstd / PARH workflows
+
+Evaluation settings are persisted to `metrics/eval_settings.json`.
+
+### 4. Optional EDA / visualization
+
+If requested in `steps`, the pipeline can also run:
+
+- `eda`: innovation/frame-log exploratory summaries
+- `visualize`: PNG plots for summary metrics, overlays, traces, and diagnostics
+
+### 5. Metadata and run status
+
+Run bookkeeping is handled in `core/pipeline/metadata_step.py`.
+Each run directory receives `run_status.json`, and `metadata.json` is emitted even when
+the pipeline fails part-way through.
+
+## Results Layout
+
+Single-dataset runs normally resolve to:
+
 ```text
-results/experiment_name/
-├── data/            # 비디오별 추정 결과 (.pkl) - 파형, 주파수 등 포함
-├── metrics/         # 평가 결과 (.json, .csv) - RMSE, MAE 수치
-└── aux/             # (선택) 디버깅용 보조 데이터 (.npz)
+results/<name>/
 ```
 
-### Q. 새로운 **모델**을 만들고 싶어요.
-`components/models/heads/` 폴더에서 작업하세요.
+Multi-dataset runs resolve to:
 
-1.  파일 생성: `components/models/heads/my_model.py`
-2.  작성:
-    ```python
-    from ..core.base import _BaseOscillatorHead
-
-    class MyModel(_BaseOscillatorHead):
-        head_key = "my_model"
-        def run(self, signal, fs, meta=None):
-            # 알고리즘 구현
-            return self._package(signal_hat, track_hz, meta)
-    ```
-3.  등록: `components/models/__init__.py` 에 클래스 추가.
-
-### Q. 새로운 **데이터셋**을 추가하고 싶어요.
-`components/datasets/` 폴더를 사용합니다.
-
-1.  파일 생성: `components/datasets/my_dataset.py`
-2.  작성: `DatasetBase` 상속 후 `load_dataset`, `load_gt` 구현.
-3.  등록: `components/datasets/__init__.py` (선택 사항이나 권장).
-
-### Q. **자동 파라미터 튜닝(EM Algorithm)**은 무엇인가요?
-모든 Kalman Filter 기반 모델(KFStd, UKFFreq)은 기본적으로 **Online EM Learning** 모드가 켜져 있습니다(`em_mode="online"`).
-- **작동 원리**: 실험 시작 전, 입력 신호(Observation) 전체를 스캔하여 EM 알고리즘으로 해당 비디오에 가장 적합한 **Process Noise (Q)**와 **Measurement Noise (R)** 값을 수학적으로 계산합니다.
-- **장점**: 수동 튜닝 없이도 항상 최적(Optimal)에 가까운 필터 성능을 보장합니다.
-
-### Q. **Optuna 최적화**는 어떻게 하나요? (고급 사용자용)
-EM으로 찾은 값 외에 모델의 구조적 파라미터(예: 윈도우 크기 등)를 튜닝하고 싶을 때 사용합니다.
-`core/optimization/run_optuna.py`를 사용합니다. 루트 디렉토리에서 실행하세요.
-```bash
-python core/optimization/run_optuna.py --config configs/cohface_p1d_cubic_tuning.json --n-trials 50
+```text
+results/<name>_<DATASET>/
 ```
 
----
+Typical contents:
 
-## 4. 설치 (Installation)
-
-```bash
-# 환경 생성 및 패키지 설치
-./setup/setup.sh -n respyre_env
-
-# 활성화
-conda activate respyre_env
-eval "$(python setup/auto_profile.py)"
+```text
+results/<run>/
+├── data/                         # per-trial merged pickle payloads
+├── aux/                          # optional method-specific npz/frame-log artifacts
+├── metrics/
+│   ├── eval_settings.json
+│   ├── metrics_time_domain_raw.csv
+│   ├── metrics_freq_domain_raw.csv
+│   ├── metrics_filter_diagnostics_raw.csv
+│   ├── metrics_waveform_raw.csv
+│   └── *_summary.txt / *.pkl / *.csv
+├── plots/                        # visualization outputs when enabled
+├── logs/
+│   ├── config_usage.json
+│   ├── method_quality.csv
+│   ├── method_quality_summary.json
+│   └── frame_log_manifest.json
+├── metadata.json
+└── run_status.json
 ```
 
-## 5. 검증 (Verification)
+Each `data/*.pkl` file contains shared trial metadata plus an `estimates` list for all
+methods run on that trial.
+
+## PARH-OSSM Notes
+
+`components/models/heads/parh_ossm.py` implements the current PARH-OSSM head.
+
+Current behavior relevant to downstream analysis:
+
+- the primary packaged `signal_hat` is the smoothed oscillatory reconstruction
+- PARH additionally stores `z_osc`, `z_full`, causal/smoothed variants, decomposition terms, and diagnostic arrays
+- waveform comparison code treats `z_full` as the main PARH waveform output for paper-style comparison
+
+Repository notes and analysis documents related to this workflow live in:
+
+- `notes/PARH_OSSM_V1_RECONCILIATION.md`
+- `notes/PARH_OSSM_V1_TRUTH_LOCK.md`
+- `analysis/parh_truth_reconciliation.md`
+- `analysis/parh_readiness_gate_final.md`
+
+## Extending The Framework
+
+### Add a dataset
+
+1. Create a new dataset class under `components/datasets/`
+2. Inherit from `DatasetBase`
+3. Implement `load_dataset()`, `load_gt()`, and `extract_ROI()`
+4. Register or import it where needed in `main.py`
+
+### Add an oscillator head
+
+1. Create a new head under `components/models/heads/`
+2. Inherit from `_BaseOscillatorHead`
+3. Implement `run(signal, fs, meta=None)`
+4. Register it in `components/models/__init__.py`
+5. Use it from config via `<base>__<head>`
+
+## Verification
+
+Basic CLI check:
 
 ```bash
 python main.py --help
 ```
-위 명령어가 에러 없이 옵션을 출력하면 설치가 완료된 것입니다.
+
+Run the regression suite:
+
+```bash
+pytest -q
+```
+
+If you only want to validate a config wiring path, `--debug` is the fastest smoke test.

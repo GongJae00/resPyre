@@ -755,8 +755,123 @@ def _instantaneous_freq_hz(sig: np.ndarray, fs: float, min_hz: float, max_hz: fl
     return inst.astype(np.float64)
 
 
+def _windowed_track_bpm(
+    est_track_hz: np.ndarray,
+    gt_inst_hz: np.ndarray,
+    fps_est: float,
+    fs_gt: float,
+    win_size_sec: float,
+    stride_sec: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Window-average estimator/GT frequency tracks on the estimator time base."""
+    est_track = np.asarray(est_track_hz, dtype=np.float64).reshape(-1)
+    gt_track = np.asarray(gt_inst_hz, dtype=np.float64).reshape(-1)
+    if est_track.size < 2 or gt_track.size < 2 or fps_est <= 0 or fs_gt <= 0:
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+
+    t_est = np.arange(est_track.size, dtype=np.float64) / float(fps_est)
+    t_gt = np.arange(gt_track.size, dtype=np.float64) / float(fs_gt)
+    gt_interp = np.interp(t_est, t_gt, gt_track)
+
+    win_frames = max(1, int(round(float(win_size_sec) * float(fps_est))))
+    stride_frames = max(1, int(round(float(stride_sec) * float(fps_est))))
+    if est_track.size < win_frames:
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+
+    starts = np.arange(0, est_track.size - win_frames + 1, stride_frames, dtype=np.int64)
+    if starts.size == 0:
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+
+    est_bpm = np.asarray(
+        [np.nanmean(est_track[s:s + win_frames]) * 60.0 for s in starts],
+        dtype=np.float64,
+    )
+    gt_bpm = np.asarray(
+        [np.nanmean(gt_interp[s:s + win_frames]) * 60.0 for s in starts],
+        dtype=np.float64,
+    )
+    finite = np.isfinite(est_bpm) & np.isfinite(gt_bpm)
+    return est_bpm[finite], gt_bpm[finite]
+
+
+def _diag_array(diag_obj: Optional[Dict], *keys: str) -> Optional[np.ndarray]:
+    """Return the first non-empty diagnostics array matching any key."""
+    if not isinstance(diag_obj, dict):
+        return None
+    for key in keys:
+        arr = diag_obj.get(key)
+        if arr is None:
+            continue
+        out = np.asarray(arr, dtype=np.float64).reshape(-1)
+        if out.size > 0:
+            return out
+    return None
+
+
+def _apply_nis_metrics(
+    rec: Dict[str, float],
+    nis: Optional[np.ndarray],
+    calibration_policy: Optional[Dict[str, float]] = None,
+) -> None:
+    """Populate calibration fields from an NIS sequence."""
+    if nis is None:
+        return
+    nis = np.asarray(nis, dtype=np.float64).reshape(-1)
+    nis = nis[np.isfinite(nis)]
+    if nis.size == 0:
+        return
+
+    cal = calibration_policy if isinstance(calibration_policy, dict) else {}
+    dof = int(max(1, round(float(cal.get("dof", 1.0)))))
+    alpha_strict = float(np.clip(cal.get("alpha_strict", 0.05), 1e-6, 0.5))
+    inband_target = float(np.clip(cal.get("inband_target", 0.95), 0.0, 1.0))
+    mean_tol_relaxed = float(max(0.0, cal.get("mean_tol_relaxed", 0.35)))
+    inband_tol_relaxed = float(max(0.0, cal.get("inband_tol_relaxed", 0.08)))
+    rec["NIS_InBand_Target"] = inband_target
+
+    nis_cal = metrics_lib.nis_calibration_chi2(nis, dof=dof, alpha=alpha_strict)
+    rec["NIS_Mean"] = float(nis_cal.get("mean_nis", np.nan))
+    strict_pass = bool(nis_cal.get("pass_chi2", False))
+    rec["NIS_Pass"] = 1.0 if strict_pass else 0.0
+    rec["NIS_Pass_Strict"] = rec["NIS_Pass"]
+    rec["NIS_pval"] = float(nis_cal.get("pval", np.nan))
+    rec["NIS_CI_Lower"] = float(nis_cal.get("ci_lower", np.nan))
+    rec["NIS_CI_Upper"] = float(nis_cal.get("ci_upper", np.nan))
+    if np.isfinite(rec["NIS_Mean"]):
+        rec["NIS_Mean_DevAbs"] = float(abs(rec["NIS_Mean"] - float(dof)))
+
+    lo = float(chi2.ppf(0.025, dof))
+    hi = float(chi2.ppf(0.975, dof))
+    rec["NIS_InBand"] = float(np.mean((nis >= lo) & (nis <= hi)))
+    rec["NIS_InBand_DevAbs"] = float(abs(rec["NIS_InBand"] - inband_target))
+
+    relaxed_pass = bool(
+        np.isfinite(rec["NIS_Mean_DevAbs"]) and
+        np.isfinite(rec["NIS_InBand_DevAbs"]) and
+        rec["NIS_Mean_DevAbs"] <= mean_tol_relaxed and
+        rec["NIS_InBand_DevAbs"] <= inband_tol_relaxed
+    )
+    rec["NIS_Pass_Relaxed"] = 1.0 if relaxed_pass else 0.0
+    rec["NIS_OverStrict"] = 1.0 if ((not strict_pass) and relaxed_pass) else 0.0
+    rec["NIS_TrueFail"] = 1.0 if ((not strict_pass) and (not relaxed_pass)) else 0.0
+
+
+def _apply_lambda_metrics(rec: Dict[str, float], lam: Optional[np.ndarray]) -> None:
+    """Populate Student-t scale summary fields from lambda_t."""
+    if lam is None:
+        return
+    lam = np.asarray(lam, dtype=np.float64).reshape(-1)
+    lam = lam[np.isfinite(lam)]
+    if lam.size == 0:
+        return
+    rec["Lambda_Mean"] = float(np.nanmean(lam))
+    rec["Lambda_LT1_Frac"] = float(np.nanmean(lam < 1.0))
+    rec["Lambda_LowFrac"] = float(np.nanmean(lam < 0.5))
+
+
 def _compute_filter_diag_record(
     log_obj: Optional[Dict[str, np.ndarray]],
+    payload_diagnostics: Optional[Dict[str, np.ndarray]],
     method_name: str,
     fname: str,
     data_file_rel: str,
@@ -804,6 +919,14 @@ def _compute_filter_diag_record(
         if est_track.size > 1:
             st = metrics_lib.stability_duration(est_track, fs=max(float(fps), 1.0), eps_hz=0.02)
             rec["Stability_Sec"] = float(st.get("max_stable_sec", np.nan))
+            rec["n_frames"] = float(est_track.size)
+
+    _apply_nis_metrics(
+        rec,
+        _diag_array(payload_diagnostics, "nis_empirical_t", "nis"),
+        calibration_policy=calibration_policy,
+    )
+    _apply_lambda_metrics(rec, _diag_array(payload_diagnostics, "lambda_t"))
 
     if log_obj is None:
         return rec
@@ -832,49 +955,13 @@ def _compute_filter_diag_record(
     if fail_vals:
         rec["Fail_Total"] = float(max(fail_vals))
 
-    cal = calibration_policy if isinstance(calibration_policy, dict) else {}
-    dof = int(max(1, round(float(cal.get("dof", 1.0)))))
-    alpha_strict = float(np.clip(cal.get("alpha_strict", 0.05), 1e-6, 0.5))
-    inband_target = float(np.clip(cal.get("inband_target", 0.95), 0.0, 1.0))
-    mean_tol_relaxed = float(max(0.0, cal.get("mean_tol_relaxed", 0.35)))
-    inband_tol_relaxed = float(max(0.0, cal.get("inband_tol_relaxed", 0.08)))
-    rec["NIS_InBand_Target"] = inband_target
-
     nis = col("nis")
-    if nis is not None and np.isfinite(nis).any():
-        nis_cal = metrics_lib.nis_calibration_chi2(nis, dof=dof, alpha=alpha_strict)
-        rec["NIS_Mean"] = float(nis_cal.get("mean_nis", np.nan))
-        strict_pass = bool(nis_cal.get("pass_chi2", False))
-        rec["NIS_Pass"] = 1.0 if strict_pass else 0.0
-        rec["NIS_Pass_Strict"] = rec["NIS_Pass"]
-        rec["NIS_pval"] = float(nis_cal.get("pval", np.nan))
-        rec["NIS_CI_Lower"] = float(nis_cal.get("ci_lower", np.nan))
-        rec["NIS_CI_Upper"] = float(nis_cal.get("ci_upper", np.nan))
-        if np.isfinite(rec["NIS_Mean"]):
-            rec["NIS_Mean_DevAbs"] = float(abs(rec["NIS_Mean"] - float(dof)))
-
-        nis_f = nis[np.isfinite(nis)]
-        if nis_f.size > 0:
-            lo = float(chi2.ppf(0.025, dof))
-            hi = float(chi2.ppf(0.975, dof))
-            rec["NIS_InBand"] = float(np.mean((nis_f >= lo) & (nis_f <= hi)))
-            rec["NIS_InBand_DevAbs"] = float(abs(rec["NIS_InBand"] - inband_target))
-
-        relaxed_pass = False
-        if np.isfinite(rec["NIS_Mean_DevAbs"]) and np.isfinite(rec["NIS_InBand_DevAbs"]):
-            relaxed_pass = bool(
-                rec["NIS_Mean_DevAbs"] <= mean_tol_relaxed and
-                rec["NIS_InBand_DevAbs"] <= inband_tol_relaxed
-            )
-        rec["NIS_Pass_Relaxed"] = 1.0 if relaxed_pass else 0.0
-        rec["NIS_OverStrict"] = 1.0 if ((not strict_pass) and relaxed_pass) else 0.0
-        rec["NIS_TrueFail"] = 1.0 if ((not strict_pass) and (not relaxed_pass)) else 0.0
+    if not np.isfinite(rec["NIS_Mean"]) and nis is not None and np.isfinite(nis).any():
+        _apply_nis_metrics(rec, nis, calibration_policy=calibration_policy)
 
     lam = col("lambda_t")
-    if lam is not None and np.isfinite(lam).any():
-        rec["Lambda_Mean"] = float(np.nanmean(lam))
-        rec["Lambda_LT1_Frac"] = float(np.nanmean(lam < 1.0))
-        rec["Lambda_LowFrac"] = float(np.nanmean(lam < 0.5))
+    if not np.isfinite(rec["Lambda_Mean"]) and lam is not None and np.isfinite(lam).any():
+        _apply_lambda_metrics(rec, lam)
 
     # Coverage requires track + per-frame sigma + GT instantaneous frequency.
     freq_std = col("freq_std_hz")
@@ -938,6 +1025,7 @@ def run_evaluation(
                 f"Invalid gating_scope '{gating_scope}'. Allowed values: ['evaluation_only', 'filter_time']"
             )
         calibration_policy = _resolve_calibration_policy(eval_cfg)
+        use_track_for_rate = bool((eval_cfg or {}).get("use_track", False))
 
         # Persist evaluation settings + config usage for audit/metadata.
         config_usage = _build_config_usage(eval_cfg, gating, gating_scope=scope)
@@ -1071,12 +1159,13 @@ def run_evaluation(
                 
                 if len(est_aligned) > 10: # Ensure valid length
                     # Compute Waveform Metrics
-                    # CCC
-                    ccc_val = metrics_lib.LinCorr(est_aligned, gt_aligned_t)
-                    # MAE / RMSE (on Z-scored aligned signals)
-                    errs_time = getErrors(est_aligned, gt_aligned_t, None, None, ['MAE', 'RMSE'])
-                    mae_time = errs_time[0]
-                    rmse_time = errs_time[1]
+                    # Use direct waveform metrics here as well. The older
+                    # BPM-oriented helpers (`LinCorr`, `getErrors`) work on the
+                    # aligned arrays but obscure the semantics and introduce
+                    # rounding meant for rate tables.
+                    ccc_val = waveform_ccc(est_aligned, gt_aligned_t)
+                    mae_time = waveform_mae(est_aligned, gt_aligned_t)
+                    rmse_time = float(np.sqrt(np.mean((est_aligned - gt_aligned_t) ** 2)))
                     # SNR (Time Domain)
                     residual = gt_aligned_t - est_aligned
                     p_sig = np.sum(gt_aligned_t**2)
@@ -1182,19 +1271,31 @@ def run_evaluation(
                 # Use Sliding Window (30s window, 1s stride)
                 # We need to re-window both GT and Est with the same parameters
                 
-                # GT RPM Sequence
+                # GT/estimate sequences for legacy signal-based spectral routing.
                 gt_win, t_gt = sig_windowing(gt_filt, fs_gt, win_size, stride=stride)
                 gt_rpms = sig_to_RPM(gt_win, fs_gt, int(win_size/1.5), min_hz, max_hz).reshape(-1)
-                
-                # Est RPM Sequence
                 est_win, t_est = sig_windowing(est_filt, fps, win_size, stride=stride)
                 est_rpms = sig_to_RPM(est_win, fps, int(win_size/1.5), min_hz, max_hz).reshape(-1)
-                
-                # Align RPM sequences by time centers
-                min_len_r = min(len(gt_rpms), len(est_rpms))
+
+                rate_source = 'signal_spectral'
+                if use_track_for_rate and est_track_hz.size > 0:
+                    est_rpm_seq, gt_rpm_seq = _windowed_track_bpm(
+                        est_track_hz,
+                        gt_inst_hz,
+                        fps_est=float(fps),
+                        fs_gt=float(fs_gt),
+                        win_size_sec=float(win_size),
+                        stride_sec=float(stride),
+                    )
+                    rate_source = 'track_hz'
+                else:
+                    est_rpm_seq = est_rpms
+                    gt_rpm_seq = gt_rpms
+
+                min_len_r = min(len(gt_rpm_seq), len(est_rpm_seq))
                 if min_len_r > 5: # Need enough points for stats
-                    gt_rpm_seq = gt_rpms[:min_len_r]
-                    est_rpm_seq = est_rpms[:min_len_r]
+                    gt_rpm_seq = gt_rpm_seq[:min_len_r]
+                    est_rpm_seq = est_rpm_seq[:min_len_r]
                     
                     # Compute Rate Metrics
                     errs_freq = getErrors(est_rpm_seq, gt_rpm_seq, None, None, ['MAE', 'RMSE', 'MAPE', 'PearsonR'])
@@ -1236,6 +1337,7 @@ def run_evaluation(
                     
                     rec_freq = {
                         'video': fname, 'method': method_name,
+                        'rate_source': rate_source,
                         'MAE': errs_freq[0], 'RMSE': errs_freq[1], 'MAPE': errs_freq[2], 
                         'PearsonR': errs_freq[3],
                         'SNR_Spec': avg_spec_snr,
@@ -1267,6 +1369,7 @@ def run_evaluation(
 
                 diag_rec = _compute_filter_diag_record(
                     log_obj=log_obj,
+                    payload_diagnostics=payload.get('diagnostics') if isinstance(payload.get('diagnostics'), dict) else None,
                     method_name=method_name,
                     fname=fname,
                     data_file_rel=data_file_rel,
@@ -1505,9 +1608,11 @@ def _method_sort_key(method_name: str):
     name = _normalize(method_name)
     base = name.split('__', 1)[0] if '__' in name else name
 
-    # family order: OF -> DoF -> profile1d linear -> quadratic -> cubic
+    # family order: OF -> DoF -> profile1d linear -> quadratic -> cubic -> pair/fusion
     if base in ('of_model', 'of', 'of_farneback'):
         family = 10
+    elif base in ('of_disp_bridge', 'of_displacement_bridge', 'of_bridge'):
+        family = 15
     elif base == 'dof':
         family = 20
     elif base.startswith('profile1d_linear'):
@@ -1516,6 +1621,12 @@ def _method_sort_key(method_name: str):
         family = 40
     elif base.startswith('profile1d_cubic'):
         family = 50
+    elif base.startswith('pair_of_p1d_quadratic'):
+        family = 60
+    elif base.startswith('assist_of_p1d_quadratic'):
+        family = 68
+    elif base.startswith('fusion_of_p1d_quadratic'):
+        family = 70
     else:
         family = 99
 

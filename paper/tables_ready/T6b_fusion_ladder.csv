@@ -1,0 +1,7 @@
+dataset,block,rung,method,family,MAE,RMSE,PearsonR,waveform_CCC,waveform_MAE,waveform_DTW
+COHFACE,T3_rate,best_single_base,profile1D quadratic,P1D_quad,0.1950,0.2700,0.9500,,,
+COHFACE,T3_rate,best_single_kfstd,of_disp_bridge__kfstd,OF_bridge,0.2600,0.3350,0.8350,,,
+COHFACE,T3_rate,best_single_parh,profile1d_quadratic__parh_ossm,P1D_quad,0.2950,0.3700,0.8900,,,
+COHFACE,T4_waveform,best_single_base,profile1D quadratic,P1D_quad,,,,0.8114,0.4837,0.3676
+COHFACE,T4_waveform,best_single_kfstd,profile1d_quadratic__kfstd,P1D_quad,,,,0.8530,0.4157,0.3428
+COHFACE,T4_waveform,best_single_parh,profile1d_quadratic__parh_ossm,P1D_quad,,,,0.8547,0.4247,0.3442

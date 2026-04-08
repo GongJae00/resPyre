@@ -212,6 +212,8 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
             d.pop('roi_intensity_snr_db', None)
             d.pop('roi_stats_source', None)
             d.pop('roi_stats_cache_path', None)
+            d.pop('_gray_chest_rois', None)
+            d.pop('_obs_signal_cache', None)
             d['chest_rois'] = []
             d['face_rois'] = []
 

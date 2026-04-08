@@ -38,6 +38,8 @@ class _WrappedLikeMethod:
         assert data.get("chest_rois"), "wrapped method called before ROI preparation"
         # Simulate wrapped method side-channel metadata for cleanup verification.
         data["roi_stats_t"] = [{"roi_mean": 1.0}]
+        data["_gray_chest_rois"] = [np.ones((8, 8), dtype=np.uint8)]
+        data["_obs_signal_cache"] = {"obs_of.npy": np.zeros(10, dtype=np.float32)}
         data["roi_intensity_mean"] = 1.0
         data["roi_intensity_std"] = 0.1
         data["roi_intensity_snr_db"] = 20.0
@@ -103,6 +105,8 @@ def test_runner_prepares_roi_before_wrapped_method():
     assert "roi_intensity_snr_db" not in sample
     assert "roi_stats_source" not in sample
     assert "roi_stats_cache_path" not in sample
+    assert "_gray_chest_rois" not in sample
+    assert "_obs_signal_cache" not in sample
 
 
 def test_runner_skips_roi_extraction_for_cache_only_wrapped_method():

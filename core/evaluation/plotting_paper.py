@@ -157,10 +157,14 @@ def _method_sort_key(method_name: str):
     """Hierarchical sort key for grouping methods."""
     name = str(method_name).lower().replace(' ', '_')
     if 'of_farneback' in name or 'of_model' in name: family = 10
+    elif 'of_disp_bridge' in name or 'of_displacement_bridge' in name or 'of_bridge' in name: family = 15
     elif 'dof' in name: family = 20
     elif 'profile1d_linear' in name: family = 30
     elif 'profile1d_quadratic' in name: family = 40
     elif 'profile1d_cubic' in name: family = 50
+    elif 'pair_of_p1d_quadratic' in name: family = 60
+    elif 'assist_of_p1d_quadratic' in name: family = 68
+    elif 'fusion_of_p1d_quadratic' in name: family = 70
     else: family = 99
 
     if '__kfstd' in name:

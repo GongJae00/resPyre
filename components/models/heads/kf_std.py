@@ -11,13 +11,41 @@ class oscillator_KFstd(_BaseOscillatorHead):
         p = self.params
         fs = fs or p.fs
         self._maybe_apply_autotune(meta)
-        y = self._preprocess(signal, fs)
-        n = y.size
+        signal_arr = np.asarray(signal, dtype=np.float64)
+        multichannel = signal_arr.ndim == 2
+        if multichannel:
+            channels = [self._preprocess(np.asarray(signal_arr[i], dtype=np.float64).reshape(-1), fs) for i in range(signal_arr.shape[0])]
+            n = min((ch.size for ch in channels), default=0)
+            if n > 0:
+                y = np.vstack([ch[:n] for ch in channels])
+                ref = y[0]
+                for i in range(1, y.shape[0]):
+                    if y[i].size == ref.size and y[i].size > 8:
+                        corr = float(np.corrcoef(ref, y[i])[0, 1])
+                        if np.isfinite(corr) and corr < 0.0:
+                            y[i] = -y[i]
+            else:
+                y = np.zeros((signal_arr.shape[0], 0), dtype=np.float64)
+        else:
+            y = self._preprocess(signal_arr, fs)
+            n = y.size
         if n == 0:
-            return self._package(y, np.array([], dtype=np.float64), meta)
+            empty_sig = np.array([], dtype=np.float64) if not multichannel else np.zeros((signal_arr.shape[0], 0), dtype=np.float64)
+            return self._package(empty_sig, np.array([], dtype=np.float64), meta)
 
         dt = 1.0 / fs
-        freq0 = self._coarse_freq(y, fs)
+        init_len = min(n, max(int(10.0 * fs), int(4.0 * fs)))
+        if multichannel:
+            freq_candidates = []
+            for i in range(y.shape[0]):
+                yi = np.asarray(y[i, :init_len], dtype=np.float64)
+                if yi.size:
+                    fi = self._coarse_freq(yi, fs)
+                    if np.isfinite(fi):
+                        freq_candidates.append(float(fi))
+            freq0 = float(np.median(freq_candidates)) if freq_candidates else float(self._coarse_freq(y[0, :init_len], fs))
+        else:
+            freq0 = self._coarse_freq(y[:init_len], fs)
         freq0 = float(np.clip(freq0, p.f_min, p.f_max))
         omega0 = 2.0 * np.pi * freq0
         eff = self._effective_params(fs, meta)
@@ -37,9 +65,11 @@ class oscillator_KFstd(_BaseOscillatorHead):
         cos_w = np.cos(omega0 * dt)
         sin_w = np.sin(omega0 * dt)
         F = rho * np.array([[cos_w, -sin_w], [sin_w, cos_w]], dtype=np.float64)
-        C = np.array([[1.0, 0.0]], dtype=np.float64)
+        m_obs = int(y.shape[0]) if multichannel else 1
+        C = np.zeros((m_obs, 2), dtype=np.float64)
+        C[:, 0] = 1.0
         Q = qx * np.eye(2, dtype=np.float64)
-        R = np.array([[rv]], dtype=np.float64)
+        R = rv * np.eye(m_obs, dtype=np.float64)
 
         x_filt = np.zeros((n, 2), dtype=np.float64)
         P_filt = np.zeros((n, 2, 2), dtype=np.float64)
@@ -58,14 +88,18 @@ class oscillator_KFstd(_BaseOscillatorHead):
             x_pred[t] = x
             P_pred[t] = P
 
-            # Update (standard linear Kalman filter for 1D observation)
-            y_t = y[t]
-            S = float(C @ P @ C.T + R)
-            if S <= 1e-12 or not np.isfinite(S):
-                S = 1e-12
-            K = (P @ C.T) / S
-            innovation = float(y_t - (C @ x)[0])
-            x = x + (K[:, 0] * innovation)
+            # Update (standard linear Kalman filter for 1D / stacked observation)
+            y_t = np.asarray(y[:, t], dtype=np.float64) if multichannel else np.array([float(y[t])], dtype=np.float64)
+            y_pred = C @ x
+            innovation = y_t - y_pred
+            S = C @ P @ C.T + R
+            S = 0.5 * (S + S.T)
+            try:
+                S_inv = np.linalg.pinv(S)
+            except np.linalg.LinAlgError:
+                S_inv = np.linalg.pinv(S + 1e-9 * np.eye(m_obs, dtype=np.float64))
+            K = P @ C.T @ S_inv
+            x = x + K @ innovation
             P = (I - K @ C) @ P
             P = 0.5 * (P + P.T)
             for i in range(2):
@@ -113,8 +147,12 @@ class oscillator_KFstd(_BaseOscillatorHead):
 
         meta_payload = dict(meta or {})
         meta_payload["f0"] = freq0
+        meta_payload["f0_raw"] = freq0
         meta_payload["freq_source"] = "kf_phase"
+        meta_payload["warmup_frames"] = init_len
         meta_payload["post_smooth_alpha_base"] = alpha_base
         meta_payload["post_smooth_alpha_used"] = alpha_used
+        meta_payload["observation_mode"] = "stacked_multichannel" if multichannel else "single_channel"
+        meta_payload["n_observation_channels"] = int(m_obs)
         meta_payload.setdefault("is_constant_track", False)
         return self._package(x1, track_hz, meta_payload)

@@ -47,6 +47,8 @@ paper/*.synctex.gz
 
 # --- Results (large data: PKL, NPZ, plots) ---
 results/
+**/obs_*.npy
+**/obs_roi_stats_v1.npz
 
 # --- Logs ---
 *.log
