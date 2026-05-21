@@ -162,11 +162,12 @@ Discussion interprets the remaining observation bottleneck.
 
 \section*{Methods}
 \subsection*{Framework overview and observation-to-state topology}
-We define the physiological state decomposition, the adaptive observation law,
-the fixed motion-observation classes, and the evaluation protocol used to
-generate the reported tables and figures. Figure~\ref{fig:architecture}
-provides the visual overview before the equations specify how the same topology
-is evaluated.
+We define the method in the same left-to-right order as the topology in
+Figure~\ref{fig:architecture}: camera-derived respiratory evidence,
+candidate views and label-free summaries, adaptive observation law and
+role-specific weights, the PARH-OSSM latent respiratory state, decoupled
+readouts, diagnostics, and finally the evaluation protocol used to generate
+the reported tables and figures.
 
 Figure~\ref{fig:architecture} summarizes the observation-to-state topology.
 
@@ -201,156 +202,68 @@ and adds $z_{\mathrm{morph}}$ only when waveform morphology is the target. The
 diagnostic outputs are therefore used to audit observability and consistency,
 not to create an unreported feedback path.
 
-The following subsections specify the latent state, role-aligned readouts,
-label-free reliability law, observation construction, datasets, and
-reproducibility checks.
+The following subsections use the same hierarchy. They first define how video
+is converted into a shared pool of candidate respiratory evidence, then how
+label-free reliability and role weights route that evidence into the latent
+state, and finally how the two readouts and diagnostics are evaluated.
 
-\subsection*{State representation}
-PARH-OSSM uses the latent state
-\begin{equation}
-\state_t =
-\left[
-h_{c,t}^{(1)},\,
-h_{s,t}^{(1)},\,
-h_{c,t}^{(2)},\,
-h_{s,t}^{(2)},\,
-b_t,\,
-\dot{b}_t,\,
-r_t,\,
-\dot{r}_t
-\right]^\top,
-\end{equation}
-where $(h^{(1)}, h^{(2)})$ are the fundamental and second-harmonic oscillatory
-components, $(b_t,\dot{b}_t)$ is a slow baseline block, and
-$(r_t,\dot{r}_t)$ is an aperiodic residual block. The observation equation is
-\begin{equation}
-\obs_t = H \state_t + v_t, \qquad
-H = [1,\,0,\,1,\,0,\,1,\,0,\,1,\,0].
-\end{equation}
+\subsection*{Camera-derived respiratory evidence and fixed observation bank}
+The most important methodological lesson is that the camera-derived observation
+is part of the model, not just a preprocessing choice. Supplementary Table S2
+therefore summarizes the eight active single-observation routes in a fixed
+display order: optical flow, optical-flow bridge, depth-of-flow, depth-of-flow
+bridge, linear Profile1D, quadratic Profile1D, cubic Profile1D, and Profile1D
+consensus. This order is a table and figure convention, not a sequential
+pipeline and not a claim that one observation is transformed into the next.
 
-The superscript identifies the harmonic order. The first harmonic represents
-the dominant respiratory rhythm, while the second harmonic represents
-within-cycle asymmetry such as unequal inspiration and expiration shapes. The
-subscripts $c$ and $s$ denote real quadrature coordinates, not separate
-physiological measurements; the sine coordinate stores phase so that the
-oscillator can rotate smoothly through amplitude changes and short periods of
-weak observation support. The baseline pair $(b_t,\dot b_t)$ captures slow
-projection or posture drift, and the residual pair $(r_t,\dot r_t)$ captures
-aperiodic respiratory structure that is not well represented by a narrow-band
-oscillator. The default observation row $H$ states that a scalar
-camera-derived motion cue may contain contributions from the oscillatory,
-baseline, and residual coordinates. In the adaptive observation law, the
-effective trust in that cue is then modulated rather than assumed to be fixed.
+Three contrasts are central. First, raw optical flow and the optical-flow
+bridge are both flow-derived, but they are not interchangeable. The raw signal
+is closer to a velocity-like cue, whereas the bridge converts that cue toward a
+displacement-compatible respiratory trajectory and is therefore mainly useful
+for timing support in the current framework. Second, raw depth-of-flow and the
+depth-of-flow bridge are also distinct. The raw signal is a burst-like
+motion-energy count, whereas the bridge recovers only a coarse signed
+motion-centroid trajectory. Third, the Profile1D branch is explicitly split
+into a conservative fundamental route, two harmonic morphology routes, and a
+consensus route that checks whether the linear, quadratic, and cubic profile
+interpretations agree.
+\FloatBarrier
 
-The harmonic blocks use rotation-matrix dynamics conditioned on an external
-frequency estimate, the baseline block follows a constant-velocity model, and
-the residual block follows a damped random walk. Because the model remains
-linear conditional on the external frequency, standard Kalman filtering and
-Rauch--Tung--Striebel smoothing remain valid~\cite{Kalman1960,Sarkka2013,RauchTungStriebel1965}.
-Thus PARH-OSSM is not a filter-free alternative to Kalman filtering. Its
-contribution is the physiological state decomposition and observation-aware
-trust law wrapped around that inference machinery, whereas OSSM-KF removes
-those PARH-specific components and keeps only the fixed oscillator comparator.
-The derivative coordinates $\dot{b}_t$ and $\dot{r}_t$ are inertial state
-coordinates rather than camera channels: $\dot{b}_t$ allows slow drift to
-continue smoothly instead of being repeatedly absorbed by the oscillator, and
-$\dot{r}_t$ allows non-harmonic respiratory residual structure to persist
-briefly instead of being treated as independent frame noise.
+These constructed observations are included for information content and
+coordinate compatibility, not for cosmetic smoothing. When a constructed route
+fails, that failure is also evidence: it indicates that the current camera
+observation set does not contain a clean enough respiratory projection for a
+universal waveform claim.
 
-\subsection*{Oscillatory and full-waveform readouts}
-PARH-OSSM uses two readouts derived directly from the latent coordinates, and
-we name the non-oscillatory complement explicitly:
-\begin{equation}
-z_{\mathrm{osc},t}
-    = h_{c,t}^{(1)} + h_{c,t}^{(2)},
-\qquad
-z_{\mathrm{morph},t}
-    = b_t + r_t,
-\qquad
-z_{\mathrm{full},t}
-    = z_{\mathrm{osc},t} + z_{\mathrm{morph},t}.
-\end{equation}
-The added symbol $z_{\mathrm{morph}}$ is not a third exported performance
-signal. It names the baseline--residual complement that turns the oscillatory
-anchor into the full respiratory waveform. The oscillatory readout
-$z_{\mathrm{osc}}$ carries the dominant rhythm and is the natural source for
-rate and breath-timing analysis. The full readout $z_{\mathrm{full}}$ adds slow
-trajectory drift and aperiodic respiratory departures back to that anchor and is
-therefore the waveform compared against the reference morphology. Both causal
-and smoothed versions of the exported readouts are retained as trial-level
-outputs.
+\subsection*{Candidate evidence views and observation construction}
+The eight motion-observation classes above are instantiated as persistent
+single-observation routes for diagnosis and for the representative
+baseline/comparator rows. The integrated PARH-OSSM readout reported in
+Tables~\ref{tab:cohface_t3} and \ref{tab:cohface_t4} uses the final
+observation-law package rather than a post hoc best route. Raw
+Farneb\"ack optical flow is computed from the median vertical component of dense
+motion between adjacent chest-ROI frames~\cite{Farneback2003}; the bridge,
+depth-of-flow, and Profile1D variants then provide the complementary
+construction routes summarized in Supplementary Table S2.
 
-This decomposition is central to the study design because rate, breath timing,
-and trajectory morphology are not the same target. A camera cue can preserve a
-dominant respiratory frequency while losing the trajectory shape, or it can
-carry morphology while introducing scale, lag, or residual content that harms
-rate estimation. For that reason, PARH-OSSM does not force all evaluations
-through one waveform-derived objective. Instead, the model asks whether a video
-contains enough oscillatory information for rate and enough structured
-respiratory-form information for waveform analysis.
+For that reason, preprocessing is part of the observation definition rather
+than a generic denoising block. The raw extractor output, the inference-path
+signal, and the helper-path signal all have different meanings. PARH-OSSM
+keeps raw, bridged, band-limited, sign-coded, current, and helper views
+separate until the adaptive observation law estimates reliability and nuisance.
+The integrated readout is therefore not a hard choice of one observation for
+all clips. It is a bounded integration of candidate evidence into a shared
+respiratory state, with diagnostics that expose when the available evidence is
+too weak. The COHFACE evidence also shows why constructed observations deserve
+to be treated as first-class measurement routes: raw optical flow and the
+optical-flow bridge invert the usual rate-versus-waveform ranking across the
+same underlying source, which would be impossible to explain if observation
+construction were merely cosmetic preprocessing.
 
-\subsection*{Why this decomposition is physiology-aligned}
-The model structure is not arbitrary. A second harmonic is included because
-respiratory motion is usually asymmetric over each breath cycle even when the
-dominant rate is stable; forcing that asymmetry into a purely sinusoidal state
-invites harmonic confusion and pushes morphology into innovation residuals.
-The baseline block is needed because camera-derived chest motion carries slow
-projection drift and posture-related movement that are not themselves the
-respiratory rhythm. The residual block exists for a different reason: it is the
-state-space location where irregular respiratory content should live when the
-oscillator support weakens, including amplitude transients or breath-shape
-departures that are still respiratory but not well explained by the harmonic
-submodel.
+The failure-case panels reported in Results are drawn from these persistent
+manifests rather than manual inspection.
 
-This decomposition also clarifies the evaluation policy. Rate metrics should be
-computed from $z_{\mathrm{osc}}$, because rate is an oscillatory quantity.
-Waveform-fidelity metrics should be computed from $z_{\mathrm{full}}$, because
-the full motion trace is the object of comparison when baseline and aperiodic
-content matter. The explicit complement $z_{\mathrm{morph}}=b_t+r_t$ makes that
-separation visible: it is the morphology/trajectory content that must be added
-to the oscillator before waveform fidelity is evaluated. That separation is one
-of the central conceptual
-distinctions from single-output respiratory estimators, where rate and waveform
-interpretations are easily conflated. It also follows directly from the
-state-space design principle above: once the state variables are assigned
-distinct physiological roles, the observation targets and evaluation metrics
-must remain aligned with those roles rather than collapsing everything back to
-a single generic output.
-
-To make the shared-versus-adaptive observation story testable at the state
-interface, the system also records diagnostic observation summaries,
-bootstrap latent drives for the harmonic, baseline, and residual blocks,
-local adaptor parameters, and a global observation row in the
-adaptive-resonator diagnostic path. These objects are not primary performance
-outputs. They are retained so that the reader can inspect how the observation
-interface drives the latent states. Supplementary Fig. S6 visualizes these
-traces, and Supplementary Fig. S7 summarizes confidence and agreement
-diagnostics that motivate separate oscillatory and full-waveform readouts. Both
-figures are mechanistic diagnostics rather than competing final-package model
-claims.
-
-\subsection*{Disentangled adaptation}
-PARH-OSSM separates three internal scores:
-\begin{equation}
-q_{\mathrm{obs},t} \rightarrow \pi_t,\qquad
-q_{\mathrm{dyn},t} \rightarrow Q_{\mathrm{osc},t},\qquad
-1-q_{\mathrm{osc},t} \rightarrow Q_{\mathrm{aper},t}.
-\end{equation}
-Here $q_{\mathrm{obs},t}$ summarizes how much the current observation should be
-trusted before seeing the innovation, and it is converted to the prior trust
-term $\pi_t$. The score $q_{\mathrm{dyn},t}$ controls how freely the
-oscillatory state is allowed to move, and $q_{\mathrm{osc},t}$ separates
-oscillatory support from aperiodic or residual content. The effective
-measurement variance is then adjusted through
-\(
-\Reff = R_t / \pi_t
- \),
-while Student-$t$ downweighting remains a posterior safeguard through
-$\lambda_t$. Mehra-style adaptive measurement noise
-remains the primary scale-setting mechanism~\cite{Mehra1970}; the quality
-scores modulate the prior trust and process noise around that baseline.
-
-\subsection*{Label-free reliability calibration}
+\subsection*{Adaptive observation law and label-free summaries}
 The adaptive observation law is not a hard selector that chooses the best
 observation after seeing the respiratory reference. For each target video, the
 pipeline first constructs multiple motion-observation classes and several
@@ -414,7 +327,151 @@ baseline, comparator, and proposed rows traceable; target labels are not used
 to choose a trial's best observation or waveform source in the evaluated
 system.
 
-\subsection*{Verified model scope}
+\subsection*{Role-specific weights and adaptive state scales}
+The role-specific weight matrix $W_t$ is the interface between the candidate
+evidence pool and the latent state. Its rows correspond to candidate
+camera-derived views, and its columns correspond to respiratory roles:
+fundamental oscillatory drive, second-harmonic asymmetry, baseline/projection
+drift, and aperiodic residual structure. A strong view can therefore support
+one role without being forced to support every readout. This is why the
+adaptive law is a responsibility assignment, not a source selector: the same
+candidate evidence pool can be reused differently for rate, morphology, and
+diagnostics.
+
+After those role responsibilities are defined, PARH-OSSM separates three
+internal scores that control trust and state flexibility:
+\begin{equation}
+q_{\mathrm{obs},t} \rightarrow \pi_t,\qquad
+q_{\mathrm{dyn},t} \rightarrow Q_{\mathrm{osc},t},\qquad
+1-q_{\mathrm{osc},t} \rightarrow Q_{\mathrm{aper},t}.
+\end{equation}
+Here $q_{\mathrm{obs},t}$ summarizes how much the current observation should be
+trusted before seeing the innovation, and it is converted to the prior trust
+term $\pi_t$. The score $q_{\mathrm{dyn},t}$ controls how freely the
+oscillatory state is allowed to move, and $q_{\mathrm{osc},t}$ separates
+oscillatory support from aperiodic or residual content. The effective
+measurement variance is then adjusted through
+\(
+\Reff = R_t / \pi_t
+ \),
+while Student-$t$ downweighting remains a posterior safeguard through
+$\lambda_t$. Mehra-style adaptive measurement noise
+remains the primary scale-setting mechanism~\cite{Mehra1970}; the quality
+scores modulate the prior trust and process noise around that baseline.
+
+\subsection*{PARH-OSSM latent respiratory state and inference}
+PARH-OSSM uses the latent state
+\begin{equation}
+\state_t =
+\left[
+h_{c,t}^{(1)},\,
+h_{s,t}^{(1)},\,
+h_{c,t}^{(2)},\,
+h_{s,t}^{(2)},\,
+b_t,\,
+\dot{b}_t,\,
+r_t,\,
+\dot{r}_t
+\right]^\top,
+\end{equation}
+where $(h^{(1)}, h^{(2)})$ are the fundamental and second-harmonic oscillatory
+components, $(b_t,\dot{b}_t)$ is a slow baseline block, and
+$(r_t,\dot{r}_t)$ is an aperiodic residual block. The observation equation is
+\begin{equation}
+\obs_t = H \state_t + v_t, \qquad
+H = [1,\,0,\,1,\,0,\,1,\,0,\,1,\,0].
+\end{equation}
+
+The superscript identifies the harmonic order. The first harmonic represents
+the dominant respiratory rhythm, while the second harmonic represents
+within-cycle asymmetry such as unequal inspiration and expiration shapes. The
+subscripts $c$ and $s$ denote real quadrature coordinates, not separate
+physiological measurements; the sine coordinate stores phase so that the
+oscillator can rotate smoothly through amplitude changes and short periods of
+weak observation support. The baseline pair $(b_t,\dot b_t)$ captures slow
+projection or posture drift, and the residual pair $(r_t,\dot r_t)$ captures
+aperiodic respiratory structure that is not well represented by a narrow-band
+oscillator. The default observation row $H$ states that a scalar
+camera-derived motion cue may contain contributions from the oscillatory,
+baseline, and residual coordinates. In the adaptive observation law, the
+effective trust in that cue is then modulated rather than assumed to be fixed.
+
+The harmonic blocks use rotation-matrix dynamics conditioned on an external
+frequency estimate, the baseline block follows a constant-velocity model, and
+the residual block follows a damped random walk. Because the model remains
+linear conditional on the external frequency, standard Kalman filtering and
+Rauch--Tung--Striebel smoothing remain valid~\cite{Kalman1960,Sarkka2013,RauchTungStriebel1965}.
+Thus PARH-OSSM is not a filter-free alternative to Kalman filtering. Its
+contribution is the physiological state decomposition and observation-aware
+trust law wrapped around that inference machinery, whereas OSSM-KF removes
+those PARH-specific components and keeps only the fixed oscillator comparator.
+The derivative coordinates $\dot{b}_t$ and $\dot{r}_t$ are inertial state
+coordinates rather than camera channels: $\dot{b}_t$ allows slow drift to
+continue smoothly instead of being repeatedly absorbed by the oscillator, and
+$\dot{r}_t$ allows non-harmonic respiratory residual structure to persist
+briefly instead of being treated as independent frame noise.
+
+\subsection*{Decoupled readouts for rate and waveform morphology}
+PARH-OSSM uses two readouts derived directly from the latent coordinates, and
+we name the non-oscillatory complement explicitly:
+\begin{equation}
+z_{\mathrm{osc},t}
+    = h_{c,t}^{(1)} + h_{c,t}^{(2)},
+\qquad
+z_{\mathrm{morph},t}
+    = b_t + r_t,
+\qquad
+z_{\mathrm{full},t}
+    = z_{\mathrm{osc},t} + z_{\mathrm{morph},t}.
+\end{equation}
+The added symbol $z_{\mathrm{morph}}$ is not a third exported performance
+signal. It names the baseline--residual complement that turns the oscillatory
+anchor into the full respiratory waveform. The oscillatory readout
+$z_{\mathrm{osc}}$ carries the dominant rhythm and is the natural source for
+rate and breath-timing analysis. The full readout $z_{\mathrm{full}}$ adds slow
+trajectory drift and aperiodic respiratory departures back to that anchor and is
+therefore the waveform compared against the reference morphology. Both causal
+and smoothed versions of the exported readouts are retained as trial-level
+outputs.
+
+This decomposition is central to the study design because rate, breath timing,
+and trajectory morphology are not the same target. A camera cue can preserve a
+dominant respiratory frequency while losing the trajectory shape, or it can
+carry morphology while introducing scale, lag, or residual content that harms
+rate estimation. For that reason, PARH-OSSM does not force all evaluations
+through one waveform-derived objective. Instead, the model asks whether a video
+contains enough oscillatory information for rate and enough structured
+respiratory-form information for waveform analysis.
+
+\subsection*{Physiological rationale and diagnostic scope}
+The model structure is not arbitrary. A second harmonic is included because
+respiratory motion is usually asymmetric over each breath cycle even when the
+dominant rate is stable; forcing that asymmetry into a purely sinusoidal state
+invites harmonic confusion and pushes morphology into innovation residuals.
+The baseline block is needed because camera-derived chest motion carries slow
+projection drift and posture-related movement that are not themselves the
+respiratory rhythm. The residual block exists for a different reason: it is the
+state-space location where irregular respiratory content should live when the
+oscillator support weakens, including amplitude transients or breath-shape
+departures that are still respiratory but not well explained by the harmonic
+submodel.
+
+This decomposition also clarifies the evaluation policy. Rate metrics should be
+computed from $z_{\mathrm{osc}}$, because rate is an oscillatory quantity.
+Waveform-fidelity metrics should be computed from $z_{\mathrm{full}}$, because
+the full motion trace is the object of comparison when baseline and aperiodic
+content matter. The explicit complement $z_{\mathrm{morph}}=b_t+r_t$ makes that
+separation visible: it is the morphology/trajectory content that must be added
+to the oscillator before waveform fidelity is evaluated. That separation is one
+of the central conceptual
+distinctions from single-output respiratory estimators, where rate and waveform
+interpretations are easily conflated. It also follows directly from the
+state-space design principle above: once the state variables are assigned
+distinct physiological roles, the observation targets and evaluation metrics
+must remain aligned with those roles rather than collapsing everything back to
+a single generic output.
+
+\subsection*{Verified model scope and reproducibility boundary}
 The evaluated PARH-OSSM system includes the eight-dimensional state, the
 $K=2$ harmonic structure, baseline and residual blocks, dual readouts,
 warm-up-only frequency initialisation, external timing-evidence updates,
@@ -432,65 +489,23 @@ fixed observation operators and candidate views provide structured evidence;
 the label-free reliability scores modulate how that evidence enters the
 state update and readout; and the PARH latent state keeps the physiological
 roles explicit. Helper-only and helper-blend variants are treated as
-diagnostic context rather than as the proposed method. OSSM-KF remains a
-non-adaptive comparator: it uses conventional Kalman/RTS inference, but it
-does not contain the PARH observation law, dual-readout routing, morphology
-complement, or calibration-diagnostic pathways.
+diagnostic context rather than as the proposed method.
 
-\subsection*{Camera-derived observation classes}
-The most important methodological lesson is that the camera-derived observation
-is part of the model, not just a preprocessing choice. Supplementary Table S2
-therefore summarizes the eight active single-observation routes in a fixed
-display order: optical flow, optical-flow bridge, depth-of-flow, depth-of-flow
-bridge, linear Profile1D, quadratic Profile1D, cubic Profile1D, and Profile1D
-consensus. This order is a table and figure convention, not a sequential
-pipeline and not a claim that one observation is transformed into the next.
+To make the shared-versus-adaptive observation story testable at the state
+interface, the system also records diagnostic observation summaries,
+bootstrap latent drives for the harmonic, baseline, and residual blocks,
+local adaptor parameters, and a global observation row in the
+adaptive-resonator diagnostic path. These objects are not primary performance
+outputs. They are retained so that the reader can inspect how the observation
+interface drives the latent states. Supplementary Fig. S6 visualizes these
+traces, and Supplementary Fig. S7 summarizes confidence and agreement
+diagnostics that motivate separate oscillatory and full-waveform readouts. Both
+figures are mechanistic diagnostics rather than competing final-package model
+claims.
 
-Three contrasts are central. First, raw optical flow and the optical-flow
-bridge are both flow-derived, but they are not interchangeable. The raw signal
-is closer to a velocity-like cue, whereas the bridge converts that cue toward a
-displacement-compatible respiratory trajectory and is therefore mainly useful
-for timing support in the current framework. Second, raw depth-of-flow and the
-depth-of-flow bridge are also distinct. The raw signal is a burst-like
-motion-energy count, whereas the bridge recovers only a coarse signed
-motion-centroid trajectory. Third, the Profile1D branch is explicitly split
-into a conservative fundamental route, two harmonic morphology routes, and a
-consensus route that checks whether the linear, quadratic, and cubic profile
-interpretations agree.
-
-These constructed observations are included for information content and
-coordinate compatibility, not for cosmetic smoothing. When a constructed route
-fails, that failure is also evidence: it indicates that the current camera
-observation set does not contain a clean enough respiratory projection for a
-universal waveform claim.
-
-\subsection*{Observation construction and failure-case manifests}
-The eight motion-observation classes above are instantiated as persistent
-single-observation routes for diagnosis and for the representative
-baseline/comparator rows. The integrated PARH-OSSM readout reported in
-Tables~\ref{tab:cohface_t3} and \ref{tab:cohface_t4} uses the final
-observation-law package rather than a post hoc best route. Raw
-Farneb\"ack optical flow is computed from the median vertical component of dense
-motion between adjacent chest-ROI frames~\cite{Farneback2003}; the bridge,
-depth-of-flow, and Profile1D variants then provide the complementary
-construction routes summarized in Supplementary Table S2.
-
-For that reason, preprocessing is part of the observation definition rather
-than a generic denoising block. The raw extractor output, the inference-path
-signal, and the helper-path signal all have different meanings. PARH-OSSM
-keeps raw, bridged, band-limited, sign-coded, current, and helper views
-separate until the adaptive observation law estimates reliability and nuisance.
-The integrated readout is therefore not a hard choice of one observation for
-all clips. It is a bounded integration of candidate evidence into a shared
-respiratory state, with diagnostics that expose when the available evidence is
-too weak. The COHFACE evidence also shows why constructed observations deserve
-to be treated as first-class measurement routes: raw optical flow and the
-optical-flow bridge invert the usual rate-versus-waveform ranking across the
-same underlying source, which would be impossible to explain if observation
-construction were merely cosmetic preprocessing.
-
-The failure-case panels reported in Results are drawn from these persistent
-manifests rather than manual inspection.
+OSSM-KF remains a non-adaptive comparator: it uses conventional Kalman/RTS
+inference, but does not contain the PARH observation law, dual-readout routing,
+morphology complement, or calibration-diagnostic pathways.
 
 \subsection*{Datasets and evaluation scope}
 COHFACE contains 160 recordings from 40 subjects in a controlled

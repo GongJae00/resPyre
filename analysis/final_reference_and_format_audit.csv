@@ -1,4 +1,7 @@
 audit,item,status,path,detail
-reference_and_format,submission_manuscript_build_log,pass,paper/main.log,absent after cleanup; run latexmk to regenerate detailed citation/box diagnostics
+reference_and_format,submission_manuscript_build,pass,paper/main.log,target=paper/main.pdf; log_exists=True; latex_error=False
+reference_and_format,submission_manuscript_undefined_citations,pass,paper/main.log,undefined citation warnings=0
+reference_and_format,submission_manuscript_undefined_references,pass,paper/main.log,undefined reference warnings=0
+reference_and_format,submission_manuscript_box_warnings,pass,paper/main.log,overfull=0; underfull=7; underfull is informational
 reference_and_format,main_bbl_current,pass,paper/main.bbl,bibliography materialized
 reference_and_format,submission_pdf,pass,paper/main.pdf,Scientific Reports manuscript PDF

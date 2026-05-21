@@ -36,8 +36,8 @@ table, and manuscript artifacts.
 | guard | `analysis/final_metric_provenance_audit.csv` | 1 | 1 | 23022 | machine-readable headline metric provenance audit |
 | guard | `analysis/final_split_and_leakage_audit.md` | 1 | 1 | 1135 | split/leakage audit for final comparison package |
 | guard | `analysis/final_split_and_leakage_audit.csv` | 1 | 1 | 974 | machine-readable split/leakage audit |
-| guard | `analysis/final_reference_and_format_audit.md` | 1 | 1 | 520 | Scientific Reports reference/format audit |
-| guard | `analysis/final_reference_and_format_audit.csv` | 1 | 1 | 363 | machine-readable reference/format audit |
+| guard | `analysis/final_reference_and_format_audit.md` | 1 | 1 | 890 | Scientific Reports reference/format audit |
+| guard | `analysis/final_reference_and_format_audit.csv` | 1 | 1 | 694 | machine-readable reference/format audit |
 | guard | `analysis/final_reproducibility_audit.md` | 1 | 1 | 428 | release/reproducibility audit |
 | guard | `analysis/final_reproducibility_audit.csv` | 1 | 1 | 311 | machine-readable release/reproducibility audit |
 | target_reliability | `analysis/final_priors/cohface_mahnob_target_computable_reliability_windowed.csv` | 1 | 1 | 29085258 | windowed GT-free COHFACE/MAHNOB reliability priors |
@@ -95,8 +95,8 @@ table, and manuscript artifacts.
 | manifests | `paper/manifests/f4_allbase_same_trial_overlay_manifest.csv` | 1 | 1 | 8597 | main same-trial all-base overlay manifest |
 | manifests | `paper/manifests/s_f15_cohface_observation_class_overlay_manifest.csv` | 1 | 1 | 5487 | COHFACE observation-class overlay manifest |
 | manifests | `paper/manifests/s_f16_mahnob_observation_class_overlay_manifest.csv` | 1 | 1 | 5617 | MAHNOB-HCI observation-class overlay manifest |
-| manuscript | `paper/main.tex` | 1 | 1 | 67044 | paper source |
-| manuscript | `paper/main.pdf` | 1 | 1 | 2121809 | compiled paper PDF |
+| manuscript | `paper/main.tex` | 1 | 1 | 68102 | paper source |
+| manuscript | `paper/main.pdf` | 1 | 1 | 2122169 | compiled paper PDF |
 | manuscript | `paper/supplementary_information.tex` | 1 | 1 | 15106 | supplementary information source |
 | manuscript | `paper/supplementary_information.pdf` | 1 | 1 | 3319151 | compiled supplementary information PDF |
 | submission | `analysis/final_submission_package_audit.md` | 1 | 1 | 5621 | final submission package audit |

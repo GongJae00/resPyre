@@ -26,8 +26,8 @@ guard,analysis/final_metric_provenance_audit.md,True,True,24855,headline metric 
 guard,analysis/final_metric_provenance_audit.csv,True,True,23022,machine-readable headline metric provenance audit
 guard,analysis/final_split_and_leakage_audit.md,True,True,1135,split/leakage audit for final comparison package
 guard,analysis/final_split_and_leakage_audit.csv,True,True,974,machine-readable split/leakage audit
-guard,analysis/final_reference_and_format_audit.md,True,True,520,Scientific Reports reference/format audit
-guard,analysis/final_reference_and_format_audit.csv,True,True,363,machine-readable reference/format audit
+guard,analysis/final_reference_and_format_audit.md,True,True,890,Scientific Reports reference/format audit
+guard,analysis/final_reference_and_format_audit.csv,True,True,694,machine-readable reference/format audit
 guard,analysis/final_reproducibility_audit.md,True,True,428,release/reproducibility audit
 guard,analysis/final_reproducibility_audit.csv,True,True,311,machine-readable release/reproducibility audit
 target_reliability,analysis/final_priors/cohface_mahnob_target_computable_reliability_windowed.csv,True,True,29085258,windowed GT-free COHFACE/MAHNOB reliability priors
@@ -85,8 +85,8 @@ figures,paper/figures/S_F_component_ablation_evidence.pdf,True,True,20050,compon
 manifests,paper/manifests/f4_allbase_same_trial_overlay_manifest.csv,True,True,8597,main same-trial all-base overlay manifest
 manifests,paper/manifests/s_f15_cohface_observation_class_overlay_manifest.csv,True,True,5487,COHFACE observation-class overlay manifest
 manifests,paper/manifests/s_f16_mahnob_observation_class_overlay_manifest.csv,True,True,5617,MAHNOB-HCI observation-class overlay manifest
-manuscript,paper/main.tex,True,True,67044,paper source
-manuscript,paper/main.pdf,True,True,2121809,compiled paper PDF
+manuscript,paper/main.tex,True,True,68102,paper source
+manuscript,paper/main.pdf,True,True,2122169,compiled paper PDF
 manuscript,paper/supplementary_information.tex,True,True,15106,supplementary information source
 manuscript,paper/supplementary_information.pdf,True,True,3319151,compiled supplementary information PDF
 submission,analysis/final_submission_package_audit.md,True,True,5621,final submission package audit
