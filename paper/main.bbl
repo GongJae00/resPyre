@@ -194,24 +194,6 @@
 \newblock {\emph{\JournalTitle{Critical Care}}} \textbf{\bibinfo{volume}{25}},
   \bibinfo{pages}{280} (\bibinfo{year}{2021}).
 
-\bibitem{Gwak2024MultimodalBreathing}
-\bibinfo{author}{Gwak, M.} \emph{et~al.}
-\newblock \bibinfo{title}{Multimodal breathing rate estimation using facial
-  motion and {RPPG} from {RGB} camera}.
-\newblock In \emph{\bibinfo{booktitle}{Proceedings of the IEEE International
-  Conference on Acoustics, Speech and Signal Processing (ICASSP)}},
-  \doiprefix\url{10.1109/ICASSP48485.2024.10446086} (\bibinfo{year}{2024}).
-
-\bibitem{Du2021WeaklySupervisedRPPGRespiration}
-\bibinfo{author}{Du, J.}, \bibinfo{author}{Liu, S.-Q.}, \bibinfo{author}{Zhang,
-  B.} \& \bibinfo{author}{Yuen, P.~C.}
-\newblock \bibinfo{title}{Weakly supervised {rPPG} estimation for respiratory
-  rate estimation}.
-\newblock In \emph{\bibinfo{booktitle}{Proceedings of the IEEE/CVF
-  International Conference on Computer Vision Workshops}},
-  \bibinfo{pages}{2391--2397}, \doiprefix\url{10.1109/ICCVW54120.2021.00271}
-  (\bibinfo{year}{2021}).
-
 \bibitem{Kalman1960}
 \bibinfo{author}{Kalman, R.~E.}
 \newblock \bibinfo{journal}{\bibinfo{title}{A new approach to linear filtering
@@ -257,5 +239,23 @@
   coefficient to evaluate reproducibility}}.
 \newblock {\emph{\JournalTitle{Biometrics}}} \textbf{\bibinfo{volume}{45}},
   \bibinfo{pages}{255--268} (\bibinfo{year}{1989}).
+
+\bibitem{Gwak2024MultimodalBreathing}
+\bibinfo{author}{Gwak, M.} \emph{et~al.}
+\newblock \bibinfo{title}{Multimodal breathing rate estimation using facial
+  motion and {RPPG} from {RGB} camera}.
+\newblock In \emph{\bibinfo{booktitle}{Proceedings of the IEEE International
+  Conference on Acoustics, Speech and Signal Processing (ICASSP)}},
+  \doiprefix\url{10.1109/ICASSP48485.2024.10446086} (\bibinfo{year}{2024}).
+
+\bibitem{Du2021WeaklySupervisedRPPGRespiration}
+\bibinfo{author}{Du, J.}, \bibinfo{author}{Liu, S.-Q.}, \bibinfo{author}{Zhang,
+  B.} \& \bibinfo{author}{Yuen, P.~C.}
+\newblock \bibinfo{title}{Weakly supervised {rPPG} estimation for respiratory
+  rate estimation}.
+\newblock In \emph{\bibinfo{booktitle}{Proceedings of the IEEE/CVF
+  International Conference on Computer Vision Workshops}},
+  \bibinfo{pages}{2391--2397}, \doiprefix\url{10.1109/ICCVW54120.2021.00271}
+  (\bibinfo{year}{2021}).
 
 \end{thebibliography}
