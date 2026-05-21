@@ -85,8 +85,8 @@ figures,paper/figures/S_F_component_ablation_evidence.pdf,True,True,20050,compon
 manifests,paper/manifests/f4_allbase_same_trial_overlay_manifest.csv,True,True,8597,main same-trial all-base overlay manifest
 manifests,paper/manifests/s_f15_cohface_observation_class_overlay_manifest.csv,True,True,5487,COHFACE observation-class overlay manifest
 manifests,paper/manifests/s_f16_mahnob_observation_class_overlay_manifest.csv,True,True,5617,MAHNOB-HCI observation-class overlay manifest
-manuscript,paper/main.tex,True,True,66645,paper source
-manuscript,paper/main.pdf,True,True,2122847,compiled paper PDF
+manuscript,paper/main.tex,True,True,66787,paper source
+manuscript,paper/main.pdf,True,True,2121841,compiled paper PDF
 manuscript,paper/supplementary_information.tex,True,True,15153,supplementary information source
 manuscript,paper/supplementary_information.pdf,True,True,3320257,compiled supplementary information PDF
 submission,analysis/final_submission_package_audit.md,True,True,5621,final submission package audit

@@ -25,6 +25,13 @@
 \clubpenalty=10000
 \widowpenalty=10000
 \displaywidowpenalty=10000
+\setcounter{topnumber}{5}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{7}
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.80}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.70}
 
 \title{A Physiology-Aligned State-Space Decomposition Framework for Camera-Derived Respiratory Motion}
 
@@ -155,7 +162,7 @@ evaluation protocol in Methods.
 
 Figure~\ref{fig:architecture} summarizes this observation-to-state topology.
 
-\begin{figure}[!htbp]
+\begin{figure}[!t]
 \centering
 \includegraphics[width=\linewidth]{figures/F1_architecture.pdf}
 \caption{PARH-OSSM observation-to-state topology. Heterogeneous motion
@@ -174,8 +181,6 @@ reported as side outputs from observation trust, state-space inference, and
 readout consistency; they are not feedback inputs to the evaluated path.}
 \label{fig:architecture}
 \end{figure}
-\FloatBarrier
-
 Figure~\ref{fig:architecture} should be read as a role-allocation diagram rather
 than as a linear preprocessing recipe. The left side shows that several fixed
 motion operators can expose different fragments of the same underlying
@@ -208,7 +213,7 @@ baseline/comparator computability limits. The dataset-level claims remain
 limited to what these evaluation records and their supplementary provenance
 support.
 
-\begin{figure}[!htbp]
+\begin{figure}[!t]
 \centering
 \includegraphics[width=\linewidth,height=0.52\textheight,keepaspectratio]{figures/F2_dataset_and_observation_regime.pdf}
 \caption{Dataset-regime and observation-characterization summary. The top
@@ -224,8 +229,6 @@ Additional distribution and preprocessing-stage diagnostics are retained in the
 supplementary material.}
 \label{fig:dataset_observation_regime}
 \end{figure}
-\FloatBarrier
-
 Figure~\ref{fig:dataset_observation_regime} motivates the order of the results:
 the clean COHFACE regime and the harder MAHNOB-HCI regime differ not only in
 final errors, but also in how much respiratory structure is visible before the
@@ -243,7 +246,7 @@ OSSM-KF comparator are computable for 488 of those trials. The table
 therefore reports trial counts explicitly rather than pretending that the
 baseline route exists for every MAHNOB trial.
 
-\begin{table}[!ht]
+\begin{table}[!t]
 \centering
 \caption{Complete-cohort rate accuracy. Values are median per-trial metrics.
 Base and OSSM-KF use the pre-specified representative P1D quad route where it
@@ -312,7 +315,7 @@ aligned MAE and DTW remain comparable rather than uniformly better. MAHNOB-HCI d
 support a strong waveform reconstruction claim: aligned waveform differences
 are small and strict zero-lag cycle timing remains poor.
 
-\begin{table}[!ht]
+\begin{table}[!t]
 \centering
 \caption{Complete-cohort waveform fidelity. Aligned metrics use the common
 respiratory-band, z-scored, bounded-alignment protocol, whereas strict metrics
@@ -338,8 +341,6 @@ MAHNOB & PARH-OSSM & 0.342 & 0.910 & 0.661 & 0.000 & 0.258 & 0.257 & 1.480 & 0.2
 \end{tabular}
 \renewcommand{\arraystretch}{1.0}
 \end{table}
-\FloatBarrier
-
 The corresponding PARH-OSSM peak/trough timing companions are 1.334/1.896 s for
 COHFACE and 10.174/9.943 s for MAHNOB-HCI. MAHNOB therefore remains a
 breath-cycle timing problem, not only a scale problem.
@@ -375,7 +376,7 @@ counterpart of Table~\ref{tab:cohface_t4}: the model can improve the
 rate-oriented path, but full waveform recovery still depends on whether the
 camera-derived observation bank contains recoverable morphology.
 
-\begin{figure}[!ht]
+\begin{figure}[!t]
 \centering
 \includegraphics[width=\linewidth,height=0.70\textheight,keepaspectratio]{figures/F4_waveform_overlay_grid.pdf}
 \caption{Same-trial all-base waveform overlay atlas for the clean and hard
@@ -419,8 +420,6 @@ the hard regime is not best described as a missing hyperparameter. It is an
 observability problem: the current fixed OF/DoF/Profile1D sources do not always
 contain enough respiratory evidence for a deployable adaptive law to recover.
 
-\FloatBarrier
-
 The COHFACE operator-alignment ablation asks a narrow but important question:
 should respiratory timing and waveform morphology be forced through the same
 output? The answer is no. A waveform-specialized expert can match aligned
@@ -442,7 +441,7 @@ It shows that the reported MAHNOB-HCI rate track (2.410 bpm) is close to the
 best diagnostic source available inside the readout bank (2.390 bpm), so the
 dominant hard-regime failure is not merely the last readout switch.
 
-\begin{table}[!ht]
+\begin{table}[!t]
 \centering
 \caption{MAHNOB observability failure taxonomy from the complete-cohort label-free
 diagnostic analysis. The table should be read as diagnostic evidence, not as a proposed model
@@ -481,8 +480,6 @@ label-free evidence'' category is especially important because it identifies a
 specific future target: richer label-free observability cues, not merely a more
 complex state-space smoother.
 
-\FloatBarrier
-
 The operator-alignment and component-ablation ledgers are retained in the
 Supplementary Information. The most important ablation result is that the
 decoupled readout preserves the rate-specialized path while matching the
@@ -507,7 +504,7 @@ in the Supplementary Information. The main text keeps the graphical comparison
 ladder because it directly links the fixed observation bank, the comparator, and
 the PARH-OSSM readout.
 
-\begin{figure}[!ht]
+\begin{figure}[!t]
 \centering
 \includegraphics[width=\linewidth]{figures/F5_mechanism_activation.pdf}
 \caption{All-base complete-cohort comparison ladder for the eight fixed observation
@@ -940,7 +937,7 @@ the optical-flow bridge is a useful observation route for rate-oriented
 analysis, but it is not a universal replacement for raw OF. We therefore treat
 it as an additional observation route rather than collapsing the two.
 
-\begin{figure}[!ht]
+\begin{figure}[!t]
 \centering
 \includegraphics[width=\linewidth]{figures/F6_failure_cases.pdf}
 \caption{Failure cases selected from predefined manifests. Top row: the

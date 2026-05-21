@@ -41,7 +41,7 @@
 | submission_package | f4_manifest_final_provenance | pass | `paper/manifests/f4_allbase_same_trial_overlay_manifest.csv` | PARH rows point to final_full_validation and all 10 labels per dataset |
 | submission_package | main_display_item_count | pass | `paper/main.tex` | figures=5; tables=3; total=8; target_limit=8 |
 | submission_package | main_abstract_word_count | pass | `paper/main.tex` | rough_words=165; target_limit=200 |
-| submission_package | main_pdf_page_count_manual_review | pass | `paper/main.pdf` | pages=18; Scientific Reports page guidance is an ideal, not a hard audit failure; manual compression decision required |
+| submission_package | main_pdf_page_count_manual_review | pass | `paper/main.pdf` | pages=16; Scientific Reports page guidance is an ideal, not a hard audit failure; manual compression decision required |
 | submission_package | claim_boundary_mentions_MAHNOB | pass | `analysis/final_submission_claim_boundary.md` | token='MAHNOB' |
 | submission_package | claim_boundary_mentions_OSSM-KF | pass | `analysis/final_submission_claim_boundary.md` | token='OSSM-KF' |
 | submission_package | claim_boundary_mentions_strict | pass | `analysis/final_submission_claim_boundary.md` | token='strict' |
