@@ -9,7 +9,7 @@ table, and manuscript artifacts.
 
 | group | path | required | exists | size/children | note |
 | --- | --- | ---: | ---: | ---: | --- |
-| execution_contract | `execute.md` | 1 | 1 | 15992 | single paper-facing full command ledger |
+| execution_contract | `execute.md` | 1 | 1 | 16011 | single paper-facing full command ledger |
 | dataset_scope | `analysis/rr_dataset_symlink_audit.csv` | 1 | 1 | 503 | raw dataset symlink audit |
 | dataset_scope | `analysis/rr_dataset_scope.csv` | 1 | 1 | 1466 | dataset claim-scope audit |
 | dataset_scope | `analysis/rr_experiment_blueprint.md` | 1 | 1 | 2481 | dataset role blueprint |
@@ -95,10 +95,10 @@ table, and manuscript artifacts.
 | manifests | `paper/manifests/f4_allbase_same_trial_overlay_manifest.csv` | 1 | 1 | 8597 | main same-trial all-base overlay manifest |
 | manifests | `paper/manifests/s_f15_cohface_observation_class_overlay_manifest.csv` | 1 | 1 | 5487 | COHFACE observation-class overlay manifest |
 | manifests | `paper/manifests/s_f16_mahnob_observation_class_overlay_manifest.csv` | 1 | 1 | 5617 | MAHNOB-HCI observation-class overlay manifest |
-| manuscript | `paper/main.tex` | 1 | 1 | 66787 | paper source |
-| manuscript | `paper/main.pdf` | 1 | 1 | 2121841 | compiled paper PDF |
-| manuscript | `paper/supplementary_information.tex` | 1 | 1 | 15153 | supplementary information source |
-| manuscript | `paper/supplementary_information.pdf` | 1 | 1 | 3320257 | compiled supplementary information PDF |
+| manuscript | `paper/main.tex` | 1 | 1 | 66762 | paper source |
+| manuscript | `paper/main.pdf` | 1 | 1 | 2121837 | compiled paper PDF |
+| manuscript | `paper/supplementary_information.tex` | 1 | 1 | 15106 | supplementary information source |
+| manuscript | `paper/supplementary_information.pdf` | 1 | 1 | 3319151 | compiled supplementary information PDF |
 | submission | `analysis/final_submission_package_audit.md` | 1 | 1 | 5621 | final submission package audit |
 | submission | `analysis/final_submission_package_audit.csv` | 1 | 1 | 4986 | machine-readable final submission package audit |
 | submission | `analysis/final_manual_review_checklist.md` | 1 | 1 | 2128 | manual reviewer checklist before submission |

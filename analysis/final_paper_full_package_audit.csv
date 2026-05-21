@@ -1,5 +1,5 @@
 group,path,required,exists,size_or_child_count,note
-execution_contract,execute.md,True,True,15992,single paper-facing full command ledger
+execution_contract,execute.md,True,True,16011,single paper-facing full command ledger
 dataset_scope,analysis/rr_dataset_symlink_audit.csv,True,True,503,raw dataset symlink audit
 dataset_scope,analysis/rr_dataset_scope.csv,True,True,1466,dataset claim-scope audit
 dataset_scope,analysis/rr_experiment_blueprint.md,True,True,2481,dataset role blueprint
@@ -85,10 +85,10 @@ figures,paper/figures/S_F_component_ablation_evidence.pdf,True,True,20050,compon
 manifests,paper/manifests/f4_allbase_same_trial_overlay_manifest.csv,True,True,8597,main same-trial all-base overlay manifest
 manifests,paper/manifests/s_f15_cohface_observation_class_overlay_manifest.csv,True,True,5487,COHFACE observation-class overlay manifest
 manifests,paper/manifests/s_f16_mahnob_observation_class_overlay_manifest.csv,True,True,5617,MAHNOB-HCI observation-class overlay manifest
-manuscript,paper/main.tex,True,True,66787,paper source
-manuscript,paper/main.pdf,True,True,2121841,compiled paper PDF
-manuscript,paper/supplementary_information.tex,True,True,15153,supplementary information source
-manuscript,paper/supplementary_information.pdf,True,True,3320257,compiled supplementary information PDF
+manuscript,paper/main.tex,True,True,66762,paper source
+manuscript,paper/main.pdf,True,True,2121837,compiled paper PDF
+manuscript,paper/supplementary_information.tex,True,True,15106,supplementary information source
+manuscript,paper/supplementary_information.pdf,True,True,3319151,compiled supplementary information PDF
 submission,analysis/final_submission_package_audit.md,True,True,5621,final submission package audit
 submission,analysis/final_submission_package_audit.csv,True,True,4986,machine-readable final submission package audit
 submission,analysis/final_manual_review_checklist.md,True,True,2128,manual reviewer checklist before submission

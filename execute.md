@@ -138,10 +138,10 @@ $PY -m pytest -q \
 ## 4. Bounded Operating-Point Sensitivity
 
 This step is recommended before the complete-cohort rerun if we want to check
-performance sensitivity without turning the paper into target-specific
+performance sensitivity without turning the paper into dataset-specific
 hyperparameter tuning. The grid is fixed and small. It only changes
-semantically interpretable target-computable reliability settings:
-window length/stride and cross-family support strictness.
+semantically interpretable label-free reliability settings:
+window length/stride and cross-source support strictness.
 
 Dry-run the plan first:
 
@@ -184,13 +184,13 @@ Implementation note: `--artifact-policy lean` still writes strict waveform
 metrics during evaluation. Standalone strict regeneration is
 only needed when retained PKL artifacts are available.
 
-## 5. Windowed Target-Side Reliability Priors
+## 5. Windowed Label-Free Reliability Priors
 
-These CSVs are required by the final paper-candidate path. They are
-target-computable and GT-free: they estimate which observation groups are
-locally trustworthy from cross-family agreement, timing support, morphology
-support, nuisance evidence, and harmonic ambiguity. The materializer now fails
-closed if these windowed rows are missing.
+These CSVs are required by the final paper validation path. They are label-free
+with respect to the respiratory reference: they estimate which observation
+classes are locally trustworthy from cross-source agreement, timing support,
+morphology support, nuisance evidence, and harmonic ambiguity. The materializer
+fails closed if these windowed rows are missing.
 
 ```bash
 $PY scripts/extract_target_reliability_graph_features.py \
@@ -224,7 +224,7 @@ cp analysis/final_priors/mahnob_target_computable_reliability_windowed.csv \
 The MAHNOB windowed reliability CSV carries both readout scores and state-role
 weights. The explicit copy keeps the materializer interface honest: state
 control and readout control are separate inputs even when they are estimated
-from the same target-computable window evidence.
+from the same label-free window evidence.
 
 ## 6. Main Real-Data Paper-Candidate Validation
 
@@ -235,9 +235,9 @@ sensitivity checks only and must not be described as the submission result.
 
 The main paper tables report the integrated PARH-OSSM complete-cohort outputs
 alongside a transparent same-trial baseline/comparator refresh: pre-specified
-`P1D_quad direct`, `OSSM-KF (P1D quad)`, and PARH-OSSM. The full eight-family
-comparison remains supplementary diagnostic context and must not be used as a
-target-specific best-of-family main-table selector.
+`P1D_quad direct`, `OSSM-KF (P1D quad)`, and PARH-OSSM. The full
+eight-observation-class comparison remains supplementary diagnostic context and
+must not be used as a post hoc best-observation-class main-table selector.
 
 COHFACE:
 

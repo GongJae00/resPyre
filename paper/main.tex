@@ -202,7 +202,7 @@ direct-observation baseline (P1D quad), the second is the corresponding
 OSSM-KF comparator, and the third is the integrated PARH-OSSM run. The
 complete eight-observation comparison across the direct baselines, OSSM-KF,
 and PARH-OSSM routes is provided as a supplementary diagnostic table rather
-than used for target-specific best-observation selection.
+than used to select a post hoc best observation source.
 This scope matters because we do not claim that every observation class
 generalizes universally. The claim is that the proposed adaptive
 observation-to-state framework is auditable, performs strongly when respiratory
@@ -292,7 +292,7 @@ OSSM-KF (P1D quad). These paired deltas are reported in the supplementary
 paired-statistics table and are not used to tune the operating point.
 
 The complete eight-observation rate diagnostic plot is provided as Supplementary
-Fig. S1. It is not used for target-specific best-observation selection; the
+Fig. S1. It is not used for post hoc best-observation selection; the
 main rate result remains the complete-cohort comparison in
 Table~\ref{tab:cohface_t3}.
 
@@ -794,11 +794,11 @@ final models and they are not an ordered preprocessing cascade. They are
 parallel evidence channels used to ask whether a camera-derived cue carries
 plausible timing, morphology, or nuisance-dominated content.
 
-The reliability evidence is computed without using the target respiration
+The reliability evidence is computed without using the respiratory reference
 label. The retained features measure whether independent
 observation classes support a similar respiratory rate or phase, whether the evidence survives
 simple preprocessing changes, whether half/double-rate aliasing is likely, and
-whether nuisance or abstention pressure is high. The resulting video-level and
+whether nuisance evidence or abstention pressure is high. The resulting video-level and
 motion-class reliability priors are then used to modulate how strongly the
 constructed evidence affects the state update and the bounded oscillatory readout.
 The provenance tables store video identifiers and reliability scores for
@@ -807,10 +807,10 @@ model. Oracle or reference-derived columns are explicitly removed before the
 evaluation run.
 
 Operationally, the reliability law has three fixed stages. First, each
-candidate observation view contributes target-computable features: cross-source
+candidate observation view contributes label-free features: cross-source
 rate agreement, preprocessing invariance, event-timing support, bridge timing
 support, rate/phase support, morphology support, ROI observability, harmonic
-alias risk, nuisance pressure, and abstention pressure. Second, these features
+alias risk, nuisance evidence, and abstention pressure. Second, these features
 are clipped to $[0,1]$ and combined with fixed coefficients into state-role
 responsibilities for the fundamental timing anchor, second-harmonic scaffold,
 baseline support, residual support, and abstention. For example, agreement is a
@@ -822,7 +822,7 @@ responsibilities modulate $\pi_t$, $Q_{\mathrm{osc},t}$,
 $Q_{\mathrm{aper},t}$, and the bounded $z_{\mathrm{osc}}$ readout. The exact
 feature columns, coefficients, and source files are listed in the Supplementary
 Methods and release audit files; no target respiratory waveform or
-target-specific oracle source is used in these computations.
+post hoc oracle source is used in these computations.
 
 In the evaluated path, COHFACE uses combined label-free reliability evidence
 on the readout side, whereas MAHNOB-HCI uses separate state-component and
@@ -903,7 +903,7 @@ The eight motion-observation classes above are instantiated as persistent
 single-observation routes for diagnosis and for the representative
 baseline/comparator rows. The integrated PARH-OSSM readout reported in
 Tables~\ref{tab:cohface_t3} and \ref{tab:cohface_t4} uses the final
-observation-law package rather than a target-specific best route. Raw
+observation-law package rather than a post hoc best route. Raw
 Farneb\"ack optical flow is computed from the median vertical component of dense
 motion between adjacent chest-ROI frames~\cite{Farneback2003}; the bridge,
 depth-of-flow, and Profile1D variants then provide the complementary
@@ -975,7 +975,7 @@ dataset. The purpose of this evaluation is to report the
 PARH-OSSM readout on every eligible trial while preserving traceable per-trial
 diagnostics and explicitly marking any comparator computability limits.
 Single-observation comparison results are retained as diagnostic context rather than used as
-target-specific best-observation selection. The quantitative scope is therefore
+post hoc best-observation selection. The quantitative scope is therefore
 cross-dataset but deliberately bounded.
 Figure~\ref{fig:dataset_observation_regime} compares the clean COHFACE
 regime with the harder MAHNOB-HCI regime using the same observation-stage EDA

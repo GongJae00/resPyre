@@ -29,19 +29,19 @@ A Physiology-Aligned State-Space Decomposition Framework for Camera-Derived Resp
 
 \section*{Supplementary Methods}
 
-\subsection*{Target-computable reliability law}
-The reliability evidence used by PARH-OSSM is computed before access to the
-target respiratory reference. Each candidate observation contributes
-target-computable features describing rate agreement, preprocessing invariance,
+\subsection*{Label-free reliability law}
+The reliability evidence used by PARH-OSSM is computed without using the
+respiratory reference labels. Each candidate observation contributes
+label-free features describing rate agreement, preprocessing invariance,
 event timing, bridge timing, rate/phase support, morphology support, ROI
-observability, harmonic ambiguity, nuisance pressure, and abstention pressure.
+observability, harmonic ambiguity, nuisance evidence, and abstention pressure.
 Reference-derived or oracle columns are removed before materialization of the
 evaluated runs.
 
 All reliability features are mapped to $[0,1]$ by clipping. Let $G$ denote
 group support, $M$ macro timing, $B$ bridge timing, $P$ rate/phase support,
 $O_{\mathrm{roi}}$ ROI observability, $O_{\mathrm{prep}}$ preprocessing
-invariance, $T$ timing reliability, $E$ event timing, $U$ nuisance pressure,
+invariance, $T$ timing reliability, $E$ event timing, $U$ nuisance evidence,
 $H$ harmonic-risk score, $H_g$ harmonic-guard score, $R_m$ morphology
 reliability, $M_s$ morphology support, $R$ generic reliability, and $A_b$
 abstention pressure. The component-law implementation uses the fixed
@@ -89,11 +89,11 @@ oracle analyses.
 \begin{longtable}{L{1.9cm}L{2.35cm}L{2.65cm}L{3.65cm}L{3.20cm}}
 \caption{Dataset and evidence scope.}\\
 \toprule
-Dataset & Role & Label scope & Main use & Claim boundary \\
+Dataset & Role & Label scope & Main use & Supported claim \\
 \midrule
 \endfirsthead
 \toprule
-Dataset & Role & Label scope & Main use & Claim boundary \\
+Dataset & Role & Label scope & Main use & Supported claim \\
 \midrule
 \endhead
 COHFACE & Primary real benchmark & Respiration waveform and derived rate & Rate, aligned waveform, strict waveform, and cycle diagnostics & Supports clean-regime real waveform/rate claims. \\
@@ -167,14 +167,14 @@ without treating diagnostic-only files as hidden model-selection inputs.
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/F3_rate_observation_class_summary.pdf}
-\caption{Complete eight-observation rate diagnostic plot. The figure compares direct observations, OSSM-KF, and observation-class-local PARH timing behavior across the fixed observation classes and is used only as diagnostic context, not as a target-specific best-source selector.}
+\caption{Complete eight-observation rate diagnostic plot. The figure compares direct observations, OSSM-KF, and observation-class-local PARH timing behavior across the fixed observation classes and is used only as diagnostic context, not as a post hoc best-source selector.}
 \end{figure}
 
-This figure expands the rate evidence beyond the three compact rows in the
-main text. It shows whether fixed observations, OSSM-KF, and PARH-style readouts
-fail for the same reason or for different observation-class reasons. Because it
-is diagnostic, it explains the observed boundary but does not define a
-target-specific best-source policy.
+This figure expands the rate evidence beyond the three compact rows in the main
+text. It shows whether fixed observations, OSSM-KF, and PARH-style readouts fail
+for the same reason or for different observation-class reasons. As diagnostic
+context, it explains the observed boundary without defining a post hoc
+best-source policy.
 
 \begin{figure}[htbp]
 \centering
@@ -251,7 +251,7 @@ $z_{\mathrm{full}}$ are not evaluated as the same target.
 
 This figure marks the boundary between useful hard-regime diagnostics and the
 reported operating point. The fallback behaviour is informative about weak
-observability and nuisance pressure, but it is not used to replace the
+observability and nuisance, but it is not used to replace the
 predefined PARH-OSSM evaluation route.
 
 \begin{figure}[htbp]
@@ -260,9 +260,9 @@ predefined PARH-OSSM evaluation route.
 \caption{Within-versus-transfer operating-point comparison. The figure is retained as diagnostic context for readout policy boundaries.}
 \end{figure}
 
-This figure checks whether operating-point behaviour is stable within and
-across evaluation settings. It is included to document readout-policy
-boundaries, not to introduce an additional tuned model variant.
+This figure checks whether operating-point behaviour is stable within and across
+evaluation settings. Its role is to document readout-policy boundaries, not to
+introduce an additional tuned model variant.
 
 \begin{figure}[htbp]
 \centering
