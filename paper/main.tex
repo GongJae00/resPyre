@@ -6,6 +6,7 @@
 \usepackage{array}
 \usepackage{multirow}
 \usepackage{graphicx}
+\usepackage{float}
 \usepackage{placeins}
 \usepackage{xcolor}
 \usepackage{enumitem}
@@ -668,6 +669,7 @@ final errors, but also in how much respiratory structure is visible before the
 state-space model is applied. Rate accuracy, aligned morphology, strict
 zero-lag reconstruction, and observability diagnostics must therefore be read
 together rather than collapsed into a single score.
+\FloatBarrier
 
 \subsection*{Complete-cohort rate accuracy}
 Table~\ref{tab:cohface_t3} reports rate accuracy for the fixed direct P1D quad
@@ -679,7 +681,7 @@ OSSM-KF comparator are computable for 488 of those trials. The table
 therefore reports trial counts explicitly rather than pretending that the
 baseline route exists for every MAHNOB trial.
 
-\begin{table}[!t]
+\begin{table}[H]
 \centering
 \caption{Complete-cohort rate accuracy. Values are median per-trial metrics.
 Base and OSSM-KF use the pre-specified representative P1D quad route where it
@@ -706,6 +708,7 @@ MAHNOB & PARH-OSSM & track Hz & 2.410 & 2.920 & 0.230 & 525 \\
 \end{tabular}
 }
 \end{table}
+\FloatBarrier
 
 The rate decomposition gives a useful sanity check. On COHFACE, the fixed P1D
 spectral baseline remains the strongest scalar-rate source, which is expected
@@ -748,7 +751,7 @@ aligned MAE and DTW remain comparable rather than uniformly better. MAHNOB-HCI d
 support a strong waveform reconstruction claim: aligned waveform differences
 are small and strict zero-lag cycle timing remains poor.
 
-\begin{table}[!t]
+\begin{table}[H]
 \centering
 \caption{Complete-cohort waveform fidelity. Aligned metrics use the common
 respiratory-band, z-scored, bounded-alignment protocol, whereas strict metrics
@@ -774,6 +777,7 @@ MAHNOB & PARH-OSSM & 0.342 & 0.910 & 0.661 & 0.000 & 0.258 & 0.257 & 1.480 & 0.2
 \end{tabular}
 \renewcommand{\arraystretch}{1.0}
 \end{table}
+\FloatBarrier
 The corresponding PARH-OSSM peak/trough timing companions are 1.334/1.896 s for
 COHFACE and 10.174/9.943 s for MAHNOB-HCI. MAHNOB therefore remains a
 breath-cycle timing problem, not only a scale problem.
@@ -798,18 +802,7 @@ now makes the central claim visible: OF, DoF, and Profile1D-derived operators
 are not interchangeable measurements, and PARH-OSSM is evaluated against that
 heterogeneous observation bank rather than against a single hidden baseline.
 
-Figure~\ref{fig:cohface_f4_overlay} is therefore interpreted at the level of
-topology rather than by selecting a visually pleasing trace. In the COHFACE
-example, several fixed observations already follow the reference sufficiently
-well that the state-space readout should preserve, rather than replace, strong
-native respiratory evidence. In the MAHNOB-HCI example, many fixed observations
-are flat, noisy, or phase-inconsistent under the same visual window, and the
-PARH-OSSM waveform remains limited for the same reason. This is the visual
-counterpart of Table~\ref{tab:cohface_t4}: the model can improve the
-rate-oriented path, but full waveform recovery still depends on whether the
-camera-derived observation bank contains recoverable morphology.
-
-\begin{figure}[!t]
+\begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth,height=0.70\textheight,keepaspectratio]{figures/F4_waveform_overlay_grid.pdf}
 \caption{Same-trial all-base waveform overlay atlas for the clean and hard
@@ -826,6 +819,17 @@ Supplementary Figs. S12 and S13 provide observation-median all-class overlay
 companions.}
 \label{fig:cohface_f4_overlay}
 \end{figure}
+
+Figure~\ref{fig:cohface_f4_overlay} is therefore interpreted at the level of
+topology rather than by selecting a visually pleasing trace. In the COHFACE
+example, several fixed observations already follow the reference sufficiently
+well that the state-space readout should preserve, rather than replace, strong
+native respiratory evidence. In the MAHNOB-HCI example, many fixed observations
+are flat, noisy, or phase-inconsistent under the same visual window, and the
+PARH-OSSM waveform remains limited for the same reason. This is the visual
+counterpart of Table~\ref{tab:cohface_t4}: the model can improve the
+rate-oriented path, but full waveform recovery still depends on whether the
+camera-derived observation bank contains recoverable morphology.
 
 \subsection*{Calibration diagnostics}
 The calibration diagnostics summarise a limited but important boundary.
@@ -874,7 +878,7 @@ It shows that the reported MAHNOB-HCI rate track (2.410 bpm) is close to the
 best diagnostic source available inside the readout bank (2.390 bpm), so the
 dominant hard-regime failure is not merely the last readout switch.
 
-\begin{table}[!t]
+\begin{table}[H]
 \centering
 \caption{MAHNOB observability failure taxonomy from the complete-cohort label-free
 diagnostic analysis. The table should be read as diagnostic evidence, not as a proposed model
@@ -899,6 +903,7 @@ Very low label-free observability & 2/525 & 3.715 & 0.660 & Very low label-free 
 \end{tabular}
 \renewcommand{\arraystretch}{1.0}
 \end{table}
+\FloatBarrier
 
 Table~\ref{tab:observability_taxonomy} separates several failure mechanisms
 that would be hidden by a single MAE value. The largest category is bounded by
@@ -937,7 +942,7 @@ in the Supplementary Information. The main text keeps the graphical comparison
 ladder because it directly links the fixed observation bank, the comparator, and
 the PARH-OSSM readout.
 
-\begin{figure}[!t]
+\begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/F5_mechanism_activation.pdf}
 \caption{All-base complete-cohort comparison ladder for the eight fixed observation
@@ -978,7 +983,7 @@ the optical-flow bridge is a useful observation route for rate-oriented
 analysis, but it is not a universal replacement for raw OF. We therefore treat
 it as an additional observation route rather than collapsing the two.
 
-\begin{figure}[!t]
+\begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/F6_failure_cases.pdf}
 \caption{Failure cases selected from predefined manifests. Top row: the
