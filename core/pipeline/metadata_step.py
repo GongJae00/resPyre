@@ -2,13 +2,19 @@ import json
 import os
 import subprocess
 import pickle
-from datetime import datetime
+import socket
+import getpass
+import platform
+import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 from core.pipeline.common import (
     _dataset_results_dir,
     _sanitize_run_label,
     resolve_target_run_dirs,
+    _atomic_json_dump,
 )
 
 def _load_json(path: Path) -> Optional[Dict]:
@@ -115,22 +121,21 @@ def write_run_status(
     completed_steps: Optional[Iterable[str]] = None,
     error_summary: str = "",
     error_traceback: str = "",
+    heartbeat_only: bool = False,
+    extra: Optional[Dict] = None,
 ) -> str:
     """Write a run_status.json payload to `run_dir`."""
     p = Path(run_dir)
     p.mkdir(parents=True, exist_ok=True)
     status_path = p / "run_status.json"
     prev = _load_json(status_path)
-    started_at = None
-    prev_run_instance = None
-    prev_completed_at = None
-    if isinstance(prev, dict):
-        started_at = prev.get("started_at")
-        prev_run_instance = prev.get("run_instance_started_at")
-        prev_completed_at = prev.get("completed_at")
-    now_iso = datetime.utcnow().isoformat() + "Z"
+    prev = prev if isinstance(prev, dict) else {}
+    started_at = prev.get("started_at")
+    prev_run_instance = prev.get("run_instance_started_at")
+    prev_completed_at = prev.get("completed_at")
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     status_l = str(status).lower()
-    if status_l == "running":
+    if status_l == "running" and not heartbeat_only:
         run_instance_started_at = now_iso
         completed_at = None
     else:
@@ -139,22 +144,31 @@ def write_run_status(
             completed_at = now_iso
         else:
             completed_at = prev_completed_at
+    runtime = prev.get("runtime") if isinstance(prev.get("runtime"), dict) else {}
+    if not runtime:
+        runtime = capture_runtime_context()
+    heartbeat_seq = int(prev.get("heartbeat_seq", 0) or 0) + 1
     payload = {
-        "schema_version": "run_status.v1",
+        "schema_version": "run_status.v2",
         "status": str(status),
         "started_at": started_at or now_iso,
         "run_instance_started_at": run_instance_started_at,
         "completed_at": completed_at,
         "updated_at": now_iso,
-        "command": command,
-        "config_path": config_path,
-        "steps": list(steps or []),
-        "completed_steps": list(completed_steps or []),
-        "error_summary": error_summary or "",
-        "error_traceback": error_traceback or "",
+        "heartbeat_at": now_iso,
+        "heartbeat_seq": heartbeat_seq,
+        "duration_sec": _duration_seconds(started_at or now_iso, completed_at),
+        "command": command or prev.get("command", ""),
+        "config_path": config_path or prev.get("config_path", ""),
+        "steps": list(steps or prev.get("steps", [])),
+        "completed_steps": list(completed_steps or prev.get("completed_steps", [])),
+        "error_summary": error_summary or prev.get("error_summary", ""),
+        "error_traceback": error_traceback or prev.get("error_traceback", ""),
+        "runtime": runtime,
     }
-    with open(status_path, "w", encoding="utf-8") as fp:
-        json.dump(payload, fp, ensure_ascii=False, indent=2)
+    if extra:
+        payload["extra"] = dict(extra)
+    _atomic_json_dump(payload, str(status_path), indent=2)
     return str(status_path.resolve())
 
 def mark_run_status_bulk(
@@ -167,6 +181,8 @@ def mark_run_status_bulk(
     completed_steps: Optional[Iterable[str]] = None,
     error_summary: str = "",
     error_traceback: str = "",
+    heartbeat_only: bool = False,
+    extra: Optional[Dict] = None,
 ) -> List[str]:
     """Write run_status.json for multiple run directories."""
     written = []
@@ -181,15 +197,125 @@ def mark_run_status_bulk(
                 completed_steps=completed_steps,
                 error_summary=error_summary,
                 error_traceback=error_traceback,
+                heartbeat_only=heartbeat_only,
+                extra=extra,
             )
         )
     return written
+
+
+def touch_run_status_bulk(run_dirs: Iterable[str]) -> List[str]:
+    return mark_run_status_bulk(run_dirs, status="running", heartbeat_only=True)
+
+
+class RunStatusHeartbeat:
+    def __init__(self, run_dirs: Iterable[str], interval_sec: float = 60.0):
+        self.run_dirs = [str(d) for d in run_dirs]
+        self.interval_sec = max(5.0, float(interval_sec))
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _loop(self):
+        while not self._stop.wait(self.interval_sec):
+            try:
+                touch_run_status_bulk(self.run_dirs)
+            except Exception:
+                pass
+
+    def start(self):
+        if self._thread is not None:
+            return self
+        self._thread = threading.Thread(target=self._loop, name="run-status-heartbeat", daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=min(2.0, self.interval_sec))
+        return self
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, exc_type, exc, tb):
+        self.stop()
+        return False
+
 
 def _git_commit(cwd) -> Optional[str]:
     try:
         return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=str(cwd), stderr=subprocess.DEVNULL).decode().strip()
     except Exception:
         return None
+
+
+def _git_branch(cwd) -> Optional[str]:
+    try:
+        return subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd=str(cwd), stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return None
+
+
+def _gpu_summary() -> List[Dict[str, str]]:
+    try:
+        out = subprocess.check_output(
+            [
+                'nvidia-smi',
+                '--query-gpu=name,driver_version,memory.total,memory.free',
+                '--format=csv,noheader,nounits',
+            ],
+            stderr=subprocess.DEVNULL,
+        ).decode('utf-8', errors='ignore').strip()
+    except Exception:
+        return []
+    rows = []
+    for line in out.splitlines():
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) < 4:
+            continue
+        rows.append({
+            'name': parts[0],
+            'driver_version': parts[1],
+            'memory_total_mib': parts[2],
+            'memory_free_mib': parts[3],
+        })
+    return rows
+
+
+def capture_runtime_context() -> Dict[str, object]:
+    return {
+        'host': socket.gethostname(),
+        'user': getpass.getuser(),
+        'pid': int(os.getpid()),
+        'ppid': int(os.getppid()),
+        'cwd': os.getcwd(),
+        'python_executable': os.sys.executable,
+        'python_realpath': os.path.realpath(os.sys.executable),
+        'python_version': platform.python_version(),
+        'platform': platform.platform(),
+        'pythonpath_env': os.environ.get('PYTHONPATH', ''),
+        'pyenv_version_file': (Path(os.getcwd()) / '.python-version').read_text(encoding='utf-8').strip() if (Path(os.getcwd()) / '.python-version').exists() else '',
+        'git_commit': _git_commit(Path(os.getcwd())),
+        'git_branch': _git_branch(Path(os.getcwd())),
+        'gpu': _gpu_summary(),
+    }
+
+
+def _duration_seconds(started_at: Optional[str], completed_at: Optional[str]) -> Optional[float]:
+    def _parse(ts: Optional[str]):
+        if not ts:
+            return None
+        try:
+            return datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
+        except Exception:
+            return None
+    a = _parse(started_at)
+    b = _parse(completed_at)
+    if a is None or b is None:
+        return None
+    return max(0.0, float((b - a).total_seconds()))
+
 
 def _detect_eval_settings(run_dir: Path) -> Optional[Dict]:
     candidates = [
@@ -252,6 +378,9 @@ def _default_artifacts(run_dir: Path) -> Dict[str, str]:
         eval_settings = metrics_dir / 'eval_settings.json'
         if eval_settings.exists():
             artifacts['eval_settings'] = str(eval_settings.resolve())
+        evaluation_timing = metrics_dir / 'evaluation_timing.json'
+        if evaluation_timing.exists():
+            artifacts['evaluation_timing_json'] = str(evaluation_timing.resolve())
     
     if logs_dir.exists():
         csv = logs_dir / 'method_quality.csv'
@@ -330,11 +459,12 @@ def run_metadata_generation(
         run_dir = Path(d_dir).resolve()
         
         payload = {
-            'created': datetime.utcnow().isoformat() + 'Z',
+            'created': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             'run_dir': str(run_dir),
             'command': command,
             'notes': notes,
             'git_commit': _git_commit(run_dir), # Try to get git commit from CWD of run or project root
+            'git_branch': _git_branch(run_dir),
             'artifacts': _default_artifacts(run_dir),
             'paths': {
                 'metrics': str((run_dir / 'metrics').resolve()),
@@ -376,6 +506,11 @@ def run_metadata_generation(
         if isinstance(run_status, dict):
             payload['run_status'] = run_status
             payload['status'] = run_status.get('status')
+            runtime = run_status.get('runtime')
+            if isinstance(runtime, dict):
+                payload['runtime'] = runtime
+            payload['heartbeat_at'] = run_status.get('heartbeat_at')
+            payload['duration_sec'] = run_status.get('duration_sec')
         if unused_merged:
             seen = set()
             ordered = []

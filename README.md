@@ -7,20 +7,28 @@ The codebase is organized around two layers:
 - `core/`: pipeline orchestration, evaluation, visualization, metadata/reporting
 
 The current repository is centered on chest-motion respiration experiments and the
-Base / KFstd / PARH-OSSM comparison workflow used in the paper artifacts.
+Base, OSSM-KF, and PARH-OSSM comparison workflow used in the paper artifacts.
+For the paper-facing PARH-OSSM validation path, use `execute.md`. Diagnostic
+scripts are retained only when they support the final paper package, public
+audits, or regression tests.
 
 ## What Is In Scope
 
-- Datasets: `BP4D`, `COHFACE`, `MAHNOB`
-- Base observation methods: `of_farneback`, `dof`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`
+- Datasets: `COHFACE`, `MAHNOB-HCI`, plus V4V/SCAMPS as weak external evidence in `execute.md`
+- Base observation methods: `of_farneback`, `of_disp_bridge`, `dof`, `dof_disp_bridge`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`, `profile1d_consensus`
 - Oscillator-wrapped methods via `<base>__<head>` naming
-- Main wired heads: `kfstd`, `parh_ossm`, `simple_bandpass`, `narossm`
+- Publicly documented heads: `kfstd` (`OSSM-KF` comparator), `parh_ossm`, `simple_bandpass`
+- Legacy compatibility head: `narossm`
 - End-to-end steps from one CLI: `estimate`, `evaluate`/`metrics`, `eda`, `visualize`, `metadata`
 
-Two production configs currently in the repo:
+The stable config examples currently in the repo:
 
-- `configs/cohface_parh_ossm_prod.json`
-- `configs/mahnob_parh_ossm_prod.json`
+- `configs/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json`
+- `configs/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json`
+
+The final paper-facing full validation is intentionally driven by `execute.md`,
+because it also wires target-side priors, the adaptive observation law, and the
+post-run rate-source / observability audits.
 
 ## Repository Layout
 
@@ -31,16 +39,19 @@ resPyre/
 │   ├── observations/      # Base motion / profile observation methods
 │   └── models/
 │       ├── core/          # Shared oscillator parameters and base helpers
-│       └── heads/         # KFstd, PARH-OSSM, and other oscillator heads
+│       └── heads/         # OSSM-KF, PARH-OSSM, and other oscillator heads
+├── analysis/              # Paper-facing audit artifacts and compact priors
 ├── core/
 │   ├── evaluation/        # Metrics, plotting, frame-log utilities
 │   ├── pipeline/          # Runner, wrapper, evaluation, visualization, metadata
 │   └── utils/             # Config loader and shared utilities
 ├── configs/               # Experiment configs
 ├── dataset/               # Default dataset root
+├── paper/                 # Manuscript, figures, tables, and SI source
 ├── results/               # Generated run artifacts
 ├── setup/                 # Environment bootstrap
 ├── tests/                 # Regression and pipeline tests
+├── execute.md             # Final paper-facing regeneration ledger
 └── main.py                # Primary CLI entry point
 ```
 
@@ -80,24 +91,24 @@ The expected dataset subdirectories are:
 
 ## Quick Start
 
-Run a production config:
+Run a stable config:
 
 ```bash
-python main.py --config configs/cohface_parh_ossm_prod.json
-python main.py --config configs/mahnob_parh_ossm_prod.json
+python main.py --config configs/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json
+python main.py --config configs/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json
 ```
 
 Run only the first sample from each configured dataset:
 
 ```bash
-python main.py --config configs/cohface_parh_ossm_prod.json --debug
+python main.py --config configs/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json --debug
 ```
 
 Override the results root at runtime:
 
 ```bash
 python main.py \
-  --config configs/cohface_parh_ossm_prod.json \
+  --config configs/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json \
   --results /tmp/respyre_runs
 ```
 
@@ -116,8 +127,8 @@ A minimal config looks like this:
 
 ```json
 {
-  "name": "cohface_parh_ossm_prod",
-  "results_dir": "results/cohface_parh_ossm_prod",
+  "name": "cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
+  "results_dir": "results/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
   "datasets": [
     {
       "name": "COHFACE",
@@ -197,12 +208,12 @@ For wrapped methods, `core/pipeline/wrapped_method.py` also attaches:
 
 ### 3. Evaluation
 
-`core/pipeline/evaluation_step.py` computes four artifact families:
+`core/pipeline/evaluation_step.py` computes four artifact groups:
 
 - time-domain metrics: waveform fidelity on aligned normalized signals
 - frequency-domain metrics: windowed RPM accuracy and spectral-shape statistics
 - filter diagnostics: NIS/failure/calibration summaries from frame logs
-- waveform comparison metrics: unified output comparison for Base / KFstd / PARH workflows
+- waveform comparison metrics: unified output comparison for Base, OSSM-KF, and PARH workflows
 
 Evaluation settings are persisted to `metrics/eval_settings.json`.
 
@@ -218,6 +229,23 @@ If requested in `steps`, the pipeline can also run:
 Run bookkeeping is handled in `core/pipeline/metadata_step.py`.
 Each run directory receives `run_status.json`, and `metadata.json` is emitted even when
 the pipeline fails part-way through.
+
+## Paper-Facing Final Path
+
+The final validation path is:
+
+```text
+fixed observation classes
+-> adaptive observation law
+-> PARH-OSSM state-space update
+-> bounded z_osc rate readout
+-> z_full waveform diagnostics
+```
+
+`OSSM-KF` is a comparator and external timing-evidence source in the final
+materialization command. It is not a nested fallback that replaces PARH-OSSM.
+Run the commands in `execute.md` to regenerate the current COHFACE and MAHNOB
+tail-aligned validation bundles and required post-run audits.
 
 ## Results Layout
 
@@ -269,13 +297,6 @@ Current behavior relevant to downstream analysis:
 - PARH additionally stores `z_osc`, `z_full`, causal/smoothed variants, decomposition terms, and diagnostic arrays
 - waveform comparison code treats `z_full` as the main PARH waveform output for paper-style comparison
 
-Repository notes and analysis documents related to this workflow live in:
-
-- `notes/PARH_OSSM_V1_RECONCILIATION.md`
-- `notes/PARH_OSSM_V1_TRUTH_LOCK.md`
-- `analysis/parh_truth_reconciliation.md`
-- `analysis/parh_readiness_gate_final.md`
-
 ## Extending The Framework
 
 ### Add a dataset
@@ -307,4 +328,4 @@ Run the regression suite:
 pytest -q
 ```
 
-If you only want to validate a config wiring path, `--debug` is the fastest smoke test.
+If you only want to validate a config wiring path, use `--debug` for a quick wiring check.

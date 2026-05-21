@@ -1,0 +1,11 @@
+# Final Reference and Format Audit
+
+- Checks: 3
+- Failed: 0
+- Warnings: 0
+
+| audit | item | status | path | detail |
+| --- | --- | --- | --- | --- |
+| reference_and_format | submission_manuscript_build_log | pass | `paper/main.log` | absent after cleanup; run latexmk to regenerate detailed citation/box diagnostics |
+| reference_and_format | main_bbl_current | pass | `paper/main.bbl` | bibliography materialized |
+| reference_and_format | submission_pdf | pass | `paper/main.pdf` | Scientific Reports manuscript PDF |

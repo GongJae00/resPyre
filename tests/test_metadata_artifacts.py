@@ -20,6 +20,7 @@ def test_metadata_artifacts_detects_new_metrics_and_png_plots():
     open(os.path.join(metrics_dir, "metrics_time_domain.pkl"), "wb").close()
     open(os.path.join(metrics_dir, "metrics_freq_domain.pkl"), "wb").close()
     open(os.path.join(metrics_dir, "eval_settings.json"), "w").close()
+    open(os.path.join(metrics_dir, "evaluation_timing.json"), "w").close()
     open(os.path.join(tmp, "run_status.json"), "w").close()
     open(os.path.join(plots_dir, "a.png"), "wb").close()
     open(os.path.join(plots_dir, "b.png"), "wb").close()
@@ -31,6 +32,7 @@ def test_metadata_artifacts_detects_new_metrics_and_png_plots():
     assert "metrics_freq_pickle" in artifacts
     assert artifacts.get("plots_count") == 2
     assert "run_status" in artifacts
+    assert "evaluation_timing_json" in artifacts
 
 
 def test_metadata_generation_includes_method_quality_artifacts():

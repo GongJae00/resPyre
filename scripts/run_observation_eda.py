@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run observation-family and preprocessing EDA from saved trial PKLs.
+"""Run observation-class and preprocessing EDA from saved trial PKLs.
 
 This script is designed for the next-generation PARH-OSSM redesign. It focuses
-on the observation channel: raw family proxies, preprocessing stages, alignment
+on the observation channel: raw class proxies, preprocessing stages, alignment
 to the ground-truth waveform, and spectrum-level distortion characteristics.
 """
 
@@ -34,12 +34,16 @@ FAMILY_INFO = {
         "base_methods": {"of_farneback", "of"},
     },
     "OF_bridge": {
-        "cache": "obs_of.npy",
+        "cache": "obs_of_bridge.npy",
         "base_methods": {"of_disp_bridge", "of_displacement_bridge", "of_bridge"},
     },
     "DoF": {
         "cache": "obs_dof.npy",
         "base_methods": {"dof"},
+    },
+    "DoF_bridge": {
+        "cache": "obs_dof_bridge_v2.npy",
+        "base_methods": {"dof_disp_bridge", "dof_bridge"},
     },
     "P1D_lin": {
         "cache": "obs_p1d_linear.npy",
@@ -52,6 +56,10 @@ FAMILY_INFO = {
     "P1D_cub": {
         "cache": "obs_p1d_cubic.npy",
         "base_methods": {"profile1d_cubic", "profile1d cubic"},
+    },
+    "P1D_cons": {
+        "cache": "obs_p1d_consensus_v1.npy",
+        "base_methods": {"profile1d_consensus", "profile1d_cons", "p1d_cons"},
     },
 }
 
@@ -66,6 +74,12 @@ STAGE_ORDER = [
 ]
 
 
+def trapz(y: np.ndarray, x: np.ndarray) -> float:
+    """Compatibility wrapper for NumPy versions without np.trapezoid."""
+    trapezoid = getattr(np, "trapezoid", np.trapz)
+    return float(trapezoid(y, x))
+
+
 def canonical_family(name: str) -> str:
     key = str(name).strip().lower().replace("-", "_")
     if "__" in key:
@@ -75,12 +89,17 @@ def canonical_family(name: str) -> str:
         "of_disp_bridge": "OF_bridge",
         "of": "OF",
         "dof": "DoF",
+        "dof_disp_bridge": "DoF_bridge",
         "profile1d_linear": "P1D_lin",
+        "profile1d_linear_bridge": "P1D_lin_bridge",
         "profile1d linear": "P1D_lin",
         "profile1d_quadratic": "P1D_quad",
+        "profile1d_quadratic_bridge": "P1D_quad_bridge",
         "profile1d quadratic": "P1D_quad",
         "profile1d_cubic": "P1D_cub",
+        "profile1d_cubic_bridge": "P1D_cub_bridge",
         "profile1d cubic": "P1D_cub",
+        "profile1d_consensus": "P1D_cons",
     }
     return family_map.get(key, key)
 
@@ -220,7 +239,7 @@ def spectral_summary(signal: np.ndarray, fs: float, f_min: float, f_max: float) 
     freqs, psd = sps.welch(x, fs=fs, nperseg=nperseg, noverlap=nperseg // 2)
     psd = np.asarray(psd, dtype=np.float64)
     freqs = np.asarray(freqs, dtype=np.float64)
-    total = float(np.trapz(psd, freqs)) if freqs.size > 1 else float(np.sum(psd))
+    total = trapz(psd, freqs) if freqs.size > 1 else float(np.sum(psd))
     if not np.isfinite(total) or total <= 1e-12:
         total = np.nan
 
@@ -254,7 +273,7 @@ def spectral_summary(signal: np.ndarray, fs: float, f_min: float, f_max: float) 
         if np.count_nonzero(mask) < 1:
             return np.nan
         if freqs[mask].size > 1:
-            val = float(np.trapz(psd[mask], freqs[mask]))
+            val = trapz(psd[mask], freqs[mask])
         else:
             val = float(np.sum(psd[mask]))
         if not np.isfinite(total) or total <= 1e-12:
@@ -581,7 +600,7 @@ def parse_args():
     parser.add_argument(
         "--config",
         type=Path,
-        default=ROOT / "configs" / "cohface_parh_ossm_prod.json",
+        default=ROOT / "configs" / "cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json",
         help="Config used to reproduce current preprocess settings",
     )
     parser.add_argument(

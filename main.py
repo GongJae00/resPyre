@@ -18,12 +18,16 @@ from components.observations.methods import (
     OF_Model,
     OFDisplacementBridge_Model,
     DoF_Model,
+    DoFDisplacementBridge_Model,
     profile1D_Model,
+    Profile1DDisplacementBridge_Model,
+    Profile1DConsensus_Model,
     OFP1DQuadraticPair_Model,
     AssistOFP1DQuadratic_Model,
     AssistOFBridgeOF_Model,
     AssistOFBridgeP1DQuadratic_Model,
     FusionOFP1DQuadratic_Model,
+    FamilyMultiViewHypothesisSet_Model,
 )
 from core.pipeline.wrapped_method import create_wrapped_method
 from core.pipeline.runner import extract_respiration
@@ -47,18 +51,30 @@ def _method_family_key(name: str):
         return 69
     if base == 'dof':
         return 20
+    if base in ('dof_disp_bridge', 'dof_bridge', 'dof_displacement_bridge'):
+        return 25
+    if base.startswith('profile1d_linear_bridge'):
+        return 35
     if base.startswith('profile1d_linear'):
         return 30
+    if base.startswith('profile1d_quadratic_bridge'):
+        return 45
     if base.startswith('profile1d_quadratic'):
         return 40
+    if base.startswith('profile1d_cubic_bridge'):
+        return 55
     if base.startswith('profile1d_cubic'):
         return 50
+    if base.startswith('profile1d_consensus'):
+        return 57
     if base.startswith('pair_of_p1d_quadratic'):
         return 60
     if base.startswith('assist_of_p1d_quadratic'):
         return 68
     if base.startswith('fusion_of_p1d_quadratic'):
         return 70
+    if base.startswith('family_multiview_hypothesis_set'):
+        return 75
     return 99
 
 
@@ -164,6 +180,16 @@ def _build_methods(method_configs, global_cfg=None):
             methods.append(OFDisplacementBridge_Model())
         elif name.lower() == 'dof':
             methods.append(DoF_Model())
+        elif name.lower() in ('dof_disp_bridge', 'dof_bridge', 'dof_displacement_bridge'):
+            methods.append(DoFDisplacementBridge_Model())
+        elif name.lower() in ('profile1d_linear_bridge', 'profile1d_linear_displacement_bridge'):
+            methods.append(Profile1DDisplacementBridge_Model('linear'))
+        elif name.lower() in ('profile1d_quadratic_bridge', 'profile1d_quadratic_displacement_bridge'):
+            methods.append(Profile1DDisplacementBridge_Model('quadratic'))
+        elif name.lower() in ('profile1d_cubic_bridge', 'profile1d_cubic_displacement_bridge'):
+            methods.append(Profile1DDisplacementBridge_Model('cubic'))
+        elif name.lower() in ('profile1d_consensus', 'profile1d_cons'):
+            methods.append(Profile1DConsensus_Model())
         elif name.lower().startswith('profile1d'):
             if ' ' in name:
                 interp = name.split(' ')[1]
@@ -186,6 +212,8 @@ def _build_methods(method_configs, global_cfg=None):
             'assistant_ofbridge_p1d_quadratic',
         ):
             methods.append(AssistOFBridgeP1DQuadratic_Model())
+        elif name.lower() in ('family_multiview_hypothesis_set', 'family_hypothesis_set', 'family_multiview', 'adaptive_family_views'):
+            methods.append(FamilyMultiViewHypothesisSet_Model())
         else:
             print(f"Warning: Unknown method {name}")
     return methods
@@ -196,7 +224,7 @@ def _top_level_config_usage(cfg: dict) -> dict:
         "name", "results_dir", "datasets", "methods",
         "eval", "oscillator", "preproc", "quality", "trust",
         "gating", "gating_scope", "steps",
-        "config",
+        "config", "storage",
     }
     seen = set(cfg.keys())
     return {
@@ -240,6 +268,7 @@ def main():
     run_metadata_step = 'metadata' in steps
 
     eval_cfg = cfg.get('eval', {})
+    storage_cfg = cfg.get('storage', {}) if isinstance(cfg.get('storage', {}), dict) else {}
     common_eval_params = {
         'win_size': eval_cfg.get('win_size', 30.0),
         'stride': eval_cfg.get('stride', 1.0),
@@ -274,6 +303,7 @@ def main():
         bootstrap_run_dirs,
         mark_run_status_bulk,
         run_metadata_generation,
+        RunStatusHeartbeat,
     )
     planned_run_dirs = bootstrap_run_dirs(
         results_dir,
@@ -293,45 +323,52 @@ def main():
         config_path=args.config,
         steps=planned_steps,
         completed_steps=[],
+        extra={"config_name": cfg.get('name', ''), "debug": bool(args.debug)},
     )
 
     completed_steps = []
     pipeline_error = None
     error_trace = ""
     try:
-        if run_estimate:
-            extract_respiration(
-                datasets=datasets,
-                methods=methods,
-                results_dir=results_dir,
-                run_label=cfg.get('name')
-            )
-            completed_steps.append("estimate")
+        with RunStatusHeartbeat(planned_run_dirs, interval_sec=60.0):
+            if run_estimate:
+                extract_respiration(
+                    datasets=datasets,
+                    methods=methods,
+                    results_dir=results_dir,
+                    run_label=cfg.get('name'),
+                    storage_cfg=storage_cfg,
+                )
+                completed_steps.append("estimate")
+                mark_run_status_bulk(planned_run_dirs, status="running", command=cmd_str, config_path=args.config, steps=planned_steps, completed_steps=completed_steps, heartbeat_only=True)
 
-        if run_evaluate:
-            from core.pipeline.evaluation_step import run_evaluation
-            run_evaluation(results_dir, cfg.get('name'), **eval_params)
-            completed_steps.append("evaluate")
+            if run_evaluate:
+                from core.pipeline.evaluation_step import run_evaluation
+                run_evaluation(results_dir, cfg.get('name'), **eval_params)
+                completed_steps.append("evaluate")
+                mark_run_status_bulk(planned_run_dirs, status="running", command=cmd_str, config_path=args.config, steps=planned_steps, completed_steps=completed_steps, heartbeat_only=True)
 
-        if run_eda_step:
-            from analysis.run_innovation_eda import run_innovation_eda
-            run_innovation_eda(
-                results_dir,
-                cfg.get('name'),
-                allow_missing=bool(eval_cfg.get('allow_missing', False)),
-                strict=bool(eval_cfg.get('frame_log_strict', True)),
-            )
-            completed_steps.append("eda")
+            if run_eda_step:
+                from analysis.run_innovation_eda import run_innovation_eda
+                run_innovation_eda(
+                    results_dir,
+                    cfg.get('name'),
+                    allow_missing=bool(eval_cfg.get('allow_missing', False)),
+                    strict=bool(eval_cfg.get('frame_log_strict', True)),
+                )
+                completed_steps.append("eda")
+                mark_run_status_bulk(planned_run_dirs, status="running", command=cmd_str, config_path=args.config, steps=planned_steps, completed_steps=completed_steps, heartbeat_only=True)
 
-        if run_visualize_step:
-            from core.pipeline.visualize_step import run_visualization
-            run_visualization(
-                results_dir,
-                cfg.get('name'),
-                **common_eval_params,
-                frame_log_strict=bool(eval_cfg.get('frame_log_strict', True)),
-            )
-            completed_steps.append("visualize")
+            if run_visualize_step:
+                from core.pipeline.visualize_step import run_visualization
+                run_visualization(
+                    results_dir,
+                    cfg.get('name'),
+                    **common_eval_params,
+                    frame_log_strict=bool(eval_cfg.get('frame_log_strict', True)),
+                )
+                completed_steps.append("visualize")
+                mark_run_status_bulk(planned_run_dirs, status="running", command=cmd_str, config_path=args.config, steps=planned_steps, completed_steps=completed_steps, heartbeat_only=True)
     except Exception as exc:
         pipeline_error = exc
         error_trace = traceback.format_exc()

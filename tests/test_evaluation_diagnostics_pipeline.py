@@ -250,6 +250,7 @@ def test_calibration_split_overstrict_vs_truefail():
     log_a = {"data": data_a, "idx": idx}
     rec_a = _compute_filter_diag_record(
         log_obj=log_a,
+        payload_diagnostics=None,
         method_name="m",
         fname="x",
         data_file_rel="x.pkl",
@@ -276,6 +277,7 @@ def test_calibration_split_overstrict_vs_truefail():
     log_b = {"data": data_b, "idx": idx}
     rec_b = _compute_filter_diag_record(
         log_obj=log_b,
+        payload_diagnostics=None,
         method_name="m",
         fname="x",
         data_file_rel="x.pkl",

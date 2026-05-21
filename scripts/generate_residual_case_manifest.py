@@ -2,13 +2,22 @@
 """Generate residual-focused case-study manifests for PARH analysis."""
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-FAMILY_ORDER = ["OF", "OF_bridge", "P1D_lin", "P1D_quad", "P1D_cub", "DoF"]
+from components.observations.semantics import CANONICAL_OBSERVATION_FAMILY_ORDER, get_observation_family_semantics
+
+FAMILY_ORDER = [
+    str(get_observation_family_semantics(name)["display_name"])
+    for name in CANONICAL_OBSERVATION_FAMILY_ORDER
+]
 
 
 def ordered_families(families):
@@ -105,12 +114,12 @@ def parse_args():
     parser.add_argument(
         "--waveform-csv",
         type=Path,
-        default=root / "results" / "20260408_cohface_prod_ofbridge_full" / "cohface_parh_ossm_prod_ofbridge" / "metrics" / "metrics_waveform_raw.csv",
+        default=root / "results" / "20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow" / "cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons" / "metrics" / "metrics_waveform_raw.csv",
     )
     parser.add_argument(
         "--freq-csv",
         type=Path,
-        default=root / "results" / "20260408_cohface_prod_ofbridge_full" / "cohface_parh_ossm_prod_ofbridge" / "metrics" / "metrics_freq_domain_raw.csv",
+        default=root / "results" / "20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow" / "cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons" / "metrics" / "metrics_freq_domain_raw.csv",
     )
     parser.add_argument(
         "--dataset-name",

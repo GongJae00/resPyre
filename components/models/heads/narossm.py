@@ -246,10 +246,11 @@ class oscillator_NAROSSM(_BaseOscillatorHead):
 
             # ── 4. Innovation ──
             y_t = float(y[t])
-            e_t = y_t - float(H @ x_pred)
+            y_pred_t = float((H @ x_pred).item())
+            e_t = y_t - y_pred_t
 
             # ── 5. Innovation variance tracking & Adaptive R ──
-            HP = float(H @ P_pred @ H.T)
+            HP = float((H @ P_pred @ H.T).item())
             if t >= WARMUP_FRAMES:
                 # Always track C_e (even in LTI mode) so that on LTI exit
                 # R_t can immediately recover to the correct noise level.
@@ -421,7 +422,7 @@ class oscillator_NAROSSM(_BaseOscillatorHead):
             logger.log_state(
                 t, x, P,
                 y_t=y_t,
-                y_pred=float(H @ x_pred),
+                y_pred=y_pred_t,
                 v_t=e_t,
                 nis=nis_empirical,
                 lambda_t=lambda_t,
@@ -539,6 +540,7 @@ class oscillator_NAROSSM(_BaseOscillatorHead):
 
         # ── Save frame log ──
         aux_dir = (meta or {}).get('aux_save_dir')
+        save_frame_logs = bool((meta or {}).get('save_frame_logs', True))
         trial_key = str((meta or {}).get('trial_key') or "").strip()
         if not trial_key:
             short_key, _ = derive_trial_identifiers(
@@ -550,7 +552,7 @@ class oscillator_NAROSSM(_BaseOscillatorHead):
                 sample_index=0,
             )
             trial_key = short_key
-        if aux_dir and trial_key:
+        if aux_dir and trial_key and save_frame_logs:
             log_dir = os.path.join(aux_dir, 'frame_logs')
             os.makedirs(log_dir, exist_ok=True)
             base_key = sanitize_trial_key(trial_key, fallback="trial")

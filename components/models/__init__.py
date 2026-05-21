@@ -4,6 +4,7 @@ from .heads.kf_std import oscillator_KFstd
 from .heads.simple_bandpass import oscillator_SimpleBandpass
 from .heads.narossm import oscillator_NAROSSM
 from .heads.parh_ossm import oscillator_PARH_OSSM
+from .heads.parh_resonator_adaptive import oscillator_PARH_ResonatorAdaptive
 
 # Archived heads — import conditionally for backward compatibility
 try:
@@ -34,6 +35,9 @@ HEAD_REGISTRY = {
     "narossm": oscillator_NAROSSM,
     "parh_ossm": oscillator_PARH_OSSM,
     "parhossm": oscillator_PARH_OSSM,
+    "parh_resonator_adaptive": oscillator_PARH_ResonatorAdaptive,
+    "parhresonatoradaptive": oscillator_PARH_ResonatorAdaptive,
+    "adaptive_resonator": oscillator_PARH_ResonatorAdaptive,
 }
 
 # Register archived heads if available

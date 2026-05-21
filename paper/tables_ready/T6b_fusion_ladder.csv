@@ -1,7 +1,13 @@
-dataset,block,rung,method,family,MAE,RMSE,PearsonR,waveform_CCC,waveform_MAE,waveform_DTW
-COHFACE,T3_rate,best_single_base,profile1D quadratic,P1D_quad,0.1950,0.2700,0.9500,,,
-COHFACE,T3_rate,best_single_kfstd,of_disp_bridge__kfstd,OF_bridge,0.2600,0.3350,0.8350,,,
-COHFACE,T3_rate,best_single_parh,profile1d_quadratic__parh_ossm,P1D_quad,0.2950,0.3700,0.8900,,,
-COHFACE,T4_waveform,best_single_base,profile1D quadratic,P1D_quad,,,,0.8114,0.4837,0.3676
-COHFACE,T4_waveform,best_single_kfstd,profile1d_quadratic__kfstd,P1D_quad,,,,0.8530,0.4157,0.3428
-COHFACE,T4_waveform,best_single_parh,profile1d_quadratic__parh_ossm,P1D_quad,,,,0.8547,0.4247,0.3442
+dataset,rung,observation_class,variant,method,rate_MAE,rate_PearsonR,waveform_CCC,waveform_MAE,waveform_DTW,strict_CCC,strict_NMAE_span,cycle_ppi_mae_s,source_layer
+COHFACE,direct_OF,OF,Base,of_farneback,0.2900,0.8900,0.7111,0.5758,0.4520,0.0069,0.2834,0.9136,20260409_cohface_observation_class_full_dataset
+COHFACE,direct_DoF,DoF,Base,DoF,2.4000,0.3700,0.4375,0.7918,0.5509,0.0002,377.8282,1.8646,20260409_cohface_observation_class_full_dataset
+COHFACE,direct_P1D_quad,P1D_quad,Base,profile1D quadratic,0.1950,0.9500,0.8114,0.4837,0.3676,0.0017,53.4019,0.7175,20260409_cohface_observation_class_full_dataset
+COHFACE,direct_P1D_cons,P1D_cons,Base,profile1d_consensus,0.2200,0.9200,0.7859,0.4819,0.3953,0.1044,0.9488,0.6018,20260409_cohface_observation_class_full_dataset
+COHFACE,OSSM-KF (P1D quad),P1D_quad,OSSM-KF,profile1d_quadratic__ossm_kf,0.4850,0.8000,0.8524,0.4169,0.3420,0.1192,0.8671,0.5336,20260409_cohface_observation_class_full_dataset
+COHFACE,PARH-OSSM,PARH-OSSM,PARH-OSSM,parh_ossm,0.3350,0.8550,0.8585,0.4234,0.3475,0.1566,0.5485,0.3466,final_full_validation/cohface
+MAHNOB,direct_OF,OF,Base,of_farneback,6.2300,-0.0100,0.3447,0.9426,0.6610,0.0000,0.1872,1.4312,20260409_mahnob_observation_class_full_dataset
+MAHNOB,direct_DoF,DoF,Base,DoF,5.4200,-0.0500,0.4011,0.7924,0.5585,-0.0004,0.2060,1.4783,20260409_mahnob_observation_class_full_dataset
+MAHNOB,direct_P1D_quad,P1D_quad,Base,profile1D quadratic,6.6000,-0.0300,0.3522,0.9116,0.6020,0.0007,0.2363,1.6851,20260409_mahnob_observation_class_full_dataset
+MAHNOB,direct_P1D_cons,P1D_cons,Base,profile1d_consensus,5.7500,-0.0200,0.3739,0.9070,0.6213,0.0000,0.1866,1.4908,20260409_mahnob_observation_class_full_dataset
+MAHNOB,OSSM-KF (P1D quad),P1D_quad,OSSM-KF,profile1d_quadratic__ossm_kf,4.3250,-0.0200,0.3453,0.9105,0.6398,0.0000,0.1866,1.4037,20260409_mahnob_observation_class_full_dataset
+MAHNOB,PARH-OSSM,PARH-OSSM,PARH-OSSM,parh_ossm,2.4100,0.2300,0.3417,0.9103,0.6607,0.0000,0.2580,1.4798,final_full_validation/mahnob_tailaligned

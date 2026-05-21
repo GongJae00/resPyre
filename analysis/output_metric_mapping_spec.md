@@ -32,7 +32,7 @@ All methods evaluated under identical protocol; output_type distinguishes signal
 | Method Variant | Signal Source | output_type | Smoothing |
 |---------------|--------------|-------------|-----------|
 | Base | signal_hat | signal_hat | smoothed |
-| KFstd | signal_hat | signal_hat | smoothed |
+| OSSM-KF (internal `KFstd`) | signal_hat | signal_hat | smoothed |
 | PARH-OSSM | z_full | z_full | smoothed |
 | PARH-OSSM (supp) | z_osc | z_osc | smoothed |
 
@@ -41,6 +41,24 @@ All methods evaluated under identical protocol; output_type distinguishes signal
 | CCC | Lin's concordance correlation coefficient | signal vs GT waveform (sample-level) |
 | wMAE | Waveform mean absolute error | signal vs GT waveform (sample-level) |
 | DTW | Dynamic time warping distance (normalised) | signal vs GT waveform |
+
+### Waveform strict metrics (Table T4b: Strict Reconstruction)
+
+| Metric | Description | Computed on |
+|--------|-------------|-------------|
+| strict_CCC | Zero-lag, unit-preserving CCC | bandpassed estimate vs bandpassed GT |
+| strict_MAE | Zero-lag waveform MAE | bandpassed estimate vs bandpassed GT |
+| strict_RMSE | Zero-lag waveform RMSE | bandpassed estimate vs bandpassed GT |
+| strict_DTW | Zero-lag DTW distance | bandpassed estimate vs bandpassed GT |
+
+### Cycle-level metrics (Table T4c: Landmark Timing)
+
+| Metric | Description | Computed on |
+|--------|-------------|-------------|
+| peak_time_mae_s | Mean absolute peak timing error (s) | zero-lag strict pair |
+| trough_time_mae_s | Mean absolute trough timing error (s) | zero-lag strict pair |
+| cycle_ppi_mae_s | Peak-to-peak interval MAE (s) | zero-lag strict pair |
+| cycle_ie_abs_err | Absolute inhale:exhale ratio error | zero-lag strict pair |
 
 Interpretation boundary:
 
@@ -129,12 +147,12 @@ Added functions:
 Block 1b: Unified waveform metrics for ALL methods (CCC/wMAE/DTW).
 - **Before (2026-03-31):** Only z_full (smoothed/causal) for PARH-OSSM methods
 - **After (2026-04-02):** All methods get waveform evaluation via identical protocol
-- Base/KFstd: output_type='signal_hat' (smoothed)
+- Base and OSSM-KF: output_type='signal_hat' (smoothed)
 - PARH-OSSM: output_type='z_full' (smoothed + causal), 'z_osc' (smoothed supplement)
 - Outputs: `metrics_waveform_raw.csv` with columns: video, method, output_type, causal_or_smoothed, waveform_CCC, waveform_MAE, waveform_DTW, latency_ms
 
 Block 2: Rate metrics route through `track_hz` when available and `eval.use_track=true`.
-- KFstd/PARH-OSSM: windowed `track_hz` vs windowed GT instantaneous frequency
+- OSSM-KF and PARH-OSSM: windowed `track_hz` vs windowed GT instantaneous frequency
 - Base methods: legacy signal-spectral fallback when no `track_hz` exists
 
 Block 3: Filter diagnostics prefer saved payload diagnostics.

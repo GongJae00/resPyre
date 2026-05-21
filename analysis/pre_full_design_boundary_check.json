@@ -1,0 +1,1822 @@
+[
+  {
+    "name": "STATE_DIM",
+    "value": "8",
+    "category": "fixed_structure",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state-space structure or reference unit"
+  },
+  {
+    "name": "_REF_FPS",
+    "value": "20.0",
+    "category": "fixed_structure",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state-space structure or reference unit"
+  },
+  {
+    "name": "TAU_R_SEC",
+    "value": "2.5",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "R_ANCHOR_FRAC",
+    "value": "0.3",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "TAU_MAD_SEC",
+    "value": "2.5",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "TAU_KAPPA_SEC",
+    "value": "3.0",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "NU_MIN",
+    "value": "3.0",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "NU_MAX",
+    "value": "200.0",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "VB_ITERS",
+    "value": "3",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "Q_OBS_ROBUST_Z_SCALE",
+    "value": "2.0",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OBS_JUMP_SCALE",
+    "value": "3.0",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OBS_MIN",
+    "value": "0.05",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_DYN_FREQ_WEIGHT",
+    "value": "1.5",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_DYN_AMP_WEIGHT",
+    "value": "0.75",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_DYN_FREQ_REF_HZ",
+    "value": "0.06",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_PHASE_WEIGHT",
+    "value": "0.2",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_HELPER_WEIGHT",
+    "value": "0.45",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_FREQ_WEIGHT",
+    "value": "0.35",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_OBS_WEIGHT",
+    "value": "0.0",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_OBS_MODE",
+    "value": "'blend_support'",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_OBS_REF",
+    "value": "0.97",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_OBS_BAND",
+    "value": "0.08",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "GATE_PHASE_SIGMA",
+    "value": "0.8",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_ERR_SIGMA",
+    "value": "1.25",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_OSC_FREQ_REF_HZ",
+    "value": "0.08",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "TAU_AMP_SEC",
+    "value": "1.5",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "GATE_WARMUP_SEC",
+    "value": "0.75",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_DYN_GAMMA",
+    "value": "0.5",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_APER_GAMMA",
+    "value": "4.0",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "Q_APER_OBS_GAMMA",
+    "value": "0.0",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "QX_ADAPT_GAMMA_LEGACY",
+    "value": "0.5",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "FREQ_UPDATE_INTERVAL_SEC",
+    "value": "2.0",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "FREQ_CONFIRM_COUNT",
+    "value": "3",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "FREQ_MAX_STEP_HZ",
+    "value": "0.03",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "ENABLE_FREQ_RESCUE",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "FREQ_RESCUE_WINDOW_SEC",
+    "value": "4.0",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FREQ_RESCUE_MIN_SUPPORT",
+    "value": "0.75",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FREQ_RESCUE_MIN_QDYN",
+    "value": "0.6",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FREQ_RESCUE_MIN_MISMATCH_HZ",
+    "value": "0.07",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FREQ_RESCUE_HELPER_STD_MAX_HZ",
+    "value": "0.1",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FREQ_RESCUE_CONFIRM_COUNT",
+    "value": "2",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FREQ_RESCUE_MAX_STEP_HZ",
+    "value": "0.08",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FREQ_RESCUE_POLICY",
+    "value": "'bridge_v1'",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HARMONIC_POWER_RATIO",
+    "value": "0.4",
+    "category": "frequency_harmonic_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "locked harmonic disambiguation policy; no target-dataset tuning"
+  },
+  {
+    "name": "HARMONIC_ACF_RATIO",
+    "value": "1.05",
+    "category": "frequency_harmonic_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "locked harmonic disambiguation policy; no target-dataset tuning"
+  },
+  {
+    "name": "WARMUP_SEC",
+    "value": "2.5",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "QX_ADAPT_WARMUP_SEC",
+    "value": "3.0",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "FREQ_INIT_SEC",
+    "value": "10.0",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "OBS_LIGHT_LOWPASS_HZ",
+    "value": "1.0",
+    "category": "preprocessing_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "preprocessing is part of the observation law"
+  },
+  {
+    "name": "OBS_CLIP_Z",
+    "value": "6.0",
+    "category": "preprocessing_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "preprocessing is part of the observation law"
+  },
+  {
+    "name": "OBS_CENTER_MODE",
+    "value": "'median'",
+    "category": "preprocessing_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "preprocessing is part of the observation law"
+  },
+  {
+    "name": "OBS_BLEND_ALPHA",
+    "value": "0.35",
+    "category": "preprocessing_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "preprocessing is part of the observation law"
+  },
+  {
+    "name": "ENABLE_OBS_CAL",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "OBS_CAL_WARMUP_SEC",
+    "value": "12.0",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_SKIP_SEC",
+    "value": "2.0",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MODE",
+    "value": "'family_phase_aux'",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_RIDGE",
+    "value": "0.05",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_PRIOR_STRENGTH",
+    "value": "1.5",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_GAIN_OSC",
+    "value": "4.0",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_GAIN_AUX",
+    "value": "0.45",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_GAIN_B",
+    "value": "0.35",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_GAIN_R",
+    "value": "0.65",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_GAIN_H1",
+    "value": "1.25",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_GAIN_H2",
+    "value": "1.5",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_LAG_SEC",
+    "value": "0.12",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MIN_FIT_CORR",
+    "value": "0.45",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_MAX_FIT_RMSE_NORM",
+    "value": "1.1",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OBS_CAL_ALLOWED_FAMILIES",
+    "value": "'profile1d_quadratic,profile1d_cubic,profile1d_consensus'",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "QUADCUB_HARMONIC_ONLY",
+    "value": "True",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "QUADCUB_PRIOR_STRENGTH",
+    "value": "1.7",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "QUADCUB_MAX_GAIN_H1",
+    "value": "1.2",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "QUADCUB_MAX_GAIN_H2",
+    "value": "1.6",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "QUADCUB_MAX_LAG_SEC",
+    "value": "0.08",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_HARMONIC_ONLY",
+    "value": "True",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_PRIOR_STRENGTH",
+    "value": "1.35",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_MAX_GAIN_H1",
+    "value": "1.1",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_MAX_GAIN_H2",
+    "value": "0.85",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_MAX_LAG_SEC",
+    "value": "0.06",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_MIN_FIT_CORR",
+    "value": "0.6",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_MAX_FIT_RMSE_NORM",
+    "value": "1.0",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "OF_FIXED_VELOCITY_PRIOR",
+    "value": "False",
+    "category": "observation_equation_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "allowed only as a locked observation-law policy"
+  },
+  {
+    "name": "P1D_FIXED_FAMILY_PRIOR",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "legacy family-prior switch; off for paper-facing runs unless explicitly ablated"
+  },
+  {
+    "name": "Q_HARMONIC1_SCALE",
+    "value": "1.0",
+    "category": "state_noise_scale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state flexibility prior; must be justified and locked"
+  },
+  {
+    "name": "Q_HARMONIC2_SCALE",
+    "value": "0.5",
+    "category": "state_noise_scale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state flexibility prior; must be justified and locked"
+  },
+  {
+    "name": "Q_BASELINE_POS",
+    "value": "0.0001",
+    "category": "state_noise_scale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state flexibility prior; must be justified and locked"
+  },
+  {
+    "name": "Q_BASELINE_VEL",
+    "value": "1e-05",
+    "category": "state_noise_scale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state flexibility prior; must be justified and locked"
+  },
+  {
+    "name": "Q_RESIDUAL_POS",
+    "value": "0.1",
+    "category": "state_noise_scale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state flexibility prior; must be justified and locked"
+  },
+  {
+    "name": "Q_RESIDUAL_VEL",
+    "value": "0.01",
+    "category": "state_noise_scale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "state flexibility prior; must be justified and locked"
+  },
+  {
+    "name": "TAU_RESIDUAL_SEC",
+    "value": "5.0",
+    "category": "estimation_timescale",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "physiology/statistics timescale; sensitivity only, no target tuning"
+  },
+  {
+    "name": "ENABLE_HARMONIC2",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_BASELINE",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_RESIDUAL",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_ADAPT_R",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_DISENTANGLED_Q",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_LEGACY_COUPLED_Q",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_STUDENT_T",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_FREQ_ADAPT",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "USE_HELPER_PATH",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "USE_LIGHT_OBS_PATH",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "OBS_FAMILY_POLICY",
+    "value": "'bridge_v1'",
+    "category": "preprocessing_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "preprocessing is part of the observation law"
+  },
+  {
+    "name": "OUTPUT_RATE_POLICY",
+    "value": "'of_helper_blend_v1'",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_BLEND_ALPHA",
+    "value": "0.45",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_MIN_SUPPORT",
+    "value": "0.72",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_MIN_QDYN",
+    "value": "0.45",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_MIN_MISMATCH_HZ",
+    "value": "0.04",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_BIAS_WIN_SEC",
+    "value": "5.0",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_BIAS_MIN_SIGN_STABILITY",
+    "value": "0.65",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_BIAS_MAX_HELPER_STD_HZ",
+    "value": "0.08",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "OUTPUT_RATE_BIAS_MAX_CORR_HZ",
+    "value": "0.05",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "PROFILE_RATE_BLEND_ALPHA",
+    "value": "0.18",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "PROFILE_RATE_MIN_SUPPORT",
+    "value": "0.95",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "PROFILE_RATE_MAX_QDYN",
+    "value": "0.4",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "PROFILE_RATE_MIN_MISMATCH_HZ",
+    "value": "0.025",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "PROFILE_RATE_MAX_MISMATCH_HZ",
+    "value": "0.1",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HELPER_TRUST_POLICY",
+    "value": "'off'",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HELPER_TRUST_WINDOW_SEC",
+    "value": "4.0",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HELPER_TRUST_STD_REF_HZ",
+    "value": "0.07",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HELPER_TRUST_QDYN_FLOOR",
+    "value": "0.3",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HELPER_TRUST_MIN_MISMATCH_HZ",
+    "value": "0.03",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HELPER_TRUST_MISMATCH_REF_HZ",
+    "value": "0.06",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "HELPER_TRUST_RESCUE_MIN",
+    "value": "0.45",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "ENABLE_FAMILY_CONFIDENCE",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "FAMILY_CONFIDENCE_ALLOWED_FAMILIES",
+    "value": "'profile1d_quadratic,profile1d_cubic,profile1d_quadratic_bridge,profile1d_cubic_bridge,profile1d_consensus'",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FAMILY_CONFIDENCE_MIN_FIT_CORR",
+    "value": "0.975",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FAMILY_CONFIDENCE_MAX_FIT_RMSE",
+    "value": "0.2",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FAMILY_CONFIDENCE_PI_FLOOR",
+    "value": "0.97",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FAMILY_CONFIDENCE_QDYN_SCALE",
+    "value": "0.55",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "FAMILY_CONFIDENCE_R_SCALE",
+    "value": "0.85",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "ENABLE_DYNAMIC_MIXTURE",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "DYNAMIC_MIXTURE_TAU_SEC",
+    "value": "2.0",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "DYNAMIC_MIXTURE_TEMPERATURE",
+    "value": "0.45",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "DYNAMIC_MIXTURE_MIN_WEIGHT",
+    "value": "0.02",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "DYNAMIC_MIXTURE_CONTEXT_FLOOR",
+    "value": "0.2",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "DYNAMIC_MIXTURE_R_WEIGHT",
+    "value": "0.5",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "DYNAMIC_MIXTURE_GLOBAL_QUALITY_FLOOR",
+    "value": "0.05",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "ENABLE_RATE_OBSERVABILITY_MIXTURE",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "ENABLE_RATE_OBSERVABILITY_HELPER",
+    "value": "True",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "RATE_OBS_WINDOW_SEC",
+    "value": "8.0",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_STD_REF_HZ",
+    "value": "0.06",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_AGREE_REF_HZ",
+    "value": "0.075",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_HARMONIC_PENALTY",
+    "value": "0.58",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_FLOOR",
+    "value": "0.18",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_POWER",
+    "value": "1.2",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_HELPER_BLEND",
+    "value": "0.65",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_HELPER_MIN_SUPPORT",
+    "value": "0.28",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "RATE_OBS_HELPER_MAX_STEP_HZ",
+    "value": "0.08",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "do not tune per dataset; promote only after no-sweep validation"
+  },
+  {
+    "name": "STATE_ROLE_CONTEXT_POWER",
+    "value": "0.5",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "STATE_ROLE_RATE_POWER",
+    "value": "0.5",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "STATE_ROLE_CONTEXT_MULTIPLIER_FLOOR",
+    "value": "0.85",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "STATE_ROLE_RATE_MULTIPLIER_FLOOR",
+    "value": "0.8",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "STATE_ROLE_ABSTAIN_R_SCALE",
+    "value": "0.35",
+    "category": "reliability_mapping",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "should become normalized or online-estimated where possible"
+  },
+  {
+    "name": "ENABLE_TARGET_OBSERVABILITY_CONTROL",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "TARGET_OBS_TRUST_FLOOR",
+    "value": "0.65",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "target-computable observability control; promote only after no-sweep validation"
+  },
+  {
+    "name": "TARGET_OBS_QDYN_FLOOR",
+    "value": "0.75",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "target-computable observability control; promote only after no-sweep validation"
+  },
+  {
+    "name": "TARGET_OBS_NUISANCE_R_SCALE",
+    "value": "0.55",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "target-computable observability control; promote only after no-sweep validation"
+  },
+  {
+    "name": "TARGET_OBS_ROLE_POWER",
+    "value": "0.5",
+    "category": "high_risk_tuning_or_experimental",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "target-computable observability control; promote only after no-sweep validation"
+  },
+  {
+    "name": "ENABLE_RESIDUAL_SEMANTICS",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "RESIDUAL_PRIOR_MIN",
+    "value": "0.1",
+    "category": "experimental_residual_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "diagnostic unless promoted by four-regime validation"
+  },
+  {
+    "name": "RESIDUAL_PRIOR_POWER",
+    "value": "1.0",
+    "category": "experimental_residual_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "diagnostic unless promoted by four-regime validation"
+  },
+  {
+    "name": "ENABLE_RESIDUAL_IDENTIFIABILITY_GUARD",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "RESIDUAL_GUARD_TRUST_FLOOR",
+    "value": "0.2",
+    "category": "experimental_residual_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "diagnostic unless promoted by four-regime validation"
+  },
+  {
+    "name": "RESIDUAL_GUARD_NUISANCE_SCALE",
+    "value": "0.8",
+    "category": "experimental_residual_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "diagnostic unless promoted by four-regime validation"
+  },
+  {
+    "name": "ENABLE_PHASE_ANCHORED_MORPHOLOGY",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "PHASE_MORPH_MAX_BLEND",
+    "value": "0.35",
+    "category": "readout_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "phase-anchored morphology readout; fixed structural sensitivity, not target tuning"
+  },
+  {
+    "name": "PHASE_MORPH_BINS",
+    "value": "24.0",
+    "category": "readout_policy",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "phase-anchored morphology readout; fixed structural sensitivity, not target tuning"
+  },
+  {
+    "name": "ENABLE_GROUP_BALANCED_FUSION",
+    "value": "False",
+    "category": "ablation_flag",
+    "source": "components/models/heads/parh_ossm.py",
+    "note": "must be locked for paper-facing runs"
+  },
+  {
+    "name": "--anchor-policy",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--artifact-policy",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--canonical-policy",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--data-dir",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--enable-decoupled-rate-readout",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--enable-derived-consistency-scaling",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--enable-observation-law",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--enable-observation-law-v2",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--enable-phase-anchor-validation",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--enable-rate-hypothesis-graph",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--enable-rate-hypothesis-graph-v4",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--enable-rate-posterior",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--enable-regime-observation-law",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--enable-signal-sqi-observability",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--enable-target-observability-control",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--eval-use-track",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--external-rate-evidence-source",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--jobs",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--lag-max-sec",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--max-files",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--max-hz",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--min-hz",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--min-support-corr",
+    "value": "",
+    "category": "high_risk_tuning_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "candidate for no-sweep lock or ablation-only status"
+  },
+  {
+    "name": "--name",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--out-run",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--parh-base-method",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--parh-input",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--rate-posterior-output-source",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--rate-track-source",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--readout-reliability-group-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--regime-anchor-policy",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--reliability-group-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--reliability-prior-scope",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--skip-eval",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--source-key",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--state-reliability-group-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--stride",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--win-size",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/materialize_calibrated_multifamily_parh_system.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--candidate-output",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--data-dir",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--dataset-label",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--feature-fs",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--jobs",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--max-files",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--max-hz",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--max-lag-sec",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--max-support-residual",
+    "value": "",
+    "category": "high_risk_tuning_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "candidate for no-sweep lock or ablation-only status"
+  },
+  {
+    "name": "--method",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--min-hz",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--min-support-corr",
+    "value": "",
+    "category": "high_risk_tuning_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "candidate for no-sweep lock or ablation-only status"
+  },
+  {
+    "name": "--out-edge",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--out-group",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--out-summary",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--report-out",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--window-sec",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--window-stride-sec",
+    "value": "",
+    "category": "model_or_metric_boundary_arg",
+    "source": "scripts/extract_target_reliability_graph_features.py",
+    "note": "semantic parameter; justify and lock"
+  },
+  {
+    "name": "--allow-missing",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/audit_external_weak_evidence.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--figure-out",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_external_weak_evidence.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--out-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_external_weak_evidence.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--out-md",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_external_weak_evidence.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--scamps-manifest",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/audit_external_weak_evidence.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--table-out",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_external_weak_evidence.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--v4v-manifest",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/audit_external_weak_evidence.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--allow-missing",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/audit_final_paper_full_package.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--out-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_final_paper_full_package.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--out-md",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_final_paper_full_package.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--checklist-md",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/audit_final_submission_readiness.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--package-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_final_submission_readiness.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--package-md",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/audit_final_submission_readiness.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--reference-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/audit_final_submission_readiness.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--reference-md",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/audit_final_submission_readiness.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--analysis-csv",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--analysis-md",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--artifact-policy",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--cohface-data-dir",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--commands-out",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--execute",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--jobs",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--mahnob-data-dir",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--max-files",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--only",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--results-root",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--skip-existing",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_operating_point_sensitivity.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--analysis-dir",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/run_final_baseline_comparator_refresh.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--artifact-policy",
+    "value": "",
+    "category": "runtime_resource",
+    "source": "scripts/run_final_baseline_comparator_refresh.py",
+    "note": "hardware/runtime control; not a model claim"
+  },
+  {
+    "name": "--dry-run",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_baseline_comparator_refresh.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--execute",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_baseline_comparator_refresh.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--out-run",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/run_final_baseline_comparator_refresh.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--representative-family",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/run_final_baseline_comparator_refresh.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--tables-dir",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/run_final_baseline_comparator_refresh.py",
+    "note": "I/O, dataset, or reporting path"
+  },
+  {
+    "name": "--cohface-metrics",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/generate_table_ready.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--dataset-metrics",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/generate_table_ready.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--mahnob-metrics",
+    "value": "",
+    "category": "other_arg",
+    "source": "scripts/generate_table_ready.py",
+    "note": "manual review"
+  },
+  {
+    "name": "--out-dir",
+    "value": "",
+    "category": "io_or_dataset",
+    "source": "scripts/generate_table_ready.py",
+    "note": "I/O, dataset, or reporting path"
+  }
+]

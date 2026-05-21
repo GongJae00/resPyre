@@ -1,0 +1,21 @@
+scenario_label,operating_point,artifact_scope,n_train,n_val,n_test,rate_MAE,rate_RMSE,rate_PearsonR,waveform_CCC,strict_CCC,consistency_score,system_confidence_score,rate_waveform_track_abs_diff_bpm
+COHFACE within,adaptive+temporal default,learned_gate,96,32,32,0.36,0.5,0.805,0.911,0.782,0.376,0.233,0.948
+COHFACE within,p1dquad+temporal default,learned_gate,96,32,32,0.145,0.2,0.9,0.911,0.782,0.544,0.292,0.34
+COHFACE within,consistency-first robust,robust_fallback,96,32,32,0.145,0.2,0.9,0.911,0.782,0.544,0.292,0.34
+COHFACE within,waveform-first robust,robust_fallback,96,32,32,0.145,0.2,0.9,0.911,0.782,0.544,0.292,0.34
+MAHNOB within,adaptive+temporal default,learned_gate,293,98,97,3.22,3.87,0.0,0.381,-0.0,0.173,0.137,5.389
+MAHNOB within,p1dquad+temporal default,learned_gate,293,98,97,3.46,4.1,-0.1,0.381,-0.0,0.179,0.155,5.415
+MAHNOB within,consistency-first robust,robust_fallback,293,98,97,3.46,4.1,-0.1,0.381,-0.0,0.283,0.18,1.563
+MAHNOB within,waveform-first robust,robust_fallback,293,98,97,3.46,4.1,-0.1,0.381,-0.0,0.282,0.179,1.684
+COHFACE->MAHNOB,adaptive+temporal default,learned_gate,96,32,244,3.2,3.71,-0.04,0.343,0.0,0.212,0.142,3.042
+COHFACE->MAHNOB,p1dquad+temporal default,learned_gate,96,32,244,3.39,3.885,0.045,0.343,0.0,0.21,0.155,2.989
+COHFACE->MAHNOB,consistency-first robust,robust_fallback,96,32,244,3.39,3.885,0.045,0.352,-0.0,0.301,0.182,1.344
+COHFACE->MAHNOB,waveform-first robust,robust_fallback,96,32,244,3.39,3.885,0.045,0.364,-0.0,0.291,0.177,1.603
+COHFACE->MAHNOB,support-context waveform-first,support_context_robust_fallback,96,32,244,3.39,3.885,0.045,0.356,0.0,0.307,0.18,1.635
+COHFACE->MAHNOB,candidate-bank pen0.30,candidate_bank_robust,96,32,244,3.39,3.885,0.045,0.373,-0.0,0.307,0.182,1.322
+MAHNOB->COHFACE,adaptive+temporal default,learned_gate,293,98,80,1.955,2.17,0.555,0.83,0.569,0.308,0.197,1.203
+MAHNOB->COHFACE,p1dquad+temporal default,learned_gate,293,98,80,0.345,0.44,0.815,0.83,0.569,0.362,0.265,0.543
+MAHNOB->COHFACE,consistency-first robust,robust_fallback,293,98,80,0.345,0.44,0.815,0.83,0.569,0.365,0.267,0.454
+MAHNOB->COHFACE,waveform-first robust,robust_fallback,293,98,80,0.345,0.44,0.815,0.83,0.569,0.363,0.265,0.543
+MAHNOB->COHFACE,support-context waveform-first,support_context_robust_fallback,293,98,80,0.345,0.44,0.815,0.75,0.369,0.366,0.262,0.541
+MAHNOB->COHFACE,candidate-bank pen0.30,candidate_bank_robust,293,98,80,0.345,0.44,0.815,0.771,0.542,0.378,0.266,0.486

@@ -4,27 +4,19 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 
+from core.evaluation.figure_style import set_manuscript_style
+
 def set_paper_style():
     """Sets a clean, scientific plotting style."""
     sns.set_theme(style="whitegrid")
-    plt.rcParams.update({
-        'font.size': 12,
-        'axes.labelsize': 14,
-        'axes.titlesize': 16,
-        'xtick.labelsize': 12,
-        'ytick.labelsize': 12,
-        'legend.fontsize': 12,
-        'figure.titlesize': 18,
-        'figure.dpi': 300,
-        'savefig.bbox': 'tight'
-    })
+    set_manuscript_style("paper")
 
 def plot_summary_mae_boxplot(df: pd.DataFrame, save_path: str, title: str = "MAE Distribution"):
     """Generates a professional boxplot of MAE by method."""
     plt.figure(figsize=(12, 7))
     set_paper_style()
     
-    # Sort methods hierarchically: Group by base, then Base < KFstd < UKFfreq
+    # Sort methods hierarchically: group by base, then Base < OSSM-KF < UKFfreq.
     methods = df['method'].unique()
     order = sorted(methods, key=_method_sort_key)
     
@@ -158,6 +150,7 @@ def _method_sort_key(method_name: str):
     name = str(method_name).lower().replace(' ', '_')
     if 'of_farneback' in name or 'of_model' in name: family = 10
     elif 'of_disp_bridge' in name or 'of_displacement_bridge' in name or 'of_bridge' in name: family = 15
+    elif 'dof_disp_bridge' in name or 'dof_bridge' in name or 'dof_displacement_bridge' in name: family = 25
     elif 'dof' in name: family = 20
     elif 'profile1d_linear' in name: family = 30
     elif 'profile1d_quadratic' in name: family = 40

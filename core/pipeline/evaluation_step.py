@@ -4,6 +4,7 @@ import pickle
 import json
 import copy
 import hashlib
+import time
 import numpy as np
 import pandas as pd
 from scipy import signal as sps
@@ -794,6 +795,154 @@ def _windowed_track_bpm(
     return est_bpm[finite], gt_bpm[finite]
 
 
+def _resample_to_fs(sig: np.ndarray, fs_src: float, fs_tgt: float) -> np.ndarray:
+    x = np.asarray(sig, dtype=np.float64).reshape(-1)
+    if x.size == 0:
+        return x
+    if fs_src <= 0 or fs_tgt <= 0 or abs(float(fs_src) - float(fs_tgt)) <= 1e-6:
+        return x.copy()
+    t_src = np.arange(x.size, dtype=np.float64) / float(fs_src)
+    n_tgt = max(1, int(round(x.size * float(fs_tgt) / float(fs_src))))
+    t_tgt = np.arange(n_tgt, dtype=np.float64) / float(fs_tgt)
+    return np.interp(t_tgt, t_src, x).astype(np.float64)
+
+
+def _strict_waveform_pair(sig_est: np.ndarray, sig_gt: np.ndarray, fs_est: float, fs_gt: float) -> Tuple[np.ndarray, np.ndarray]:
+    est = np.asarray(sig_est, dtype=np.float64).reshape(-1)
+    gt = _resample_to_fs(np.asarray(sig_gt, dtype=np.float64).reshape(-1), fs_gt, fs_est)
+    m = min(est.size, gt.size)
+    if m <= 0:
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+    return est[:m], gt[:m]
+
+
+def _strict_waveform_pair_cached_gt(sig_est: np.ndarray, gt_resampled: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    est = np.asarray(sig_est, dtype=np.float64).reshape(-1)
+    gt = np.asarray(gt_resampled, dtype=np.float64).reshape(-1)
+    m = min(est.size, gt.size)
+    if m <= 0:
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+    return est[:m], gt[:m]
+
+
+def _strict_scale_span(sig_gt: np.ndarray) -> float:
+    gt = np.asarray(sig_gt, dtype=np.float64).reshape(-1)
+    gt = gt[np.isfinite(gt)]
+    if gt.size <= 1:
+        return float("nan")
+    q05, q95 = np.nanpercentile(gt, [5.0, 95.0])
+    span = float(abs(q95 - q05))
+    return span if np.isfinite(span) and span > 1e-8 else float("nan")
+
+
+def _average_spectral_snr_batch(sig_windows: np.ndarray, fs: float, min_hz: float = 0.08, max_hz: float = 0.5) -> float:
+    arr = np.asarray(sig_windows, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[np.newaxis, :]
+    if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] == 0 or fs <= 0:
+        return np.nan
+
+    n = int(arr.shape[1])
+    if n <= 0:
+        return np.nan
+    nfft = max(2048, int(2 ** np.ceil(np.log2(max(n, 1)))))
+
+    freqs, psd = sps.periodogram(arr, fs, window='hamming', nfft=nfft, axis=-1)
+    band_mask = (freqs >= min_hz) & (freqs <= 4.0)
+    if not np.any(band_mask):
+        return np.nan
+    freqs = freqs[band_mask]
+    psd = np.asarray(psd[..., band_mask], dtype=np.float64)
+    if psd.ndim != 2 or psd.shape[1] == 0:
+        return np.nan
+
+    resp_mask = (freqs >= min_hz) & (freqs <= max_hz)
+    if not np.any(resp_mask):
+        return np.nan
+
+    resp_freqs = freqs[resp_mask]
+    resp_psd = psd[:, resp_mask]
+    if resp_psd.shape[1] == 0:
+        return np.nan
+
+    peak_idx = np.argmax(resp_psd, axis=1)
+    peak_freqs = resp_freqs[peak_idx]
+    half_width = 0.05
+
+    snr_vals = np.full(psd.shape[0], np.nan, dtype=np.float64)
+    for i, f_peak in enumerate(peak_freqs):
+        f1_mask = (freqs >= f_peak - half_width) & (freqs <= f_peak + half_width)
+        f2_mask = (freqs >= 2.0 * f_peak - half_width) & (freqs <= 2.0 * f_peak + half_width)
+        signal_mask = f1_mask | f2_mask
+        if not np.any(signal_mask):
+            continue
+        noise_mask = ~signal_mask
+        power_signal = float(np.sum(psd[i, signal_mask]))
+        power_noise = float(np.sum(psd[i, noise_mask]))
+        if power_signal <= 0:
+            continue
+        if power_noise <= 0:
+            snr_vals[i] = np.inf
+        else:
+            snr_vals[i] = 10.0 * np.log10(power_signal / power_noise)
+
+    finite = snr_vals[np.isfinite(snr_vals)]
+    if finite.size == 0:
+        return np.nan
+    return float(np.mean(finite))
+
+
+def _detect_cycle_landmarks(sig: np.ndarray, fs: float) -> Tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(sig, dtype=np.float64).reshape(-1)
+    if x.size < 8 or fs <= 0:
+        return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
+    x = x[np.isfinite(x)] if np.isfinite(x).all() else np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    prom = max(1e-6, 0.3 * float(np.std(x)))
+    dist = max(1, int(round(float(fs) * 1.0)))
+    peaks, _ = sps.find_peaks(x, prominence=prom, distance=dist)
+    troughs, _ = sps.find_peaks(-x, prominence=prom, distance=dist)
+    return np.asarray(peaks, dtype=np.int64), np.asarray(troughs, dtype=np.int64)
+
+
+def _mean_abs_event_time_error(idx_est: np.ndarray, idx_gt: np.ndarray, fs: float) -> float:
+    e = np.asarray(idx_est, dtype=np.int64).reshape(-1)
+    g = np.asarray(idx_gt, dtype=np.int64).reshape(-1)
+    m = min(e.size, g.size)
+    if m == 0 or fs <= 0:
+        return np.nan
+    return float(np.mean(np.abs(e[:m] - g[:m])) / float(fs))
+
+
+def _cycle_level_metrics(sig_est: np.ndarray, sig_gt: np.ndarray, fs: float) -> Dict[str, float]:
+    est = np.asarray(sig_est, dtype=np.float64).reshape(-1)
+    gt = np.asarray(sig_gt, dtype=np.float64).reshape(-1)
+    peaks_est, troughs_est = _detect_cycle_landmarks(est, fs)
+    peaks_gt, troughs_gt = _detect_cycle_landmarks(gt, fs)
+
+    peak_mae_s = _mean_abs_event_time_error(peaks_est, peaks_gt, fs)
+    trough_mae_s = _mean_abs_event_time_error(troughs_est, troughs_gt, fs)
+
+    ppi_est = np.diff(peaks_est) / float(fs) if peaks_est.size >= 2 and fs > 0 else np.array([], dtype=np.float64)
+    ppi_gt = np.diff(peaks_gt) / float(fs) if peaks_gt.size >= 2 and fs > 0 else np.array([], dtype=np.float64)
+    m_ppi = min(ppi_est.size, ppi_gt.size)
+    ppi_mae_s = float(np.mean(np.abs(ppi_est[:m_ppi] - ppi_gt[:m_ppi]))) if m_ppi > 0 else np.nan
+
+    ie_est, _, _ = metrics_lib.calculate_breathing_dynamics(est, fs)
+    ie_gt, _, _ = metrics_lib.calculate_breathing_dynamics(gt, fs)
+    ie_abs_err = abs(ie_est - ie_gt) if (np.isfinite(ie_est) and np.isfinite(ie_gt)) else np.nan
+
+    return {
+        "peak_time_mae_s": peak_mae_s,
+        "trough_time_mae_s": trough_mae_s,
+        "cycle_ppi_mae_s": ppi_mae_s,
+        "cycle_ie_abs_err": ie_abs_err,
+        "n_peaks_est": int(peaks_est.size),
+        "n_peaks_gt": int(peaks_gt.size),
+        "n_troughs_est": int(troughs_est.size),
+        "n_troughs_gt": int(troughs_gt.size),
+    }
+
+
 def _diag_array(diag_obj: Optional[Dict], *keys: str) -> Optional[np.ndarray]:
     """Return the first non-empty diagnostics array matching any key."""
     if not isinstance(diag_obj, dict):
@@ -991,6 +1140,7 @@ def run_evaluation(
     gating_scope: str = "evaluation_only",
     strict_key_usage: bool = False,
     frame_log_strict: bool = True,
+    save_metric_pickles: bool = True,
 ):
     """
     Scans results and computes aggregate metrics using a strict Dual-Domain approach:
@@ -1041,6 +1191,7 @@ def run_evaluation(
             'min_hz': float(min_hz),
             'max_hz': float(max_hz),
             'frame_log_strict': bool(frame_log_strict),
+            'save_metric_pickles': bool(save_metric_pickles),
             'gating_scope': scope,
             'gating': copy.deepcopy(gating) if isinstance(gating, dict) else {},
             'calibration': calibration_policy,
@@ -1069,11 +1220,35 @@ def run_evaluation(
             continue
 
         print(f"\n>> Evaluating Dataset: {dataset_name} ({len(pkl_files)} trials)")
-        
+
+        _eval_t0 = time.perf_counter()
+        timing_acc = {
+            'pkl_load_sec': 0.0,
+            'gt_preprocess_sec': 0.0,
+            'estimate_preprocess_sec': 0.0,
+            'time_domain_sec': 0.0,
+            'waveform_main_sec': 0.0,
+            'waveform_strict_sec': 0.0,
+            'freq_domain_sec': 0.0,
+            'filter_diag_sec': 0.0,
+            'save_metrics_sec': 0.0,
+            'write_method_quality_sec': 0.0,
+        }
+        timing_counts = {
+            'n_trials': int(len(pkl_files)),
+            'n_estimates': 0,
+            'n_time_records': 0,
+            'n_waveform_records': 0,
+            'n_waveform_strict_records': 0,
+            'n_freq_records': 0,
+            'n_filter_diag_records': 0,
+        }
+
         all_time_domain_records = []
         all_freq_domain_records = []
         all_filter_diag_records = []
-        all_waveform_records = []   # z_full waveform metrics (PARH-OSSM dual output)
+        all_waveform_records = []   # current morphology-friendly waveform metrics
+        all_waveform_strict_records = []  # stricter zero-lag, unit-preserving waveform metrics
         frame_log_cache: Dict[str, Dict[str, np.ndarray]] = {}
         expected_trials = _collect_expected_method_trials(d_dir)
         expected_trials_for_logs = _filter_expected_trials_for_frame_logs(d_dir, expected_trials)
@@ -1100,6 +1275,11 @@ def run_evaluation(
         # Metrics definitions
         time_metrics_list = ['CCC', 'MAE', 'RMSE', 'SNR_Time', 'Latency', 'DTW_Dist', 'IE_Err', 'PPI_MAE']
         freq_metrics_list = ['MAE', 'RMSE', 'MAPE', 'PearsonR', 'SNR_Spec', 'Bias', 'LoA_Width', 'KL_Div', 'Entropy_Err']
+        waveform_strict_metrics_list = [
+            'strict_CCC', 'strict_MAE', 'strict_RMSE', 'strict_DTW',
+            'gt_span_p95p05', 'strict_NMAE_span', 'strict_NRMSE_span', 'strict_NDTW_span',
+            'peak_time_mae_s', 'trough_time_mae_s', 'cycle_ppi_mae_s', 'cycle_ie_abs_err'
+        ]
         filter_diag_metrics_list = [
             'Fail_Total', 'Fail_Div', 'Fail_Slip', 'Fail_Lock', 'Fail_Double',
             'NIS_Mean', 'NIS_Pass', 'NIS_OverStrict', 'NIS_TrueFail', 'NIS_Pass_Relaxed',
@@ -1109,13 +1289,17 @@ def run_evaluation(
         ]
 
         for pkl_path in tqdm(pkl_files, desc="Calculating Metrics"):
+            _t_load = time.perf_counter()
             try:
                 with open(pkl_path, 'rb') as f:
                     data = pickle.load(f)
             except Exception as e:
                 print(f"Failed to load {pkl_path}: {e}")
                 continue
+            finally:
+                timing_acc['pkl_load_sec'] += time.perf_counter() - _t_load
 
+            _t_gt = time.perf_counter()
             gt_signal = data.get('gt')
             fps = data.get('fps', 30.0)
             fs_gt = data.get('fs_gt', fps)
@@ -1131,10 +1315,19 @@ def run_evaluation(
             gt_norm = (gt_filt - np.mean(gt_filt)) / (np.std(gt_filt) + 1e-9)
             gt_norm = gt_norm.flatten()
             gt_inst_hz = _instantaneous_freq_hz(gt_filt, fs_gt, min_hz=min_hz, max_hz=max_hz)
-            
+            gt_filt_resampled = _resample_to_fs(gt_filt, fs_gt, float(fps))
+            gt_win, _ = sig_windowing(gt_filt, fs_gt, win_size, stride=stride)
+            gt_rpms = sig_to_RPM(gt_win, fs_gt, int(win_size/1.5), min_hz, max_hz).reshape(-1)
+            _, p_gt_ref = Welch_rpm(gt_filt, fs_gt, win_size, min_hz, max_hz)
+            if getattr(p_gt_ref, 'ndim', 1) > 1:
+                p_gt_ref = np.mean(p_gt_ref, axis=0)
+            timing_acc['gt_preprocess_sec'] += time.perf_counter() - _t_gt
+
             estimates = data.get('estimates', [])
             
             for est in estimates:
+                timing_counts['n_estimates'] += 1
+                _t_est_pre = time.perf_counter()
                 method_name = est.get('method', est.get('name', 'unknown'))
                 payload = est.get('estimate', est)
                 if not isinstance(payload, dict): continue
@@ -1150,11 +1343,13 @@ def run_evaluation(
                 est_filt = filter_RW(sig_hat, fps, lo=min_hz, hi=max_hz)
                 est_norm = (est_filt - np.mean(est_filt)) / (np.std(est_filt) + 1e-9)
                 est_norm = est_norm.flatten()
+                timing_acc['estimate_preprocess_sec'] += time.perf_counter() - _t_est_pre
 
                 # =========================================================
                 # Block 1: Time Domain (Waveform Fidelity & Dynamics)
                 # =========================================================
                 # 1. Cross-Correlation Alignment
+                _t_time_domain = time.perf_counter()
                 est_aligned, gt_aligned_t, lag_sec = calculate_cross_corr_alignment(est_norm, gt_norm, fs_est=fps, fs_gt=fs_gt)
                 
                 if len(est_aligned) > 10: # Ensure valid length
@@ -1180,13 +1375,11 @@ def run_evaluation(
                     dtw_dist = metrics_lib.calculate_dtw_distance(est_aligned, gt_aligned_t)
                     
                     # Physiological Dynamics (I:E Ratio, PPI)
-                    # Compute on Aligned signals to match phases? 
-                    # Dynamics are independent of lag, but clean signals are better.
-                    # Use est_norm/gt_norm (full length) or aligned? 
-                    # Let's use aligned to ensure we look at same segment, 
-                    # but find_peaks handles shift.
-                    gt_ie, gt_ppi, _ = calculate_breathing_dynamics(gt_norm, fs_gt)
-                    est_ie, est_ppi, _ = calculate_breathing_dynamics(est_norm, fps)
+                    # Use the aligned overlapping segment, not the raw full-length arrays.
+                    # This keeps the supplementary morphology dynamics on the same
+                    # time support used for CCC / MAE / DTW.
+                    gt_ie, gt_ppi, _ = calculate_breathing_dynamics(gt_aligned_t, fs_gt)
+                    est_ie, est_ppi, _ = calculate_breathing_dynamics(est_aligned, fs_gt)
                     
                     ie_err = abs(est_ie - gt_ie) if (np.isfinite(est_ie) and np.isfinite(gt_ie)) else np.nan
                     ppi_mae = abs(est_ppi - gt_ppi) if (np.isfinite(est_ppi) and np.isfinite(gt_ppi)) else np.nan
@@ -1203,6 +1396,8 @@ def run_evaluation(
                         'data_file': data_file_rel,
                     }
                     all_time_domain_records.append(rec_time)
+                    timing_counts['n_time_records'] += 1
+                timing_acc['time_domain_sec'] += time.perf_counter() - _t_time_domain
 
                 # =========================================================
                 # Block 1b: Unified Waveform Metrics (T4 comparative)
@@ -1210,12 +1405,14 @@ def run_evaluation(
                 # All methods get waveform CCC/wMAE/DTW via identical protocol:
                 #   bandpass → zscore → cross-corr alignment → metrics
                 # output_type distinguishes the signal source:
-                #   Base/KFstd: signal_hat
+                #   Base and OSSM-KF: signal_hat
                 #   PARH-OSSM:  z_full (primary), z_osc (supplement)
                 _wf_candidates = {}
+                _filtered_signal_cache = {}
 
                 # --- signal_hat waveform (all methods) ---
-                if est_norm is not None and est_norm.size >= 10 and gt_signal is not None:
+                if est_filt is not None and est_filt.size >= 10 and gt_signal is not None:
+                    _filtered_signal_cache[('signal_hat', 'smoothed')] = est_filt
                     _wf_candidates[('signal_hat', 'smoothed')] = est_norm
 
                 # --- z_full waveform (PARH-OSSM only) ---
@@ -1225,12 +1422,14 @@ def run_evaluation(
                     _zfs = np.asarray(_zf_smooth, dtype=np.float64).flatten()
                     if _zfs.size >= 10:
                         _zfs_filt = filter_RW(_zfs, fps, lo=min_hz, hi=max_hz)
+                        _filtered_signal_cache[('z_full', 'smoothed')] = _zfs_filt
                         _zfs_norm = (_zfs_filt - np.mean(_zfs_filt)) / (np.std(_zfs_filt) + 1e-9)
                         _wf_candidates[('z_full', 'smoothed')] = _zfs_norm.flatten()
                 if _zf_causal is not None:
                     _zfc = np.asarray(_zf_causal, dtype=np.float64).flatten()
                     if _zfc.size >= 10:
                         _zfc_filt = filter_RW(_zfc, fps, lo=min_hz, hi=max_hz)
+                        _filtered_signal_cache[('z_full', 'causal')] = _zfc_filt
                         _zfc_norm = (_zfc_filt - np.mean(_zfc_filt)) / (np.std(_zfc_filt) + 1e-9)
                         _wf_candidates[('z_full', 'causal')] = _zfc_norm.flatten()
 
@@ -1240,9 +1439,10 @@ def run_evaluation(
                     _zos = np.asarray(_zo_smooth, dtype=np.float64).flatten()
                     if _zos.size >= 10:
                         _zos_filt = filter_RW(_zos, fps, lo=min_hz, hi=max_hz)
-                        _zos_norm = (_zos_filt - np.mean(_zos_filt)) / (np.std(_zos_filt) + 1e-9)
-                        _wf_candidates[('z_osc', 'smoothed')] = _zos_norm.flatten()
+                        _zosc_norm = (_zos_filt - np.mean(_zos_filt)) / (np.std(_zos_filt) + 1e-9)
+                        _wf_candidates[('z_osc', 'smoothed')] = _zosc_norm.flatten()
 
+                _t_waveform = time.perf_counter()
                 for (_otype, _variant_label), _wf_sig in _wf_candidates.items():
                     if gt_signal is None:
                         continue
@@ -1264,17 +1464,74 @@ def run_evaluation(
                             'data_file': data_file_rel,
                         }
                         all_waveform_records.append(rec_wf)
+                        timing_counts['n_waveform_records'] += 1
+                timing_acc['waveform_main_sec'] += time.perf_counter() - _t_waveform
+
+                # =========================================================
+                # Block 1c: Strict waveform + cycle-level metrics (supplement)
+                # =========================================================
+                # Harder protocol than T4 main:
+                #   bandpass only -> resample to estimate fps -> zero-lag truncation
+                #   no z-score, no cross-correlation alignment
+                _strict_candidates = {}
+                if est_filt is not None and est_filt.size >= 10:
+                    _strict_candidates[("signal_hat", "smoothed")] = est_filt
+
+                for _key in (("z_full", "smoothed"), ("z_full", "causal")):
+                    _cached = _filtered_signal_cache.get(_key)
+                    if _cached is not None and np.asarray(_cached).size >= 10:
+                        _strict_candidates[_key] = _cached
+
+                _t_waveform_strict = time.perf_counter()
+                for (_otype, _variant_label), _wf_sig_raw in _strict_candidates.items():
+                    _wf_strict, _gt_strict = _strict_waveform_pair_cached_gt(_wf_sig_raw, gt_filt_resampled)
+                    if len(_wf_strict) > 10:
+                        _strict_ccc = waveform_ccc(_wf_strict, _gt_strict)
+                        _strict_mae = waveform_mae(_wf_strict, _gt_strict)
+                        _strict_rmse = float(np.sqrt(np.mean((_wf_strict - _gt_strict) ** 2)))
+                        _strict_dtw = waveform_dtw(_wf_strict, _gt_strict)
+                        _strict_span = _strict_scale_span(_gt_strict)
+                        if np.isfinite(_strict_span):
+                            _strict_nmae = _strict_mae / _strict_span
+                            _strict_nrmse = _strict_rmse / _strict_span
+                            _strict_ndtw = _strict_dtw / _strict_span
+                        else:
+                            _strict_nmae = np.nan
+                            _strict_nrmse = np.nan
+                            _strict_ndtw = np.nan
+                        _cycle = _cycle_level_metrics(_wf_strict, _gt_strict, float(fps))
+                        rec_wf_strict = {
+                            'video': fname,
+                            'method': method_name,
+                            'output_type': _otype,
+                            'causal_or_smoothed': _variant_label,
+                            'strict_CCC': _strict_ccc,
+                            'strict_MAE': _strict_mae,
+                            'strict_RMSE': _strict_rmse,
+                            'strict_DTW': _strict_dtw,
+                            'gt_span_p95p05': _strict_span,
+                            'strict_NMAE_span': _strict_nmae,
+                            'strict_NRMSE_span': _strict_nrmse,
+                            'strict_NDTW_span': _strict_ndtw,
+                            'peak_time_mae_s': _cycle['peak_time_mae_s'],
+                            'trough_time_mae_s': _cycle['trough_time_mae_s'],
+                            'cycle_ppi_mae_s': _cycle['cycle_ppi_mae_s'],
+                            'cycle_ie_abs_err': _cycle['cycle_ie_abs_err'],
+                            'n_peaks_est': _cycle['n_peaks_est'],
+                            'n_peaks_gt': _cycle['n_peaks_gt'],
+                            'n_troughs_est': _cycle['n_troughs_est'],
+                            'n_troughs_gt': _cycle['n_troughs_gt'],
+                            'data_file': data_file_rel,
+                        }
+                        all_waveform_strict_records.append(rec_wf_strict)
+                        timing_counts['n_waveform_strict_records'] += 1
+                timing_acc['waveform_strict_sec'] += time.perf_counter() - _t_waveform_strict
 
                 # =========================================================
                 # Block 2: Frequency Domain (Rate Accuracy & Spectral Shape)
                 # =========================================================
-                # Use Sliding Window (30s window, 1s stride)
-                # We need to re-window both GT and Est with the same parameters
-                
-                # GT/estimate sequences for legacy signal-based spectral routing.
-                gt_win, t_gt = sig_windowing(gt_filt, fs_gt, win_size, stride=stride)
-                gt_rpms = sig_to_RPM(gt_win, fs_gt, int(win_size/1.5), min_hz, max_hz).reshape(-1)
-                est_win, t_est = sig_windowing(est_filt, fps, win_size, stride=stride)
+                _t_freq = time.perf_counter()
+                est_win, _ = sig_windowing(est_filt, fps, win_size, stride=stride)
                 est_rpms = sig_to_RPM(est_win, fps, int(win_size/1.5), min_hz, max_hz).reshape(-1)
 
                 rate_source = 'signal_spectral'
@@ -1299,33 +1556,11 @@ def run_evaluation(
                     
                     # Compute Rate Metrics
                     errs_freq = getErrors(est_rpm_seq, gt_rpm_seq, None, None, ['MAE', 'RMSE', 'MAPE', 'PearsonR'])
-                    
-                    # Spectral SNR (De Haan) - Averaged over windows
-                    # Spectral Shape (KL Div, Entropy) - Computed on Average PSD of the whole trial for robustness
-                    # (Computing KL per window is noisy).
-                    
-                    # 1. Spectral SNR Map
-                    snr_vals = []
-                    for w_sig in est_win:
-                        s_val = calculate_spectral_snr(w_sig.flatten(), fps, min_hz, max_hz)
-                        if np.isfinite(s_val): snr_vals.append(s_val)
-                    avg_spec_snr = np.mean(snr_vals) if snr_vals else np.nan
-                    
-                    # 2. Global PSD Shape Comparison
-                    # Re-compute full Welch for shape comparison
-                    # Use standard 30s window Welch on full signal
-                    _, p_gt = Welch_rpm(gt_filt, fs_gt, win_size, min_hz, max_hz)
+                    avg_spec_snr = _average_spectral_snr_batch(est_win, fps, min_hz=min_hz, max_hz=max_hz)
                     _, p_est = Welch_rpm(est_filt, fps, win_size, min_hz, max_hz)
-                    
-                    # Handle multi-channel return from Welch_rpm if any
-                    if p_gt.ndim > 1: p_gt = np.mean(p_gt, axis=0)
-                    if p_est.ndim > 1: p_est = np.mean(p_est, axis=0)
-                    
-                    # Ensure same length? Welch_rpm outputs based on nfft. 
-                    # If fs differs, length differs. Resample PSD or ensure fs matches?
-                    # Assuming fps ~= fs_gt for this metric, or interpolated.
-                    # If lengths differ, we cannot compute KL directly.
-                    # Interpolate Est PSD to GT PSD bins if needed.
+                    if getattr(p_est, 'ndim', 1) > 1:
+                        p_est = np.mean(p_est, axis=0)
+                    p_gt = p_gt_ref
                     if len(p_gt) != len(p_est):
                         p_est = np.interp(np.linspace(0, 1, len(p_gt)), np.linspace(0, 1, len(p_est)), p_est)
 
@@ -1349,10 +1584,13 @@ def run_evaluation(
                         'data_file': data_file_rel
                     }
                     all_freq_domain_records.append(rec_freq)
+                    timing_counts['n_freq_records'] += 1
+                timing_acc['freq_domain_sec'] += time.perf_counter() - _t_freq
 
                 # =========================================================
                 # Block 3: Filter Diagnostics (Failure / Calibration)
                 # =========================================================
+                _t_filter_diag = time.perf_counter()
                 dataset_token = fname.split('_', 1)[0] if '_' in fname else None
                 trial_key = _infer_trial_key_from_fname(fname, dataset_token=dataset_token)
                 log_obj = _load_frame_log(
@@ -1379,11 +1617,15 @@ def run_evaluation(
                     calibration_policy=calibration_policy,
                 )
                 all_filter_diag_records.append(diag_rec)
+                timing_counts['n_filter_diag_records'] += 1
+                timing_acc['filter_diag_sec'] += time.perf_counter() - _t_filter_diag
 
         # Save Logic
         metrics_dir = os.path.join(d_dir, 'metrics')
         os.makedirs(metrics_dir, exist_ok=True)
         
+        _t_save_metrics = time.perf_counter()
+
         def _save_domain_v2(records, label, metric_keys):
             if not records: return
             df = pd.DataFrame(records)
@@ -1443,6 +1685,8 @@ def run_evaluation(
                 title = "Filter Diagnostics (Failure/Calibration)"
             elif label == 'waveform':
                 title = "z_full Waveform (CCC/wMAE/DTW — PARH-OSSM dual output)"
+            elif label == 'waveform_strict':
+                title = "Strict Waveform / Cycle Metrics (zero-lag, unit-preserving)"
             else:
                 title = label
             
@@ -1457,26 +1701,27 @@ def run_evaluation(
             df_clean.to_csv(os.path.join(metrics_dir, f'metrics_{label}_raw.csv'), index=False)
             summary_stats.to_csv(os.path.join(metrics_dir, f'metrics_{label}_summary.csv'), index=False)
             
-            # Save Pickles for plots
-            # Reconstruct legacy structure for plotting compatibility
-            method_metrics = {}
-            for rec in records:
-                m = rec['method']
-                entry = {
-                    'video': rec['video'],
-                    'metrics': [rec[k] for k in metric_keys],
-                    'source_label': label,
-                    'data_file': rec.get('data_file')
-                }
-                if label == 'time_domain':
-                    entry['pair'] = rec.get('_sig_aligned_pair')
-                else:
-                    entry['pair'] = rec.get('_rpm_pair')
-                    
-                method_metrics.setdefault(m, []).append(entry)
-                
-            with open(os.path.join(metrics_dir, f'metrics_{label}.pkl'), 'wb') as f:
-                pickle.dump([metric_keys, method_metrics], f)
+            if bool(save_metric_pickles):
+                # Save Pickles for plots
+                # Reconstruct legacy structure for plotting compatibility
+                method_metrics = {}
+                for rec in records:
+                    m = rec['method']
+                    entry = {
+                        'video': rec['video'],
+                        'metrics': [rec[k] for k in metric_keys],
+                        'source_label': label,
+                        'data_file': rec.get('data_file')
+                    }
+                    if label == 'time_domain':
+                        entry['pair'] = rec.get('_sig_aligned_pair')
+                    else:
+                        entry['pair'] = rec.get('_rpm_pair')
+
+                    method_metrics.setdefault(m, []).append(entry)
+
+                with open(os.path.join(metrics_dir, f'metrics_{label}.pkl'), 'wb') as f:
+                    pickle.dump([metric_keys, method_metrics], f)
 
         _save_domain_v2(all_time_domain_records, 'time_domain', time_metrics_list)
         _save_domain_v2(all_freq_domain_records, 'freq_domain', freq_metrics_list)
@@ -1487,6 +1732,8 @@ def run_evaluation(
         if all_waveform_records:
             wf_metrics_keys = ['waveform_CCC', 'waveform_MAE', 'waveform_DTW', 'latency_ms']
             _save_domain_v2(all_waveform_records, 'waveform', wf_metrics_keys)
+        if all_waveform_strict_records:
+            _save_domain_v2(all_waveform_strict_records, 'waveform_strict', waveform_strict_metrics_list)
 
         # Explicitly separate strict-test failures from practical miscalibration.
         try:
@@ -1593,12 +1840,33 @@ def run_evaluation(
         except Exception as exc:
             print(f"> Warning: failed to write filter calibration split artifacts: {exc}")
 
+        timing_acc['save_metrics_sec'] += time.perf_counter() - _t_save_metrics
+
+        _t_method_quality = time.perf_counter()
         _write_method_quality_artifacts(
             d_dir,
             eval_settings,
             expected_trials=expected_trials_for_logs,
             frame_log_strict=bool(frame_log_strict),
         )
+        timing_acc['write_method_quality_sec'] += time.perf_counter() - _t_method_quality
+
+        evaluation_timing = {
+            'schema_version': 'evaluation_timing.v1',
+            'generated_at': pd.Timestamp.utcnow().isoformat() + 'Z',
+            'dataset': str(dataset_name),
+            'run_dir': str(d_dir),
+            'counts': timing_counts,
+            'timings_sec': {k: float(v) for k, v in timing_acc.items()},
+            'total_sec': float(time.perf_counter() - _eval_t0),
+            'frame_log_strict': bool(frame_log_strict),
+            'gating_scope': str(scope),
+        }
+        try:
+            with open(os.path.join(metrics_dir, 'evaluation_timing.json'), 'w', encoding='utf-8') as fp:
+                json.dump(evaluation_timing, fp, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            print(f"> Warning: failed to write evaluation_timing.json for {dataset_name}: {exc}")
 
 
 def _method_sort_key(method_name: str):

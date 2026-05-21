@@ -1,0 +1,17 @@
+dataset,comparison,metric_file,metric,delta_definition,lower_delta_favors_PARH,N,median_delta,iqr_delta,comparator_median,parh_median
+COHFACE,PARH-OSSM vs Base (P1D quad),metrics_freq_domain_raw.csv,MAE,PARH_minus_comparator,True,160,0.0600,0.4050,0.1950,0.3350
+COHFACE,PARH-OSSM vs OSSM-KF (P1D quad),metrics_freq_domain_raw.csv,MAE,PARH_minus_comparator,True,160,-0.0100,0.4700,0.4850,0.3350
+COHFACE,PARH-OSSM vs Base (P1D quad),metrics_waveform_raw.csv,waveform_CCC,comparator_minus_PARH,True,160,-0.0282,0.0807,0.8114,0.8585
+COHFACE,PARH-OSSM vs OSSM-KF (P1D quad),metrics_waveform_raw.csv,waveform_CCC,comparator_minus_PARH,True,160,-0.0033,0.0628,0.8524,0.8585
+COHFACE,PARH-OSSM vs Base (P1D quad),metrics_waveform_raw.csv,waveform_DTW,PARH_minus_comparator,True,160,-0.0297,0.0750,0.3676,0.3475
+COHFACE,PARH-OSSM vs OSSM-KF (P1D quad),metrics_waveform_raw.csv,waveform_DTW,PARH_minus_comparator,True,160,-0.0018,0.0662,0.3420,0.3475
+COHFACE,PARH-OSSM vs Base (P1D quad),metrics_waveform_strict_raw.csv,strict_NMAE_span,PARH_minus_comparator,True,160,-52.7378,126.7815,53.4019,0.5485
+COHFACE,PARH-OSSM vs OSSM-KF (P1D quad),metrics_waveform_strict_raw.csv,strict_NMAE_span,PARH_minus_comparator,True,160,-0.2726,0.3993,0.8671,0.5485
+MAHNOB,PARH-OSSM vs Base (P1D quad),metrics_freq_domain_raw.csv,MAE,PARH_minus_comparator,True,488,-4.2000,2.7750,6.6000,2.3450
+MAHNOB,PARH-OSSM vs OSSM-KF (P1D quad),metrics_freq_domain_raw.csv,MAE,PARH_minus_comparator,True,488,-1.8500,2.8925,4.3250,2.3450
+MAHNOB,PARH-OSSM vs Base (P1D quad),metrics_waveform_raw.csv,waveform_CCC,comparator_minus_PARH,True,488,0.0172,0.2131,0.3522,0.3366
+MAHNOB,PARH-OSSM vs OSSM-KF (P1D quad),metrics_waveform_raw.csv,waveform_CCC,comparator_minus_PARH,True,488,-0.0048,0.1816,0.3453,0.3366
+MAHNOB,PARH-OSSM vs Base (P1D quad),metrics_waveform_raw.csv,waveform_DTW,PARH_minus_comparator,True,488,0.0515,0.2594,0.6020,0.6649
+MAHNOB,PARH-OSSM vs OSSM-KF (P1D quad),metrics_waveform_raw.csv,waveform_DTW,PARH_minus_comparator,True,488,0.0189,0.1950,0.6398,0.6649
+MAHNOB,PARH-OSSM vs Base (P1D quad),metrics_waveform_strict_raw.csv,strict_NMAE_span,PARH_minus_comparator,True,488,0.0305,0.1447,0.2363,0.2577
+MAHNOB,PARH-OSSM vs OSSM-KF (P1D quad),metrics_waveform_strict_raw.csv,strict_NMAE_span,PARH_minus_comparator,True,488,0.0762,0.1049,0.1866,0.2577

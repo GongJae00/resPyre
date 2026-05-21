@@ -1,0 +1,5 @@
+dataset,link_path,target_path,link_target,target_exists,link_exists,status
+COHFACE,dataset/COHFACE,/mnt/hdd18t/rppg_dataset/raw/cohface,/mnt/hdd18t/rppg_dataset/raw/cohface,True,True,ok
+MAHNOB,dataset/MAHNOB,/mnt/hdd18t/rppg_dataset/raw/MAHNOB_HCI,/mnt/hdd18t/rppg_dataset/raw/MAHNOB_HCI,True,True,ok
+V4V,dataset/V4V,/mnt/hdd18t/rppg_dataset/raw/V4V,/mnt/hdd18t/rppg_dataset/raw/V4V,True,True,ok
+SCAMPS,dataset/SCAMPS,/mnt/hdd18t/rppg_dataset/raw/SCAMPS,/mnt/hdd18t/rppg_dataset/raw/SCAMPS,True,True,ok

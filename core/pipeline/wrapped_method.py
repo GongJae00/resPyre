@@ -10,12 +10,19 @@ from components.observations.methods import (
     OF_Model,
     OFDisplacementBridge_Model,
     DoF_Model,
+    DoFDisplacementBridge_Model,
+    DOF_BRIDGE_CACHE_FILE,
+    P1D_BRIDGE_CACHE_FILES,
+    P1D_CONSENSUS_CACHE_FILE,
     profile1D_Model,
+    Profile1DDisplacementBridge_Model,
+    Profile1DConsensus_Model,
     OFP1DQuadraticPair_Model,
     AssistOFP1DQuadratic_Model,
     AssistOFBridgeOF_Model,
     AssistOFBridgeP1DQuadratic_Model,
     FusionOFP1DQuadratic_Model,
+    FamilyMultiViewHypothesisSet_Model,
 )
 from components.models import OscillatorParams, build_head
 
@@ -40,12 +47,22 @@ def _normalize_base(name: str) -> str:
         return "of_disp_bridge"
     if key == "dof":
         return "dof"
+    if key in ("dof_disp_bridge", "dof_bridge", "dof_displacement_bridge"):
+        return "dof_disp_bridge"
     if key in ("profile1d_linear", "profile1d linear", "profile1d-linear"):
         return "profile1d_linear"
+    if key in ("profile1d_linear_bridge", "profile1d_linear_displacement_bridge"):
+        return "profile1d_linear_bridge"
     if key in ("profile1d_quadratic", "profile1d quadratic", "profile1d-quadratic"):
         return "profile1d_quadratic"
+    if key in ("profile1d_quadratic_bridge", "profile1d_quadratic_displacement_bridge"):
+        return "profile1d_quadratic_bridge"
     if key in ("profile1d_cubic", "profile1d cubic", "profile1d-cubic"):
         return "profile1d_cubic"
+    if key in ("profile1d_cubic_bridge", "profile1d_cubic_displacement_bridge"):
+        return "profile1d_cubic_bridge"
+    if key in ("profile1d_consensus", "profile1d_cons"):
+        return "profile1d_consensus"
     if key in (
         "pair_of_p1d_quadratic",
         "of_p1d_quadratic_pair",
@@ -76,6 +93,13 @@ def _normalize_base(name: str) -> str:
         "assistant_ofbridge_p1d_quadratic",
     ):
         return "assist_ofbridge_p1d_quadratic"
+    if key in (
+        "family_multiview_hypothesis_set",
+        "family_hypothesis_set",
+        "family_multiview",
+        "adaptive_family_views",
+    ):
+        return "family_multiview_hypothesis_set"
     raise ValueError(f"Unknown base method '{name}' for oscillator wrapper")
 
 
@@ -99,6 +123,8 @@ def _normalize_head(name: str) -> str:
         return "narossm"
     if key in ("parh_ossm", "parhossm", "parh-ossm"):
         return "parh_ossm"
+    if key in ("parh_resonator_adaptive", "parhresonatoradaptive", "adaptive_resonator"):
+        return "parh_resonator_adaptive"
     raise ValueError(f"Unknown oscillator head '{name}'")
 
 
@@ -125,17 +151,37 @@ def _build_base(base_key: str):
         base = DoF_Model()
         base.name = "dof"
         return base
+    if base_key == "dof_disp_bridge":
+        base = DoFDisplacementBridge_Model()
+        base.name = "dof_disp_bridge"
+        return base
     if base_key == "profile1d_linear":
         base = profile1D_Model("linear")
         base.name = "profile1d_linear"
+        return base
+    if base_key == "profile1d_linear_bridge":
+        base = Profile1DDisplacementBridge_Model("linear")
+        base.name = "profile1d_linear_bridge"
         return base
     if base_key == "profile1d_quadratic":
         base = profile1D_Model("quadratic")
         base.name = "profile1d_quadratic"
         return base
+    if base_key == "profile1d_quadratic_bridge":
+        base = Profile1DDisplacementBridge_Model("quadratic")
+        base.name = "profile1d_quadratic_bridge"
+        return base
     if base_key == "profile1d_cubic":
         base = profile1D_Model("cubic")
         base.name = "profile1d_cubic"
+        return base
+    if base_key == "profile1d_cubic_bridge":
+        base = Profile1DDisplacementBridge_Model("cubic")
+        base.name = "profile1d_cubic_bridge"
+        return base
+    if base_key == "profile1d_consensus":
+        base = Profile1DConsensus_Model()
+        base.name = "profile1d_consensus"
         return base
     if base_key == "pair_of_p1d_quadratic":
         base = OFP1DQuadraticPair_Model()
@@ -156,6 +202,10 @@ def _build_base(base_key: str):
     if base_key == "assist_ofbridge_p1d_quadratic":
         base = AssistOFBridgeP1DQuadratic_Model()
         base.name = "assist_ofbridge_p1d_quadratic"
+        return base
+    if base_key == "family_multiview_hypothesis_set":
+        base = FamilyMultiViewHypothesisSet_Model()
+        base.name = "family_multiview_hypothesis_set"
         return base
     raise ValueError(f"Unsupported base key '{base_key}'")
 
@@ -503,12 +553,22 @@ class OscillatorWrappedMethod(MethodBase):
             return os.path.join(trial_dir, "obs_of_bridge.npy")
         if self.base_key == "dof":
             return os.path.join(trial_dir, "obs_dof.npy")
+        if self.base_key == "dof_disp_bridge":
+            return os.path.join(trial_dir, DOF_BRIDGE_CACHE_FILE)
         if self.base_key == "profile1d_linear":
             return os.path.join(trial_dir, "obs_p1d_linear.npy")
+        if self.base_key == "profile1d_linear_bridge":
+            return os.path.join(trial_dir, P1D_BRIDGE_CACHE_FILES["linear"])
         if self.base_key == "profile1d_quadratic":
             return os.path.join(trial_dir, "obs_p1d_quad.npy")
+        if self.base_key == "profile1d_quadratic_bridge":
+            return os.path.join(trial_dir, P1D_BRIDGE_CACHE_FILES["quadratic"])
         if self.base_key == "profile1d_cubic":
             return os.path.join(trial_dir, "obs_p1d_cubic.npy")
+        if self.base_key == "profile1d_cubic_bridge":
+            return os.path.join(trial_dir, P1D_BRIDGE_CACHE_FILES["cubic"])
+        if self.base_key == "profile1d_consensus":
+            return os.path.join(trial_dir, P1D_CONSENSUS_CACHE_FILE)
         if self.base_key == "pair_of_p1d_quadratic":
             return None
         if self.base_key == "fusion_of_p1d_quadratic":
@@ -518,6 +578,8 @@ class OscillatorWrappedMethod(MethodBase):
         if self.base_key == "assist_ofbridge_of":
             return None
         if self.base_key == "assist_ofbridge_p1d_quadratic":
+            return None
+        if self.base_key == "family_multiview_hypothesis_set":
             return None
         return None
 
@@ -595,6 +657,11 @@ class OscillatorWrappedMethod(MethodBase):
         return meta
 
     def _store_npz(self, data: Dict, result: Dict[str, np.ndarray]):
+        storage_policy = data.get("storage_policy") if isinstance(data.get("storage_policy"), dict) else {}
+        save_aux = bool(storage_policy.get("save_aux", True))
+        save_component_aux = bool(storage_policy.get("save_component_aux", save_aux))
+        if not save_aux:
+            return
         aux_dir = data.get("aux_save_dir")
         trial_key = data.get("trial_key")
         if not aux_dir or not trial_key:
@@ -609,7 +676,7 @@ class OscillatorWrappedMethod(MethodBase):
         }
         np.savez_compressed(os.path.join(aux_dir, f"{trial_key}.npz"), **payload)
         components = result.get("components")
-        if components:
+        if components and save_component_aux:
             comp_dir = os.path.join(aux_dir, "components", trial_key)
             os.makedirs(comp_dir, exist_ok=True)
             for comp in components:
@@ -638,6 +705,7 @@ class OscillatorWrappedMethod(MethodBase):
             data["trial_key"] = short_key
             data["trial_key_full"] = full_key
             data["trial_uid"] = full_key
+        storage_policy = data.get("storage_policy") if isinstance(data.get("storage_policy"), dict) else {}
         meta = dict(self._base_meta)
         if hasattr(self.base_method, "get_runtime_meta"):
             try:
@@ -664,6 +732,9 @@ class OscillatorWrappedMethod(MethodBase):
             "method_name": self.name,
             "data_file": data.get("video_path"),
             "aux_save_dir": data.get("aux_save_dir"),
+            "save_aux": bool(storage_policy.get("save_aux", True)),
+            "save_frame_logs": bool(storage_policy.get("save_frame_logs", bool(storage_policy.get("save_aux", True)))),
+            "save_component_aux": bool(storage_policy.get("save_component_aux", bool(storage_policy.get("save_aux", True)))),
             "gating_scope": self.gating_scope,
         })
         if self._unused_config_keys:

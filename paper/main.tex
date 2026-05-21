@@ -6,6 +6,7 @@
 \usepackage{array}
 \usepackage{multirow}
 \usepackage{graphicx}
+\usepackage{placeins}
 \usepackage{xcolor}
 \usepackage{enumitem}
 \usepackage{siunitx}
@@ -19,8 +20,13 @@
 \newcommand{\obs}{y}
 \newcommand{\NIS}{\mathrm{NIS}}
 \newcommand{\Reff}{R_{\mathrm{eff}}}
+\setlength{\parindent}{15pt}
+\setlength{\parskip}{0pt}
+\clubpenalty=10000
+\widowpenalty=10000
+\displaywidowpenalty=10000
 
-\title{PARH-OSSM: A Physiology-Aligned Harmonic State-Space Decomposition for Camera-Derived Respiratory Motion}
+\title{A Physiology-Aligned State-Space Decomposition Framework for Camera-Derived Respiratory Motion}
 
 \author[1]{Young-Jae Cho}
 \author[2,*]{Dae-Yeol Kim}
@@ -28,51 +34,26 @@
 \affil[2]{School of ICT Convergence, University of Ulsan, Ulsan, Republic of Korea}
 \affil[*]{daeyeol@ulsan.ac.kr}
 
-\keywords{contactless respiration, state-space model, harmonic decomposition, camera-derived motion, implementation audit}
+\keywords{contactless respiration, state-space model, harmonic decomposition, adaptive observation law, camera-derived motion}
 
 \begin{abstract}
-Camera-derived respiratory motion should not be forced into a single sinusoid.
-We study the current reproducible state of PARH-OSSM, a physiology-aligned
-harmonic state-space decomposition that separates respiratory motion into a
-second-order oscillatory component, a baseline trend, and an aperiodic
-residual. The audited implementation is an eight-dimensional exactly linear
-state-space model conditioned on an external frequency estimate, and it stores
-dual outputs for oscillatory analysis ($z_{\mathrm{osc}}$) and full waveform
-analysis ($z_{\mathrm{full}}$), together with causal and Rauch--Tung--Striebel
-smoothed trajectories and per-sample diagnostics.
-
-This manuscript reports only claims supported by persistent artifacts in the
-current repository. A complete six-family COHFACE rerun is now available and
-is used for all quantitative tables. The MAHNOB-HCI production run is still
-incomplete, so no MAHNOB quantitative claims are made here. The live COHFACE
-ladder now includes raw OF, an additional OF-derived displacement bridge
-(\texttt{OF\_bridge}), DoF, and three Profile1D families. On COHFACE, PARH-OSSM now
-exceeds KFstd in waveform fidelity on raw OF, is effectively tied on
-P1D-linear, slightly exceeds KFstd on P1D-quadratic in waveform CCC while
-remaining worse in waveform MAE/DTW, and still trails on \texttt{OF\_bridge},
-P1D-cubic, and DoF. In frequency tracking, PARH-OSSM improves over KFstd in
-five of the six families after routing rate metrics through the stored
-\texttt{track\_hz}, but the raw base observation remains the strongest absolute
-rate route on raw OF, \texttt{OF\_bridge}, and all three Profile1D families.
-Regenerated calibration diagnostics from the saved PARH-OSSM arrays yield
-median NIS means of roughly 0.83--0.94, median NIS in-band fractions of
-roughly 0.93--0.96, and Student-$t$ weights that remain close to one,
-indicating conservative but internally consistent scaling rather than strong
-posterior downweighting. Mechanism audits from the saved per-frame diagnostics
-now show moderate dynamical-novelty scores, non-saturated oscillatory-support
-scores, and a family-dependent residual-energy share, indicating that the
-current implementation is no longer a nearly dormant decomposition scaffold.
-
-We therefore position the current system as a physiology-aligned,
-self-auditing scaffold whose decomposition and traceability are already
-useful, but whose main bottleneck is still the observation model. The
-repository now contains multiple gated observation-calibration prototypes, and
-the current evidence supports two promotable observation-construction steps:
-a family-selective harmonic-only observation row for P1D-quadratic and
-P1D-cubic, and an additional OF-derived displacement-compatible family
-(\texttt{OF\_bridge}) that improves OF-family rate tracking. Additional broad
-calibration variants, helper-only, helper-blend, and aggressive OF
-output-side policies all failed promotion.
+Video-based respiration monitoring typically estimates breathing rate from
+indirect camera-derived motion signals shaped by viewpoint, clothing, posture,
+body motion, and preprocessing. We introduce PARH-OSSM, a physiology-aligned
+state-space decomposition framework that separates camera observations into
+oscillatory rate/timing, second-harmonic morphology, baseline projection drift,
+and aperiodic residual components. The model uses a label-free adaptive
+observation law and dual readouts: \(z_{\mathrm{osc}}\) for rate and
+\(z_{\mathrm{full}}\) for waveform morphology. In a complete-cohort evaluation,
+COHFACE represented a clean regime (160 trials), where PARH-OSSM achieved rate
+MAE 0.335 bpm, Pearson \(r=0.855\), and aligned waveform CCC 0.859. MAHNOB-HCI
+represented a harder regime (525 trials), where PARH-OSSM improved rate
+tracking (MAE 2.410 bpm) but waveform recovery remained limited. The failure
+taxonomy showed that many hard-regime cases were bounded by the current
+observation bank rather than by gross state-space divergence. These results
+establish PARH-OSSM as an auditable observation-to-state framework and
+highlight the need for richer respiratory observation operators when waveform
+morphology is the target.
 \end{abstract}
 
 \begin{document}
@@ -91,28 +72,36 @@ autocorrelation analysis~\cite{Li2014optical,Bai2021,Welch1967}. That framing
 is often adequate for stable recordings, but it is too restrictive for
 waveform morphology, baseline drift, and irregular events.
 
-Two adjacent literature blocks motivate the present reset. First, state-space
-methods are only as meaningful as the correspondence between the chosen latent
-state, the observation equation, and the structure of the system that is
-believed to generate the data~\cite{Harvey1989,DurbinKoopman2012,Sarkka2013}.
-That principle is especially important here because camera-derived respiration
-is not measured directly; it is observed through projection, extractor-family
-choice, and preprocessing. Recent benchmark work on RGB-camera respiration also
-shows that motion-based families, rPPG-based families, and learned pipelines
-behave very differently across datasets and evaluation targets~\cite{Boccignone2025Review}.
-Second, robust and adaptive filtering methods improve state estimation under
-outliers or changing noise statistics, for example through covariance
-adaptation, heavy-tailed likelihoods, or both~\cite{Mehra1970,MohamedSchwarz1999,Piche2012,Roth2017,Huang2017}.
-Third, oscillator state-space models provide a principled way to represent
-quasi-periodic latent structure while preserving tractable inference under
+This limitation is not only a filtering problem. Camera-derived respiration is
+not measured directly; it is obtained through body projection, region
+selection, a motion or colour operator, and subsequent preprocessing. Recent
+benchmark work on RGB-camera respiration shows that motion-based methods,
+rPPG-based methods, and learned pipelines can behave differently across
+datasets and evaluation targets~\cite{Boccignone2025Review}. Physiologically,
+visible upper-body or thoraco-abdominal displacement is often the most direct
+camera cue for breathing. In practice, viewpoint, clothing, posture, body
+habitus, illumination, ROI placement, and non-respiratory motion can attenuate,
+invert, or remove that cue~\cite{Wang2021AlgorithmicRespiration}. A respiratory
+state estimator therefore needs to account not only for temporal noise, but
+also for the fact that each camera-derived motion cue is a different
+observation of the underlying respiratory process.
+
+State-space modelling provides a natural language for this problem because the
+latent state, the observation equation, and the assumed generative structure can
+be written explicitly~\cite{Harvey1989,DurbinKoopman2012,Sarkka2013}. Robust
+and adaptive filters can further reduce the effect of outliers or changing
+noise statistics through covariance adaptation and heavy-tailed
+updates~\cite{Mehra1970,MohamedSchwarz1999,Piche2012,Roth2017,Huang2017}.
+Oscillator state-space models are particularly suitable for quasi-periodic
+physiological rhythms because they preserve tractable inference under
 conditional linearity~\cite{Sarkka2012DRIFTER,Somata2018,Sarkka2013,SolinSarkka2014}.
-Those lines of work are relevant but not sufficient on their own for
-camera-derived respiration, because they do not by themselves specify how
-respiratory morphology, baseline drift, and non-oscillatory event structure
-should be separated in the latent representation. Learned monitoring
-approaches can also be effective~\cite{Chaichulee2017,Perepelkina2020}, but
-they do not remove the need for an interpretable model of what portion of the
-motion trace should be treated as oscillatory versus aperiodic.
+However, these methods do not by themselves decide which part of a
+camera-derived trace should represent the respiratory oscillator, which part
+should represent breath-shape asymmetry, and which part should be treated as
+slow projection drift or aperiodic respiratory motion. Learned monitoring
+approaches can also be effective~\cite{Chaichulee2017,Perepelkina2020}, but an
+interpretable decomposition remains useful when the goal is to explain why a
+video contains enough respiratory information in one regime and not in another.
 
 The central premise of this work is that camera-derived respiratory motion is
 not a single clean sinusoid. It contains at least four interpretable parts:
@@ -126,36 +115,535 @@ rhythm generation, mechanical feedback, non-respiratory motor acts, and
 behavioral or emotional modulation rather than as a perfectly stationary
 sinusoid~\cite{Oku2022,vanDenBosch2021}.
 
-This manuscript intentionally reports the \emph{current verified state} of
-PARH-OSSM rather than an aspirational final system. A reverse-audit of the
-repository, saved results, and the previous manuscript showed that the older
-NAROSSM framing overclaimed what the present code and result files support. We
-therefore reset the paper around persistent evidence only.
+In this study, we develop a physiology-aligned respiratory decomposition
+framework, PARH-OSSM, that keeps these roles separate. We use a set of fixed
+camera-motion observation classes not as a leaderboard ensemble, but as a
+controlled way to ask which physical or algorithmic view of the video still
+carries respiratory timing, morphology, or nuisance-dominated content. We then
+connect those observations to a harmonic state-space model with separate
+oscillatory, harmonic, baseline, and residual pathways, and we route rate and
+waveform analyses through different readouts. The evaluation is deliberately
+conservative: we report only results that are reproduced by the same
+predefined protocol spanning direct observations, an OSSM-KF comparator, and
+the integrated PARH-OSSM readout. PARH-OSSM itself uses Kalman filtering and
+Rauch--Tung--Striebel smoothing as the inference machinery for its decomposed
+state-space model. We reserve the name OSSM-KF for the stripped-down,
+non-adaptive oscillator state-space comparator with a standard Kalman filter.
+The distinction is therefore
+not ``Kalman versus non-Kalman'', but a comparison between a fixed resonator
+baseline and the full physiology-aligned observation law, state decomposition,
+dual readouts, and diagnostics. The goal is not to claim universal superiority,
+but to show what can be inferred when the respiratory observation is strong and
+how the failure boundary appears when it is weak.
 
-The present manuscript makes three contributions.
+Accordingly, we make three scientific steps. We formulate camera-derived
+respiratory motion as an eight-dimensional harmonic state-space decomposition
+with separate oscillatory, morphology-complement, and full-waveform roles. We
+evaluate complete COHFACE and MAHNOB-HCI cohorts using three predefined
+routes: direct observations, the non-adaptive OSSM-KF comparator, and the full
+PARH-OSSM framework. We then analyse the clean-regime and hard-regime outcomes with label-free
+observability diagnostics, so that MAHNOB-HCI failures are treated as evidence
+about the current camera-observation set rather than hidden as generic model
+failure.
+
+We organize the analysis around that evidence chain. Figure~\ref{fig:architecture}
+first provides a role-allocation overview of the observation-to-state topology.
+We then report rate, waveform, strict reconstruction, and failure-taxonomy
+results from the predefined evaluation package, discuss what the clean COHFACE
+and irregular MAHNOB-HCI regimes imply, and give the detailed model and
+evaluation protocol in Methods.
+
+Figure~\ref{fig:architecture} summarizes this observation-to-state topology.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/F1_architecture.pdf}
+\caption{PARH-OSSM observation-to-state topology. Heterogeneous motion
+operators generate candidate camera-derived respiratory evidence, from which
+label-free view-level summaries are computed. The adaptive observation law maps
+those summaries to prior trust, effective measurement uncertainty,
+role-specific observation weights, oscillator/residual process scales, and
+abstention pressure. The role weights $W_t$ assign the shared evidence pool to
+the latent respiratory roles: dominant rhythm, harmonic asymmetry,
+baseline/projection drift, and aperiodic residual structure. The oscillatory
+roles form $z_{\mathrm{osc}}$ for rate and timing, whereas the full waveform
+readout reuses $z_{\mathrm{osc}}$ and adds the morphology complement
+$z_{\mathrm{morph}}=b+r$, yielding
+$z_{\mathrm{full}}=z_{\mathrm{osc}}+z_{\mathrm{morph}}$. Diagnostics are
+reported as side outputs from observation trust, state-space inference, and
+readout consistency; they are not feedback inputs to the evaluated path.}
+\label{fig:architecture}
+\end{figure}
+\FloatBarrier
+
+Figure~\ref{fig:architecture} should be read as a role-allocation diagram rather
+than as a linear preprocessing recipe. The left side shows that several fixed
+motion operators can expose different fragments of the same underlying
+respiratory process. The middle blocks show where the label-free evidence is
+converted into trust, effective noise, process scales, and role-specific
+weights before state inference. The right side shows why the two exported
+signals are intentionally decoupled: $z_{\mathrm{osc}}$ carries the
+rate-bearing oscillatory drive, whereas $z_{\mathrm{full}}$ reuses that drive
+and adds $z_{\mathrm{morph}}$ only when waveform morphology is the target. The
+diagnostic outputs are therefore used to audit observability and consistency,
+not to create an unreported feedback path.
+
+\section*{Results}
+\subsection*{Evaluation scope and evidence routing}
+Quantitative claims are restricted to the predefined evaluation
+cohorts, and each table states its evidence layer. The main performance tables
+compare three explicitly tracked sources. The first is a pre-specified fixed
+direct-observation baseline (P1D quad), the second is the corresponding
+OSSM-KF comparator, and the third is the integrated PARH-OSSM run. The
+complete eight-observation comparison across the direct baselines, OSSM-KF,
+and PARH-OSSM routes is provided as a supplementary diagnostic table rather
+than used for target-specific best-observation selection.
+This scope matters because we do not claim that every observation class
+generalizes universally. The claim is that the proposed adaptive
+observation-to-state framework is auditable, performs strongly when respiratory
+evidence is present, and exposes when the camera-observation bank is
+insufficient. The complete-cohort evidence layer is therefore not a
+method-specific cherry-pick: it reports all eligible PARH trials and explicitly exposes
+baseline/comparator computability limits. The dataset-level claims remain
+limited to what these evaluation records and their supplementary provenance
+support.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth,height=0.52\textheight,keepaspectratio]{figures/F2_dataset_and_observation_regime.pdf}
+\caption{Dataset-regime and observation-characterization summary. The top
+panels summarize the rate-label/peak-rate distributions and a claim-scope
+evidence map for all four audited datasets: COHFACE and MAHNOB-HCI are the real
+waveform/rate benchmarks, V4V contributes external rate-only evidence, and
+SCAMPS is retained as a synthetic diagnostic control rather than a real-video
+performance benchmark. The lower panels use the two real waveform
+datasets to show observation-class EDA: waveform correlation and
+high-frequency nuisance energy vary strongly across observation class and preprocessing
+stage, and the same observation bank becomes visibly weaker in MAHNOB-HCI.
+Additional distribution and preprocessing-stage diagnostics are retained in the
+supplementary material.}
+\label{fig:dataset_observation_regime}
+\end{figure}
+\FloatBarrier
+
+Figure~\ref{fig:dataset_observation_regime} motivates the order of the results:
+the clean COHFACE regime and the harder MAHNOB-HCI regime differ not only in
+final errors, but also in how much respiratory structure is visible before the
+state-space model is applied. Rate accuracy, aligned morphology, strict
+zero-lag reconstruction, and observability diagnostics must therefore be read
+together rather than collapsed into a single score.
+
+\subsection*{Complete-cohort rate accuracy}
+Table~\ref{tab:cohface_t3} reports rate accuracy for the fixed direct P1D quad
+baseline, OSSM-KF (P1D quad), and the integrated PARH-OSSM readout.
+COHFACE is the clean regime and all three rows are evaluated on the same
+160 trials. MAHNOB-HCI is the hard-regime stress test: PARH-OSSM is evaluated
+on all 525 eligible tail-aligned trials, whereas the representative P1D quad baseline and
+OSSM-KF comparator are computable for 488 of those trials. The table
+therefore reports trial counts explicitly rather than pretending that the
+baseline route exists for every MAHNOB trial.
+
+\begin{table}[!ht]
+\centering
+\caption{Complete-cohort rate accuracy. Values are median per-trial metrics.
+Base and OSSM-KF use the pre-specified representative P1D quad route where it
+is computable; PARH-OSSM uses the oscillatory rate (track-Hz) readout. MAHNOB-HCI
+comparator rows contain 488 computable P1D quad trials, whereas the PARH-OSSM
+row describes all 525 eligible tail-aligned trials; paired MAHNOB deltas are
+therefore reported separately on the common 488-trial subset. Dataset label
+MAHNOB abbreviates MAHNOB-HCI.}
+\label{tab:cohface_t3}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllcccc}
+\toprule
+Dataset & Method & Rate source & MAE (bpm) & RMSE (bpm) & Pearson $r$ & N \\
+\midrule
+COHFACE & P1D quad direct & signal spectrum & 0.195 & 0.270 & 0.950 & 160 \\
+COHFACE & OSSM-KF (P1D quad) & track Hz & 0.485 & 0.580 & 0.800 & 160 \\
+COHFACE & PARH-OSSM & track Hz & 0.335 & 0.410 & 0.855 & 160 \\
+MAHNOB & P1D quad direct & signal spectrum & 6.600 & 8.025 & -0.030 & 488 \\
+MAHNOB & OSSM-KF (P1D quad) & track Hz & 4.325 & 4.910 & -0.020 & 488 \\
+MAHNOB & PARH-OSSM & track Hz & 2.410 & 2.920 & 0.230 & 525 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+The rate decomposition gives a useful sanity check. On COHFACE, the fixed P1D
+spectral baseline remains the strongest scalar-rate source, which is expected
+in a clean regime where a simple observation already exposes respiratory
+periodicity. PARH-OSSM improves rate over the OSSM-KF comparator and preserves
+a strong Pearson correlation, but it is not presented as the best possible
+COHFACE rate-only estimator. On MAHNOB-HCI, the best diagnostic source is still
+only modestly better than the final selection, indicating that the dominant
+failure is usually not a trivial last-step selector miss. The failure taxonomy in
+Table~\ref{tab:observability_taxonomy} therefore becomes essential for
+interpreting the MAHNOB result.
+To avoid comparing different trial universes silently, the MAHNOB paired
+statistics are also computed on the common 488 trials where the representative
+P1D quad route is available. On that common subset, PARH-OSSM reduces rate MAE
+by 4.20 bpm relative to P1D quad direct and by 1.85 bpm relative to
+OSSM-KF (P1D quad). These paired deltas are reported in the supplementary
+paired-statistics table and are not used to tune the operating point.
+
+The complete eight-observation rate diagnostic plot is provided as Supplementary
+Fig. S1. It is not used for target-specific best-observation selection; the
+main rate result remains the complete-cohort comparison in
+Table~\ref{tab:cohface_t3}.
+
+\subsection*{Complete-cohort waveform fidelity}
+Table~\ref{tab:cohface_t4} reports waveform fidelity for the same three
+comparison sources. The aligned protocol asks whether the reconstructed
+morphology can match the reference after the same bounded alignment rule used
+throughout the evaluation. The strict protocol is harsher: it preserves zero-lag
+timing and native units. Raw strict MAE is therefore retained in
+the supplementary strict companion, but it is not the primary comparison
+axis because fixed observation operators can have arbitrary native scale. The
+table foregrounds strict CCC, span-normalized strict errors, and cycle timing
+instead. Span-normalized strict errors can exceed one when a fixed observation
+has an arbitrary native scale or offset relative to the belt reference; such
+large values are therefore interpreted as unit/scale diagnostics rather than as
+physiological amplitude errors. COHFACE supports the main waveform claim in a
+bounded sense: PARH-OSSM yields the highest aligned CCC and improves strict
+CCC, span-normalized strict error, and cycle timing relative to OSSM-KF, while
+aligned MAE and DTW remain comparable rather than uniformly better. MAHNOB-HCI does not
+support a strong waveform reconstruction claim: aligned waveform differences
+are small and strict zero-lag cycle timing remains poor.
+
+\begin{table}[!ht]
+\centering
+\caption{Complete-cohort waveform fidelity. Aligned metrics use the common
+respiratory-band, z-scored, bounded-alignment protocol, whereas strict metrics
+preserve zero-lag native-scale behaviour. The table foregrounds strict CCC,
+span-normalized strict error, and cycle timing; raw strict MAE is retained in
+the supplementary strict companion. Dataset label MAHNOB abbreviates
+MAHNOB-HCI, and paired MAHNOB waveform deltas use the common 488-trial subset.}
+\label{tab:cohface_t4}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.10}
+\begin{tabular}{L{1.55cm}L{2.65cm}C{1.20cm}C{1.20cm}C{1.20cm}C{1.10cm}C{1.35cm}C{1.35cm}C{1.10cm}C{1.05cm}}
+\toprule
+Dataset & Method & Aligned CCC & Aligned MAE & Aligned DTW & Strict CCC & Strict span-NMAE & Strict span-NDTW & PPI MAE (s) & IE error \\
+\midrule
+COHFACE & P1D quad direct & 0.811 & 0.484 & 0.368 & 0.002 & 53.402 & 52.960 & 0.718 & 0.181 \\
+COHFACE & OSSM-KF (P1D quad) & 0.852 & 0.417 & 0.342 & 0.119 & 0.867 & 0.637 & 0.534 & 0.111 \\
+COHFACE & PARH-OSSM & 0.859 & 0.423 & 0.347 & 0.157 & 0.548 & 0.292 & 0.347 & 0.090 \\
+MAHNOB & P1D quad direct & 0.352 & 0.912 & 0.602 & 0.001 & 0.236 & 0.172 & 1.685 & 0.389 \\
+MAHNOB & OSSM-KF (P1D quad) & 0.345 & 0.910 & 0.640 & 0.000 & 0.187 & 0.179 & 1.404 & 0.340 \\
+MAHNOB & PARH-OSSM & 0.342 & 0.910 & 0.661 & 0.000 & 0.258 & 0.257 & 1.480 & 0.269 \\
+\bottomrule
+\end{tabular}
+\renewcommand{\arraystretch}{1.0}
+\end{table}
+\FloatBarrier
+
+The corresponding PARH-OSSM peak/trough timing companions are 1.334/1.896 s for
+COHFACE and 10.174/9.943 s for MAHNOB-HCI. MAHNOB therefore remains a
+breath-cycle timing problem, not only a scale problem.
+The common-488 MAHNOB paired waveform deltas reinforce the same boundary:
+PARH-OSSM improves rate but does not improve aligned morphology over the fixed
+P1D quad route, and its strict span-normalized error is worse than the standard
+OSSM-KF comparator. We therefore treat MAHNOB waveform recovery
+as a limitation and use the failure taxonomy to explain where the current
+observation bank becomes insufficient.
+
+Figure~\ref{fig:cohface_f4_overlay} is the main visual guard against an
+over-simplified ``one waveform extractor'' interpretation. It uses one
+COHFACE trial and one MAHNOB-HCI trial from the predefined evaluation cohorts and overlays the
+reference against every retained fixed Base observation, the pre-specified
+OSSM-KF (P1D quad) comparator, and the PARH-OSSM readout.
+Within each dataset block the black reference trace is the same fixed visual
+window in every panel; estimates are shifted only by the precomputed bounded visual
+lag. Thus the figure shows same-trial output topology rather than a
+cherry-picked best observation or panel-specific reference crop. The larger
+supplementary atlases still provide observation-median coverage, but the main figure
+now makes the central claim visible: OF, DoF, and Profile1D-derived operators
+are not interchangeable measurements, and PARH-OSSM is evaluated against that
+heterogeneous observation bank rather than against a single hidden baseline.
+
+Figure~\ref{fig:cohface_f4_overlay} is therefore interpreted at the level of
+topology rather than by selecting a visually pleasing trace. In the COHFACE
+example, several fixed observations already follow the reference sufficiently
+well that the state-space readout should preserve, rather than replace, strong
+native respiratory evidence. In the MAHNOB-HCI example, many fixed observations
+are flat, noisy, or phase-inconsistent under the same visual window, and the
+PARH-OSSM waveform remains limited for the same reason. This is the visual
+counterpart of Table~\ref{tab:cohface_t4}: the model can improve the
+rate-oriented path, but full waveform recovery still depends on whether the
+camera-derived observation bank contains recoverable morphology.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth,height=0.70\textheight,keepaspectratio]{figures/F4_waveform_overlay_grid.pdf}
+\caption{Same-trial all-base waveform overlay atlas for the clean and hard
+regimes. Each dataset block uses one predefined manifest case from the predefined
+evaluation cohort and shows all eight fixed Base observation operators, the
+pre-specified OSSM-KF (P1D quad)
+comparator, and the PARH-OSSM readout against the same reference. This
+figure is generated from a predefined same-trial manifest. The visual window
+is chosen by reference visibility only, not by method performance. The atlas
+should be read together with the strict zero-lag metrics in
+Table~\ref{tab:cohface_t4}; near-flat or noisy fixed-observation traces
+indicate weak observation topology in that window, not a different reference.
+Supplementary Figs. S12 and S13 provide observation-median all-class overlay
+companions.}
+\label{fig:cohface_f4_overlay}
+\end{figure}
+
+\subsection*{Calibration diagnostics}
+The calibration diagnostics summarise a limited but important boundary.
+PARH-OSSM stores NIS and Student-$t$ adaptation diagnostics, while
+OSSM-KF provides comparable stability duration but not the
+PARH-specific NIS, $\lambda_t$, or adaptive reliability arrays. MAHNOB-HCI is not
+explained by gross state-space divergence: NIS remains close to one and
+Student-$t$ weights do not collapse. The failure is therefore better read as
+limited respiratory evidence plus reference/observability risk, not as an
+unstable Kalman-style update. The complete calibration diagnostics are retained
+in the Supplementary Information.
+
+\subsection*{Ablation evidence and failure decomposition}
+The rate-source decomposition and
+Table~\ref{tab:observability_taxonomy} first ask why the evaluated system does
+not close MAHNOB-HCI. The rate-source decomposition shows that COHFACE has a strong native
+timing source and that the reported track is a conservative but still
+high-correlation readout. In MAHNOB-HCI, however, even the best diagnostic rate
+source remains in the 3 bpm error range and is only modestly better than the
+final track. The failure taxonomy shows that this oracle room is itself
+limited: 400 of 525 MAHNOB trials are bounded by the current observation bank,
+19 are likely video/reference limited, 95 have actionable source-selection
+room, and 9 have oracle room without reliable label-free evidence. Thus
+the hard regime is not best described as a missing hyperparameter. It is an
+observability problem: the current fixed OF/DoF/Profile1D sources do not always
+contain enough respiratory evidence for a deployable adaptive law to recover.
+
+\FloatBarrier
+
+The COHFACE operator-alignment ablation asks a narrow but important question:
+should respiratory timing and waveform morphology be forced through the same
+output? The answer is no. A waveform-specialized expert can match aligned
+morphology, but it loses rate. The decoupled readout preserves the strong
+oscillatory path while retaining the same aligned waveform CCC and strict CCC.
+This is the cleanest numeric support for evaluating rate from $z_{\mathrm{osc}}$
+and waveform morphology from
+$z_{\mathrm{full}}=z_{\mathrm{osc}}+z_{\mathrm{morph}}$.
+
+The component-level evidence ledger compresses the same story into a
+component-level diagnostic ledger. It deliberately separates components
+that are retained as model structure from components kept only as diagnostics.
+This prevents the analysis from implying that every explored mechanism is a
+performance gain while still showing why each retained block exists.
+
+The detailed rate-source decomposition is provided in the Supplementary
+Information.
+It shows that the reported MAHNOB-HCI rate track (2.410 bpm) is close to the
+best diagnostic source available inside the readout bank (2.390 bpm), so the
+dominant hard-regime failure is not merely the last readout switch.
+
+\begin{table}[!ht]
+\centering
+\caption{MAHNOB observability failure taxonomy from the complete-cohort label-free
+diagnostic analysis. The table should be read as diagnostic evidence, not as a proposed model
+variant. ``Room'' is the
+median difference between the final selected source and the oracle-best source
+inside the candidate bank.}
+\label{tab:observability_taxonomy}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{L{4.0cm}cccL{5.1cm}}
+\toprule
+Category & Trials & Final MAE & Room & Interpretation \\
+\midrule
+Bounded by current observation bank & 400/525 & 2.150 & 0.290 & Current candidate sources have little oracle room; better source selection alone is unlikely to solve these trials. \\
+Source-selection room with posterior evidence & 60/525 & 3.655 & 1.030 & A different source can help and the label-free posterior already contains some usable evidence. \\
+Source-selection room with agreement evidence & 35/525 & 3.960 & 0.990 & A different source can help and cross-source agreement is partly informative. \\
+Likely video/reference limited & 19/525 & 4.510 & 0.170 & Even the best current source remains poor, suggesting weak visual respiratory evidence or reference scale/lag risk. \\
+Oracle room but weak label-free evidence & 9/525 & 5.050 & 1.940 & A better source exists, but current label-free diagnostics do not identify it reliably. \\
+Very low label-free observability & 2/525 & 3.715 & 0.660 & Very low label-free support; retained as explicit hard-observability evidence rather than removed from the evaluation cohort. \\
+\bottomrule
+\end{tabular}
+\renewcommand{\arraystretch}{1.0}
+\end{table}
+
+Table~\ref{tab:observability_taxonomy} separates several failure mechanisms
+that would be hidden by a single MAE value. The largest category is bounded by
+the current observation bank: these trials have little oracle room, so a better
+last-step selector would not substantially change the result. The two
+source-selection categories indicate cases where another candidate source could
+help and where label-free posterior or cross-source agreement evidence already
+contains partial guidance. The video/reference-limited and very-low
+observability categories mark trials where the available visual evidence or
+reference alignment is itself questionable. The ``oracle room but weak
+label-free evidence'' category is especially important because it identifies a
+specific future target: richer label-free observability cues, not merely a more
+complex state-space smoother.
+
+\FloatBarrier
+
+The operator-alignment and component-ablation ledgers are retained in the
+Supplementary Information. The most important ablation result is that the
+decoupled readout preserves the rate-specialized path while matching the
+waveform-specialized morphology and strict CCC in the COHFACE diagnostic
+package; a morphology-only expert cannot replace timing-aware estimation.
+Components without a matched numeric delta remain construction or diagnostic
+evidence rather than performance-improvement claims.
+
+\subsection*{Mechanism diagnostics and comparison ladder}
+The mechanism diagnostic table remains COHFACE-focused because the saved
+per-frame diagnostic arrays are available there. That scope limitation is
+deliberate rather than hidden, and it separates two questions cleanly: the
+mechanism table shows how the decomposition routes
+energy through harmonic, baseline, and residual blocks when the observation is
+clean and reproducible, while Figure~\ref{fig:cohface_mechanism_activation}
+uses the same complete-cohort comparison layer as the main tables to show how fixed
+operators, the OSSM-KF comparator, and PARH-OSSM move across clean
+and hard regimes.
+
+The detailed COHFACE mechanism analysis from diagnostic arrays is provided
+in the Supplementary Information. The main text keeps the graphical comparison
+ladder because it directly links the fixed observation bank, the comparator, and
+the PARH-OSSM readout.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/F5_mechanism_activation.pdf}
+\caption{All-base complete-cohort comparison ladder for the eight fixed observation
+operators, the pre-specified OSSM-KF (P1D quad) comparator, and
+PARH-OSSM. The left panel shows rate MAE, the middle panel shows aligned
+waveform CCC, and the right panel shows strict span-normalized error; the
+dotted divider separates the fixed observation bank from the
+comparator/proposed readouts. The figure makes explicit
+that COHFACE is a clean regime where profile evidence is already strong, whereas
+MAHNOB-HCI remains a hard observability regime even after PARH-OSSM improves the
+rate track.}
+\label{fig:cohface_mechanism_activation}
+\end{figure}
+
+Figure~\ref{fig:cohface_mechanism_activation} is included to keep the
+comparison visually tied to the observation problem. In COHFACE, several
+Profile1D-based observations already expose strong respiratory structure, so
+PARH-OSSM is not presented as a universal replacement for a strong fixed
+baseline. In MAHNOB-HCI, rate improves while waveform structure remains weak,
+which is exactly the pattern expected when the limiting factor is the available
+camera observation rather than a single Kalman-filter parameter. This figure
+therefore connects the numerical tables to the central interpretation: the
+framework is useful because it separates timing, form, and failure evidence,
+not because every metric in every observation regime is forced to improve.
+\section*{Discussion}
+\subsection*{Why PARH-OSSM gains are still limited}
+The combined COHFACE and MAHNOB-HCI evidence narrows the problem. The latent
+decomposition is no longer the dominant failure mode. The present framework has
+an active second harmonic, non-saturated oscillatory-support scores, usable
+baseline and residual states, corrected rate routing, and observation-dependent
+gains that would not appear if the extra states were dormant. The remaining
+bottleneck is the observation equation and the label-free evidence available to
+that equation. NIS remains near unity and Student-$t$ weights do not collapse,
+which reinforces that the hard-regime failures are driven by observation
+quality rather than gross filter instability.
+
+COHFACE and MAHNOB-HCI expose that bottleneck differently. In clean COHFACE,
+the integrated system preserves strong rate and aligned morphology. In
+irregular MAHNOB-HCI, the same framework remains calibrated but the final rate
+correlation and waveform fidelity are weak. This means the proposed state-space
+organization is not enough by itself: a hard target regime also needs richer or
+more reliable respiratory observations.
+
+\subsection*{What the evidence supports}
+Three claims are now defensible.
 \begin{itemize}[nosep]
-\item It defines the current minimal PARH-OSSM v1 as an eight-dimensional
-      harmonic decomposition with dual outputs, exact linear filtering, and
-      stored per-sample diagnostics.
-\item It reports the current reproducible evidence boundary: a completed
-      COHFACE production run, saved diagnostic PKLs, and an incomplete MAHNOB
-      production run that is not yet used for benchmark claims.
-\item It explains why corrected rate evaluation reveals a real PARH-OSSM rate
-      gain over KFstd on COHFACE, while waveform gains remain limited despite
-      the additional model structure.
+\item Observation construction matters. Raw optical flow and the optical-flow
+bridge come from the same source but lead to materially different
+rate-versus-waveform trade-offs.
+\item Observation roles are now identifiable. Quadratic and cubic Profile1D
+routes are waveform-primary harmonic cues, the optical-flow bridge is a
+rate-oriented constructed cue, Profile1D consensus adds rate-supporting
+agreement evidence, and raw/bridged depth-of-flow routes remain auxiliary cues.
+\item The hard-regime failure is measurable rather than opaque. MAHNOB-HCI does
+not support strong waveform claims under the current observation bank, but the
+observability taxonomy identifies when the bank has little oracle room and when
+source-selection evidence exists but remains insufficient for deployable
+source routing.
 \end{itemize}
 
-The manuscript therefore proceeds in three layers. It first defines the
-code-verified model structure and its intended metric routing. It then reports
-only those quantitative results that are traceable to persistent artifacts.
-Finally, it interprets those artifacts mechanistically, including why the
-current COHFACE behavior is informative but still insufficient to stabilise the
-final paper story without rerun evidence from the updated code and from
-MAHNOB-HCI.
+\subsection*{Current boundaries and next observation requirements}
+Several boundaries still separate the present system from a fully
+closed adaptive multi-observation state-space model.
+\begin{itemize}[nosep]
+\item PARH-OSSM is an integrated but bounded observation-law system. It is
+not a fully general time-local multi-observation matrix $H_{m,t}$ with explicit
+source covariance for every observation.
+\item The strict reconstruction tables show that aligned morphology is not
+yet the same as true waveform recovery. The present framework can line up breath
+shape after normalisation and lag correction, but it still fails badly when
+gain, offset, and zero-lag timing must all be correct at once.
+\item The present label-free reliability features are not sufficient for
+deployment-style routing. They can reject some within-source consistency
+patterns, but they still confuse repeated bridge-like waveforms with genuinely
+recoverable respiratory morphology on difficult MAHNOB-HCI trials.
+\item Comparator symmetry is incomplete because OSSM-KF is intentionally a
+stripped-down resonator-plus-Kalman comparator. It shares the broad
+state-space inference machinery, but it does not save the same per-frame
+calibration arrays, posterior source roles, or posterior frequency uncertainty
+fields as PARH-OSSM.
+\item The residual branch is more interpretable than before, but it is still a
+diagnosed leftover pathway rather than a separately validated physiological
+event branch.
+\item Multi-observation fusion is only partially closed. The integrated readout uses
+bounded integration and explicit source analyses, but the next-generation model
+should make every source's role, covariance, and low-observability decision
+explicit inside one observation equation.
+\end{itemize}
 
-\section*{PARH-OSSM v1}
-\subsection*{Latent decomposition}
-The current audited model uses the latent state
+This boundary also clarifies how the framework should interact with rPPG and
+deep learning. rPPG-derived respiratory modulation, learned motion fields, or
+learned ROI-quality maps are natural additional observation operators, not
+conceptual competitors to the state/readout decomposition~\cite{Gwak2024MultimodalBreathing,Du2021WeaklySupervisedRPPGRespiration}.
+A future learned front end should be judged by whether it produces label-free
+respiratory evidence and uncertainty that can enter the observation law without
+using target labels at test time. Conversely, the state-space layer should keep
+the timing, morphology, baseline, residual, calibration, and low-observability
+diagnostics explicit, so that a deep model does not simply hide the same
+failure modes inside an uninterpretable waveform output.
+
+\subsection*{Limitations and next steps}
+The current analysis no longer has an incomplete MAHNOB-HCI cohort limitation:
+both major datasets are evaluated over their predefined cohorts. The remaining limitations
+are scientific.
+
+First, the integrated system is strong on COHFACE but still weak on
+MAHNOB-HCI. That gap should not be explained away as a formatting artifact:
+MAHNOB rate correlation is low, aligned waveform CCC is modest, and strict
+waveform CCC is 0.000 in the complete-cohort table. Second, the
+calibration diagnostics do not
+show gross state divergence, so simply retuning a Kalman parameter is unlikely
+to be the right scientific fix. Third, the label-free observability analysis shows
+that many MAHNOB trials have little recoverable room inside the present
+OF/DoF/Profile1D bank. The conclusion is that the framework is useful and
+auditable, but the present observation bank is not sufficient for universal
+camera-based respiratory reconstruction.
+
+The next development stage should therefore prioritise four tasks. (1) Build
+richer respiratory observations before adding more output-side gates, especially
+phase-anchored morphology cues that survive person and environment shift. (2)
+Make label-free reliability time-local, so trust can change within a recording
+instead of being inferred mostly at the clip level. (3) Make the residual branch
+identifiable as respiratory residual structure rather than a catch-all
+observation-error absorber. (4) Promote multi-observation fusion only when each
+source carries an explicit role, covariance, and low-observability flag; naive
+source stacking would obscure the main lesson of the present analysis.
+\section*{Methods}
+\subsection*{Implementation and evaluation protocol overview}
+The Methods define the physiological state decomposition, the adaptive
+observation law, the fixed motion-observation classes, and the evaluation
+protocol used to generate the reported tables and figures. Figure~\ref{fig:architecture}
+provides the visual overview of this pipeline before the Results; the equations
+and implementation boundaries below specify how the same topology is evaluated.
+
+\subsection*{State representation}
+PARH-OSSM uses the latent state
 \begin{equation}
 \state_t =
 \left[
@@ -177,23 +665,66 @@ $(r_t,\dot{r}_t)$ is an aperiodic residual block. The observation equation is
 H = [1,\,0,\,1,\,0,\,1,\,0,\,1,\,0].
 \end{equation}
 
+The superscript identifies the harmonic order. The first harmonic represents
+the dominant respiratory rhythm, while the second harmonic represents
+within-cycle asymmetry such as unequal inspiration and expiration shapes. The
+subscripts $c$ and $s$ denote real quadrature coordinates, not separate
+physiological measurements; the sine coordinate stores phase so that the
+oscillator can rotate smoothly through amplitude changes and short periods of
+weak observation support. The baseline pair $(b_t,\dot b_t)$ captures slow
+projection or posture drift, and the residual pair $(r_t,\dot r_t)$ captures
+aperiodic respiratory structure that is not well represented by a narrow-band
+oscillator. The default observation row $H$ states that a scalar
+camera-derived motion cue may contain contributions from the oscillatory,
+baseline, and residual coordinates. In the adaptive observation law, the
+effective trust in that cue is then modulated rather than assumed to be fixed.
+
 The harmonic blocks use rotation-matrix dynamics conditioned on an external
 frequency estimate, the baseline block follows a constant-velocity model, and
 the residual block follows a damped random walk. Because the model remains
 linear conditional on the external frequency, standard Kalman filtering and
 Rauch--Tung--Striebel smoothing remain valid~\cite{Kalman1960,Sarkka2013,RauchTungStriebel1965}.
+Thus PARH-OSSM is not a filter-free alternative to Kalman filtering. Its
+contribution is the physiological state decomposition and observation-aware
+trust law wrapped around that inference machinery, whereas OSSM-KF removes
+those PARH-specific components and keeps only the fixed oscillator comparator.
+The derivative coordinates $\dot{b}_t$ and $\dot{r}_t$ are inertial state
+coordinates rather than camera channels: $\dot{b}_t$ allows slow drift to
+continue smoothly instead of being repeatedly absorbed by the oscillator, and
+$\dot{r}_t$ allows non-harmonic respiratory residual structure to persist
+briefly instead of being treated as independent frame noise.
 
-\subsection*{Dual outputs}
-The current implementation stores two outputs:
+\subsection*{Oscillatory and full-waveform readouts}
+PARH-OSSM uses two readouts derived directly from the latent coordinates, and
+we name the non-oscillatory complement explicitly:
 \begin{equation}
-z_{\mathrm{osc},t} = h_{c,t}^{(1)} + h_{c,t}^{(2)},
+z_{\mathrm{osc},t}
+    = h_{c,t}^{(1)} + h_{c,t}^{(2)},
 \qquad
-z_{\mathrm{full},t} = z_{\mathrm{osc},t} + b_t + r_t.
+z_{\mathrm{morph},t}
+    = b_t + r_t,
+\qquad
+z_{\mathrm{full},t}
+    = z_{\mathrm{osc},t} + z_{\mathrm{morph},t}.
 \end{equation}
-$z_{\mathrm{osc}}$ is the intended oscillatory output for rate and dominant
-rhythm analysis. $z_{\mathrm{full}}$ is the intended full respiratory motion
-estimate for waveform fidelity and morphology. Both causal and smoothed
-versions are stored in the saved trial payloads.
+The added symbol $z_{\mathrm{morph}}$ is not a third exported performance
+signal. It names the baseline--residual complement that turns the oscillatory
+anchor into the full respiratory waveform. The oscillatory readout
+$z_{\mathrm{osc}}$ carries the dominant rhythm and is the natural source for
+rate and breath-timing analysis. The full readout $z_{\mathrm{full}}$ adds slow
+trajectory drift and aperiodic respiratory departures back to that anchor and is
+therefore the waveform compared against the reference morphology. Both causal
+and smoothed versions of the exported readouts are retained as trial-level
+outputs.
+
+This decomposition is central to the study design because rate, breath timing,
+and trajectory morphology are not the same target. A camera cue can preserve a
+dominant respiratory frequency while losing the trajectory shape, or it can
+carry morphology while introducing scale, lag, or residual content that harms
+rate estimation. For that reason, PARH-OSSM does not force all evaluations
+through one waveform-derived objective. Instead, the model asks whether a video
+contains enough oscillatory information for rate and enough structured
+respiratory-form information for waveform analysis.
 
 \subsection*{Why this decomposition is physiology-aligned}
 The model structure is not arbitrary. A second harmonic is included because
@@ -212,617 +743,386 @@ This decomposition also clarifies the evaluation policy. Rate metrics should be
 computed from $z_{\mathrm{osc}}$, because rate is an oscillatory quantity.
 Waveform-fidelity metrics should be computed from $z_{\mathrm{full}}$, because
 the full motion trace is the object of comparison when baseline and aperiodic
-content matter. That separation is one of the most important paper-level
-distinctions from the earlier manuscript state, where rate and waveform
-interpretations were more easily conflated. It also follows directly from the
+content matter. The explicit complement $z_{\mathrm{morph}}=b_t+r_t$ makes that
+separation visible: it is the morphology/trajectory content that must be added
+to the oscillator before waveform fidelity is evaluated. That separation is one
+of the central conceptual
+distinctions from single-output respiratory estimators, where rate and waveform
+interpretations are easily conflated. It also follows directly from the
 state-space design principle above: once the state variables are assigned
 distinct physiological roles, the observation targets and evaluation metrics
 must remain aligned with those roles rather than collapsing everything back to
 a single generic output.
 
-\subsection*{Disentangled adaptation in the current code}
-The current scaffold separates three internal scores:
+To make the shared-versus-adaptive observation story testable at the state
+interface, the system also records diagnostic observation summaries,
+bootstrap latent drives for the harmonic, baseline, and residual blocks,
+local adaptor parameters, and a global observation row in the
+adaptive-resonator diagnostic path. These objects are not primary performance
+outputs. They are retained so that the reader can inspect how the observation
+interface drives the latent states. Supplementary Fig. S6 visualizes these
+traces, and Supplementary Fig. S7 summarizes confidence and agreement
+diagnostics that motivate separate oscillatory and full-waveform readouts. Both
+figures are mechanistic diagnostics rather than competing final-package model
+claims.
+
+\subsection*{Disentangled adaptation}
+PARH-OSSM separates three internal scores:
 \begin{equation}
 q_{\mathrm{obs},t} \rightarrow \pi_t,\qquad
 q_{\mathrm{dyn},t} \rightarrow Q_{\mathrm{osc},t},\qquad
 1-q_{\mathrm{osc},t} \rightarrow Q_{\mathrm{aper},t}.
 \end{equation}
-Here $\pi_t$ is a prior trust term used through
+Here $q_{\mathrm{obs},t}$ summarizes how much the current observation should be
+trusted before seeing the innovation, and it is converted to the prior trust
+term $\pi_t$. The score $q_{\mathrm{dyn},t}$ controls how freely the
+oscillatory state is allowed to move, and $q_{\mathrm{osc},t}$ separates
+oscillatory support from aperiodic or residual content. The effective
+measurement variance is then adjusted through
 \(
 \Reff = R_t / \pi_t
-\),
+ \),
 while Student-$t$ downweighting remains a posterior safeguard through
-$\lambda_t$. In the current code, Mehra-style adaptive measurement noise
+$\lambda_t$. Mehra-style adaptive measurement noise
 remains the primary scale-setting mechanism~\cite{Mehra1970}; the quality
 scores modulate the prior trust and process noise around that baseline.
 
-\subsection*{Current implementation boundary}
-The present repository already contains the following verified features: the
-eight-dimensional state, $K=2$ harmonic structure, baseline and residual
-blocks, dual outputs, warm-up-only frequency initialisation, external helper
-frequency updates, causal and smoothed outputs, and saved per-sample
-diagnostics for $R_t$, $\pi_t$, $\lambda_t$, $\nu_t$,
-$q_{\mathrm{obs},t}$, $q_{\mathrm{dyn},t}$, and $q_{\mathrm{osc},t}$.
+\subsection*{Label-free reliability calibration}
+The adaptive observation law is not a hard selector that chooses the best
+observation after seeing the respiratory reference. For each target video, the
+pipeline first constructs multiple motion-observation classes and several
+views of each class, including raw, detrended, band-limited, sign/event,
+robustly scaled, current-path, and helper views. These views are not separate
+final models and they are not an ordered preprocessing cascade. They are
+parallel evidence channels used to ask whether a camera-derived cue carries
+plausible timing, morphology, or nuisance-dominated content.
 
-Several important items are still incomplete or unstable. First, the current
-live production path is still not a fully general observation-calibrated
-state-space model. Instead, the code now uses a family-selective hybrid:
-raw OF uses a light observation path, \texttt{OF\_bridge} is added as an
-OF-derived displacement-compatible observation family, DoF remains on the
-legacy stack, P1D-linear remains on the legacy stack with selective frequency
-rescue, and P1D-quadratic/cubic now use a bounded warm-up observation-row
-calibration.
-Second, broader warm-up observation-calibration prototypes and helper-only or
-helper-blend observation-routing variants failed the same 12-trial COHFACE
-promotion gate. This means preprocessing-policy switching alone is no longer a
-credible primary redesign axis. Third, the calibration CSV now emits NIS and
-lambda aggregates for PARH-OSSM from saved diagnostics arrays, but comparable
-per-frame calibration fields are still unavailable for KFstd. Fourth, the
-all-family COHFACE rerun has now been completed under the current live
-default including \texttt{OF\_bridge}, but the MAHNOB-HCI production run is still
-incomplete, so the present manuscript does not claim cross-dataset results.
+The reliability evidence is computed without using the target respiration
+label. The retained features measure whether independent
+observation classes support a similar respiratory rate or phase, whether the evidence survives
+simple preprocessing changes, whether half/double-rate aliasing is likely, and
+whether nuisance or abstention pressure is high. The resulting video-level and
+motion-class reliability priors are then used to modulate how strongly the
+constructed evidence affects the state update and the bounded oscillatory readout.
+The provenance tables store video identifiers and reliability scores for
+reproducibility, but those storage fields are not scientific variables in the
+model. Oracle or reference-derived columns are explicitly removed before the
+evaluation run.
 
-\subsection*{Observation-family semantics in the live scaffold}
-The most important implementation lesson so far is that the observation family
-is part of the model, not just part of preprocessing. Table~\ref{tab:obs_family_map}
-therefore summarises the six active COHFACE families by their current
-construction, observation domain, and present PARH role. Two contrasts matter
-most. First, raw OF and \texttt{OF\_bridge} are both derived from optical flow
-but they are not interchangeable: raw OF remains a helper-heavy velocity-like
-family, whereas \texttt{OF\_bridge} is a displacement-compatible constructed
-family whose main present benefit is rate. Second, the Profile1D quadratic and
-cubic routes are not just ``better smoothed inputs''; they are currently the
-waveform-primary harmonic families because their observation semantics align
-best with the shared latent decomposition. This is the core reviewer-facing
-point of the present redesign: the same PARH latent state is kept across
-families, but what is observed and how it should be interpreted is explicitly
-family-dependent.
+Operationally, the reliability law has three fixed stages. First, each
+candidate observation view contributes target-computable features: cross-source
+rate agreement, preprocessing invariance, event-timing support, bridge timing
+support, rate/phase support, morphology support, ROI observability, harmonic
+alias risk, nuisance pressure, and abstention pressure. Second, these features
+are clipped to $[0,1]$ and combined with fixed coefficients into state-role
+responsibilities for the fundamental timing anchor, second-harmonic scaffold,
+baseline support, residual support, and abstention. For example, agreement is a
+fixed weighted combination of group support, macro timing, bridge timing, and
+rate/phase support; observability is the geometric mean of ROI and preprocessing
+support; and harmonic ambiguity discounts the fundamental-rate responsibility
+rather than being treated as a simple failure flag. Third, the component
+responsibilities modulate $\pi_t$, $Q_{\mathrm{osc},t}$,
+$Q_{\mathrm{aper},t}$, and the bounded $z_{\mathrm{osc}}$ readout. The exact
+feature columns, coefficients, and source files are listed in the Supplementary
+Methods and release audit files; no target respiratory waveform or
+target-specific oracle source is used in these computations.
 
-\begin{table}[!ht]
-\centering
-\caption{Observation-family semantics and current PARH role map. Values are
-generated from \texttt{paper/tables\_ready/T2\_observation\_family\_map.csv},
-itself derived from the current semantics registry plus the official COHFACE
-table-ready T3/T4 CSVs.}
-\label{tab:obs_family_map}
-\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{p{1.2cm}p{3.2cm}p{1.1cm}p{3.0cm}p{2.6cm}cc}
-\toprule
-Family & Construction & Domain & Primary information & Current PARH role & PARH T3 MAE & PARH T4 CCC \\
-\midrule
-OF         & raw vertical optical-flow surrogate & velocity & oscillatory motion & helper-heavy rate family & 0.510 & 0.791 \\
-OF\_bridge & OF-derived displacement-compatible bridge & displacement & bridged oscillatory displacement & rate-oriented constructed family & 0.295 & 0.777 \\
-P1D\_lin   & linear 1D profile shift surrogate & displacement & fundamental displacement & conservative displacement family & 0.465 & 0.727 \\
-P1D\_quad  & quadratic 1D profile shift surrogate & displacement & harmonic morphology & waveform-primary harmonic family & 0.295 & 0.855 \\
-P1D\_cub   & cubic 1D profile shift surrogate & displacement & harmonic morphology & waveform-primary harmonic family & 0.300 & 0.849 \\
-DoF        & thresholded frame-difference count & energy & thresholded motion energy & nuisance-limited auxiliary family & 2.110 & 0.571 \\
-\bottomrule
-\end{tabular}
-\end{table}
+In the evaluated path, COHFACE uses combined label-free reliability evidence
+on the readout side, whereas MAHNOB-HCI uses separate state-component and
+readout reliability evidence. These scores softly modulate
+observation trust, effective measurement uncertainty, and the bounded
+$z_{\mathrm{osc}}$ readout inside the PARH-OSSM update. They do not switch the
+system to the non-adaptive OSSM-KF comparator, and they do not select a
+trial-specific best waveform source from the ground truth. Respiratory ground
+truth is used for evaluation and for after-the-fact oracle/failure analyses
+only. When the label-free evidence is ambiguous, the intended behaviour is
+conservative: inflate uncertainty or preserve the existing readout rather than
+force a winner-take-all source switch.
 
-\section*{Results}
-\subsection*{Evidence boundary}
-All quantitative claims in this manuscript are restricted to persistent files
-generated by the completed all-family COHFACE rerun in
-\texttt{results/20260408\_cohface\_prod\_ofbridge\_full}. The evaluation CSVs,
-table-ready inputs, mechanism audit, and case-study manifest were all
-regenerated from that run. The same repository also contains gate-tested
-negative controls and pair-fusion experiments, but those remain secondary or
-explicitly rejected design evidence rather than current production behavior.
-The MAHNOB-HCI production directory still does not contain a completed metrics
-directory and metadata file, so MAHNOB-HCI is discussed only as the intended
-irregular-regime benchmark for the next stage, not as a current quantitative
-result.
+This design also defines the learning boundary. The evaluated system is not an
+end-to-end supervised waveform predictor and it is not a dataset-specific
+hyperparameter sweep. The fixed observation operators, resonant state
+definition, Kalman/RTS inference equations, and metric routing are not learned
+per target dataset. What is calibrated weakly is the label-free reliability
+evidence that controls how strongly already constructed evidence
+should affect the state update and readout. The complete COHFACE and
+MAHNOB-HCI evaluation cohorts are used to keep all available
+baseline, comparator, and proposed rows traceable; target labels are not used
+to choose a trial's best observation or waveform source in the evaluated
+system.
 
-\subsection*{COHFACE rate accuracy}
-Table~\ref{tab:cohface_t3} reports the current median per-trial COHFACE rate
-metrics after correcting the rate-evaluation path for methods that save
-\texttt{track\_hz}. This materially changes the rate interpretation relative to
-the older legacy spectral path. PARH-OSSM now improves on KFstd in median MAE
-and RMSE in five of the six families, and it is the strongest estimator on
-DoF. The newly promoted \texttt{OF\_bridge} route is also now the best PARH family by
-the locked T3 ladder rule, but even there the raw base and KFstd bridge routes
-still achieve lower absolute median error. The remaining limitation is
-different: the raw base observation still has the best median MAE on raw OF,
-\texttt{OF\_bridge}, and all three Profile1D families.
+\subsection*{Verified model scope}
+The evaluated PARH-OSSM system includes the eight-dimensional state, the
+$K=2$ harmonic structure, baseline and residual blocks, dual readouts,
+warm-up-only frequency initialisation, external timing-evidence updates,
+causal and smoothed outputs, and per-sample diagnostics for $R_t$, $\pi_t$,
+$\lambda_t$, $\nu_t$, $q_{\mathrm{obs},t}$,
+$q_{\mathrm{dyn},t}$, and $q_{\mathrm{osc},t}$. These diagnostics are part of
+the scientific output because they expose whether the model is using the
+oscillatory, harmonic, baseline, or residual pathways, and whether the
+available observation is trustworthy enough for rate or waveform analysis.
 
-This means the old ``PARH $\approx$ KFstd'' reading was partly an
-evaluation-path artifact, not a faithful description of the saved PARH-OSSM
-outputs. Once T3 is routed through the intended oscillatory output, PARH-OSSM
-is rate-competitive. The unresolved issue is that this rate improvement still
-does not translate into leading waveform fidelity. Figure~\ref{fig:cohface_t3_summary}
-makes the rate-versus-family split explicit, especially the new
-raw-OF-versus-\texttt{OF\_bridge} contrast.
+The results should therefore be read as evidence for a bounded
+observation-aware state-space framework, not as a fully learned
+multi-observation covariance model for every source and time segment. The
+fixed observation operators and candidate views provide structured evidence;
+the label-free reliability scores modulate how that evidence enters the
+state update and readout; and the PARH latent state keeps the physiological
+roles explicit. Helper-only and helper-blend variants are treated as
+diagnostic context rather than as the proposed method. OSSM-KF remains a
+non-adaptive comparator: it uses conventional Kalman/RTS inference, but it
+does not contain the PARH observation law, dual-readout routing, morphology
+complement, or calibration-diagnostic pathways.
 
-\begin{table}[!ht]
-\centering
-\caption{COHFACE frequency-domain rate accuracy. Values are median per-trial
-metrics from \texttt{paper/tables\_ready/T3\_rate\_main.csv}, regenerated from
-\texttt{metrics\_freq\_domain\_raw.csv}. Base uses the signal-spectral fallback;
-KFstd and PARH-OSSM use the stored \texttt{track\_hz}.}
-\label{tab:cohface_t3}
-\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccccccccc}
-\toprule
-Family &
-\multicolumn{3}{c}{MAE (BPM)} &
-\multicolumn{3}{c}{RMSE (BPM)} &
-\multicolumn{3}{c}{Pearson $r$} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
-& Base & KFstd & PARH & Base & KFstd & PARH & Base & KFstd & PARH \\
-\midrule
-OF         & 0.290 & 0.550 & 0.510 & 0.390 & 0.650 & 0.565 & 0.890 & 0.730 & 0.740 \\
-OF\_bridge & 0.245 & 0.260 & 0.295 & 0.325 & 0.335 & 0.370 & 0.900 & 0.835 & 0.850 \\
-P1D\_lin   & 0.335 & 0.620 & 0.465 & 0.435 & 0.820 & 0.590 & 0.840 & 0.655 & 0.715 \\
-P1D\_quad  & 0.195 & 0.485 & 0.295 & 0.270 & 0.580 & 0.375 & 0.950 & 0.800 & 0.890 \\
-P1D\_cub   & 0.220 & 0.500 & 0.310 & 0.275 & 0.605 & 0.385 & 0.940 & 0.790 & 0.875 \\
-DoF        & 2.400 & 3.110 & 2.110 & 4.015 & 3.230 & 2.310 & 0.370 & 0.300 & 0.390 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection*{Camera-derived observation classes}
+The most important methodological lesson is that the camera-derived observation
+is part of the model, not just a preprocessing choice. Supplementary Table S2
+therefore summarizes the eight active single-observation routes in a fixed
+display order: optical flow, optical-flow bridge, depth-of-flow, depth-of-flow
+bridge, linear Profile1D, quadratic Profile1D, cubic Profile1D, and Profile1D
+consensus. This order is a table and figure convention, not a sequential
+pipeline and not a claim that one observation is transformed into the next.
 
-\begin{figure}[!ht]
-\centering
-\includegraphics[width=\linewidth]{figures/F3_t3_family_summary.pdf}
-\caption{Family-level COHFACE T3 summary generated from
-\texttt{paper/tables\_ready/T3\_rate\_main.csv}. The left panel shows median
-rate MAE and the right panel shows median Pearson correlation across the six
-active observation families. The figure makes the current split explicit:
-\texttt{OF\_bridge} is the best PARH rate route, while raw base observations
-remain strongest in absolute rate error for several displacement-like
-families.}
-\label{fig:cohface_t3_summary}
-\end{figure}
+Three contrasts are central. First, raw optical flow and the optical-flow
+bridge are both flow-derived, but they are not interchangeable. The raw signal
+is closer to a velocity-like cue, whereas the bridge converts that cue toward a
+displacement-compatible respiratory trajectory and is therefore mainly useful
+for timing support in the current framework. Second, raw depth-of-flow and the
+depth-of-flow bridge are also distinct. The raw signal is a burst-like
+motion-energy count, whereas the bridge recovers only a coarse signed
+motion-centroid trajectory. Third, the Profile1D branch is explicitly split
+into a conservative fundamental route, two harmonic morphology routes, and a
+consensus route that checks whether the linear, quadratic, and cubic profile
+interpretations agree.
 
-\subsection*{COHFACE waveform fidelity}
-Table~\ref{tab:cohface_t4} shows the current waveform comparison under the
-locked policy Base(\texttt{signal\_hat}) / KFstd(\texttt{signal\_hat}) /
-PARH(\texttt{z\_full}), all evaluated in smoothed mode. This is the strongest
-current positive result for PARH-OSSM: waveform fidelity improves over the raw
-base observation on every family except \texttt{OF\_bridge}, where KFstd and PARH are
-already operating on a constructed OF-derived observation. However, the
-family-specific picture is mixed in a scientifically useful way: PARH-OSSM
-now exceeds KFstd on raw OF, is essentially tied with a slight edge on
-P1D-linear, slightly exceeds KFstd on P1D-quadratic in waveform CCC while
-remaining worse in waveform MAE/DTW, and remains below KFstd on
-\texttt{OF\_bridge}, P1D-cubic, and DoF.
+These constructed observations are included for information content and
+coordinate compatibility, not for cosmetic smoothing. When a constructed route
+fails, that failure is also evidence: it indicates that the current camera
+observation set does not contain a clean enough respiratory projection for a
+universal waveform claim.
 
-This pattern is materially different from a superiority claim. The current
-evidence supports ``useful waveform improvement over the raw proxy'' and
-``family-dependent but still incomplete narrowing of the KFstd gap''.
-
-\begin{table}[!ht]
-\centering
-\caption{COHFACE waveform fidelity. Values are median per-trial metrics from
-\texttt{paper/tables\_ready/T4\_waveform\_main.csv}, regenerated from
-\texttt{metrics\_waveform\_raw.csv}.}
-\label{tab:cohface_t4}
-\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccccccccc}
-\toprule
-Family &
-\multicolumn{3}{c}{CCC} &
-\multicolumn{3}{c}{wMAE} &
-\multicolumn{3}{c}{DTW} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
-& Base & KFstd & PARH & Base & KFstd & PARH & Base & KFstd & PARH \\
-\midrule
-OF         & 0.711 & 0.773 & 0.791 & 0.576 & 0.516 & 0.511 & 0.452 & 0.403 & 0.403 \\
-OF\_bridge & 0.685 & 0.789 & 0.777 & 0.629 & 0.503 & 0.504 & 0.466 & 0.396 & 0.399 \\
-P1D\_lin   & 0.578 & 0.725 & 0.727 & 0.655 & 0.536 & 0.543 & 0.531 & 0.424 & 0.424 \\
-P1D\_quad  & 0.811 & 0.853 & 0.854 & 0.484 & 0.416 & 0.425 & 0.368 & 0.343 & 0.346 \\
-P1D\_cub   & 0.806 & 0.851 & 0.848 & 0.490 & 0.419 & 0.425 & 0.371 & 0.344 & 0.346 \\
-DoF        & 0.438 & 0.575 & 0.571 & 0.792 & 0.731 & 0.736 & 0.551 & 0.460 & 0.459 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Figure~\ref{fig:cohface_f4_overlay} makes the current best waveform family more
-concrete by holding the trial fixed and comparing Base, KFstd, and PARH on the
-same \texttt{P1D\_quad} clips. This same-trial view matters because the
-family-level medians in Table~\ref{tab:cohface_t4} can hide where the current
-PARH route is genuinely stronger and where it still trails KFstd. In the best
-and median clips, PARH narrows or matches the KFstd waveform shape while
-maintaining the physiology-aligned decomposition. In the bottom clip, however,
-the figure also makes the current limitation explicit: once the observation is
-already badly mismatched, the present observation model does not rescue the
-waveform.
-
-\begin{figure}[!ht]
-\centering
-\includegraphics[width=\linewidth]{figures/F4_waveform_overlay_grid.pdf}
-\caption{Same-trial waveform overlays for the current strongest waveform family
-\texttt{P1D\_quad}. Rows are the top, median, and bottom PARH clips selected by
-\texttt{waveform\_CCC} using the persistent manifest
-\texttt{paper/manifests/cohface\_p1dquad\_overlay\_manifest.csv}. Columns show
-the corresponding Base, KFstd, and PARH outputs on the same trial, each aligned
-to the ground-truth respiratory waveform using the same cross-correlation rule
-as the T4 protocol.}
-\label{fig:cohface_f4_overlay}
-\end{figure}
-
-\subsection*{COHFACE calibration diagnostics}
-Table~\ref{tab:cohface_t6} summarises the regenerated PARH-OSSM calibration
-CSV. The current evaluation path now emits NIS and lambda aggregates directly
-from the saved PARH-OSSM diagnostic arrays, while KFstd remains unavailable in
-this table because the saved KFstd payloads do not contain analogous per-frame
-diagnostics.
-
-Across families, PARH NIS means lie between 0.833 and 0.937 and NIS in-band
-fractions between 0.929 and 0.958. Lambda means remain close to one, and the
-fraction of downweighted frames is highest on raw OF at 8.6\% while remaining
-near zero on \texttt{OF\_bridge} and the profile families. \texttt{OF\_bridge} is
-informative here: it lowers the OF-family NIS mean and raises the in-band
-fraction, which is consistent with a more observation-consistent rate-oriented
-route, but its stability still remains far below the profile families.
-
-\begin{table}[!ht]
-\centering
-\caption{COHFACE PARH-OSSM calibration diagnostics from
-\texttt{paper/tables\_ready/T6\_diagnostics\_main.csv}. KFstd remains blank in
-this table because its saved payloads do not carry comparable per-frame
-diagnostic arrays.}
-\label{tab:cohface_t6}
-\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccccc}
-\toprule
-Family & NIS mean & NIS in-band & $\lambda$ mean & $\Pr(\lambda_t<1)$ & Stability (s) \\
-\midrule
-OF         & 0.937 & 0.929 & 1.019 & 0.086 & 9.825 \\
-OF\_bridge & 0.841 & 0.950 & 1.015 & 0.000 & 18.575 \\
-P1D\_lin   & 0.839 & 0.942 & 1.017 & 0.005 & 60.450 \\
-P1D\_quad  & 0.833 & 0.949 & 1.017 & 0.000 & 60.525 \\
-P1D\_cub   & 0.835 & 0.951 & 1.016 & 0.000 & 60.500 \\
-DoF        & 0.891 & 0.958 & 1.009 & 0.014 & 40.500 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection*{COHFACE mechanism audit}
-To understand why PARH-OSSM now shows better T3 rate metrics than KFstd while
-still falling short of KFstd on waveform fidelity, we aggregated the saved
-per-sample diagnostics directly from the persistent trial PKLs of the completed
-production run. Table~\ref{tab:cohface_mech} summarises the resulting
-mechanism profile.
-
-The pattern is now materially healthier than in the older conservative
-scaffold. Observation trust remains only mildly reduced on average
-($q_{\mathrm{obs}} \approx 0.91$--0.93). The dynamical-novelty score is no
-longer near-saturated: $q_{\mathrm{dyn}}$ lies around 0.56--0.69 across
-families, while $q_{\mathrm{osc}}$ now lies around 0.73--0.83 rather than
-near one. The aperiodic pathway therefore opens more often than before, but
-its activity is clearly family-dependent. Raw OF, \texttt{OF\_bridge}, P1D-linear,
-and DoF retain non-zero residual energy, whereas the stronger
-P1D-quadratic/cubic routes now drive almost all clean COHFACE structure
-through the harmonic block. Strong Student-$t$ downweighting is still modest
-overall, but raw OF remains the family with the clearest low-level tail
-fraction.
-
-In other words, the current implementation is no longer a nearly dormant
-extension of KFstd. The extra decomposition states are being used. The
-remaining limitation is that this healthier decomposition still does not close
-the family-specific observation gap strongly enough to dominate the best raw
-base proxies. Figure~\ref{fig:cohface_mechanism_activation} shows this
-visually: the mechanism scores are active and calibrated, but the family-level
-energy routing is still uneven.
-
-\begin{table}[!ht]
-\centering
-\caption{COHFACE mechanism audit from saved PARH-OSSM diagnostic arrays in the
-production PKLs. Values are pooled means unless otherwise noted.}
-\label{tab:cohface_mech}
-\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lcccccccc}
-\toprule
-Family &
-$q_{\mathrm{obs}}$ &
-$q_{\mathrm{dyn}}$ &
-$q_{\mathrm{osc}}$ &
-$\Pr(\lambda_t<0.95)$ &
-$Q_{\mathrm{osc}}/Q_{\mathrm{osc},0}$ &
-$Q_{\mathrm{aper}}/Q_{\mathrm{aper},0}$ &
-$E_b/E_{\mathrm{tot}}$ &
-$E_r/E_{\mathrm{tot}}$ \\
-\midrule
-OF         & 0.911 & 0.594 & 0.831 & 0.055 & 1.297 & 1.677 & 0.023 & 0.011 \\
-OF\_bridge & 0.925 & 0.554 & 0.788 & 0.006 & 1.277 & 1.847 & 0.026 & 0.013 \\
-P1D\_lin   & 0.926 & 0.588 & 0.788 & 0.021 & 1.294 & 1.848 & 0.021 & 0.012 \\
-P1D\_quad  & 0.928 & 0.563 & 0.787 & 0.007 & 1.281 & 1.850 & 0.000 & 0.000 \\
-P1D\_cub   & 0.928 & 0.564 & 0.786 & 0.008 & 1.282 & 1.857 & 0.000 & 0.000 \\
-DoF        & 0.929 & 0.692 & 0.727 & 0.007 & 1.346 & 2.094 & 0.011 & 0.018 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[!ht]
-\centering
-\includegraphics[width=\linewidth]{figures/F5_mechanism_activation.pdf}
-\caption{Mechanism and calibration summary from the current six-family
-COHFACE rerun. Left: family-level median mechanism activity, showing moderate
-$q_{\mathrm{dyn}}$, non-saturated $q_{\mathrm{osc}}$, and a small but
-non-zero observation-driven non-oscillatory need. Middle: family-level PARH
-calibration position in NIS mean versus NIS in-band space. Right: baseline and
-residual energy ratios, showing that residual usage remains family-dependent
-and near-zero on the strongest quadratic/cubic profile routes.}
-\label{fig:cohface_mechanism_activation}
-\end{figure}
-
-\section*{Discussion}
-\subsection*{Why current PARH-OSSM gains are limited on COHFACE}
-After correcting the T3 evaluation path, COHFACE no longer supports the claim
-that PARH-OSSM is merely tied with KFstd. The current saved PARH-OSSM outputs
-are better than KFstd for rate tracking in five of the six observation
-families. The remaining limitation is narrower but still important:
-PARH-OSSM still fails to beat the raw base observation on rate MAE in every
-family except DoF, and its waveform gains remain family-specific rather than
-uniform.
-
-The main bottleneck is now better described as an observation-model problem
-than as a dormant-latent problem. The current scaffold no longer shows the old
-near-saturated $q_{\mathrm{osc}}$ behavior. Instead, the saved diagnostics show
-moderate $q_{\mathrm{dyn}}$, non-saturated $q_{\mathrm{osc}}$, and residual
-energy shares of roughly 0.7--1.8\%. The decomposition is therefore active.
-What remains unresolved is that the observation equation still does not encode
-family-specific visibility, mild lag mismatch, or nuisance projection effects
-well enough to consistently outperform the strongest raw proxies.
-
-The negative gate results point in the same direction. Exposing helper-style
-observations to quad/cub families slightly improves rate but slightly harms
-waveform, helper routing for all P1D families clearly breaks P1D-linear, and
-helper-blend policies are slightly worse than the current scaffold. That means
-continued preprocessing-policy switching is not the answer. The next gain has
-to come from stronger observation-row semantics rather than from another
-preprocessing rearrangement. The current evidence now supports that claim in
-two complementary ways: a selective harmonic-only observation row helps the
-two higher-order profile families, and an OF-derived displacement bridge
-changes the OF-family rate/waveform trade-off in a reproducible direction.
-The resulting best-single ladder is therefore split by task:
-\texttt{OF\_bridge} is now the strongest PARH T3 family under the locked
-median-based ladder rule, whereas \texttt{P1D\_quadratic} remains the
-strongest PARH T4 family.
-
-\subsection*{What already matches the intended final model}
-The current implementation is not a placeholder in the trivial sense. The core
-architecture already matches the intended PARH-OSSM direction in several
-important ways: the eight-dimensional latent decomposition is real, the
-second-harmonic morphology block is active, the baseline and residual states
-exist in the saved trajectories, warm-up-only initialisation is implemented,
-the forward and RTS-smoothed paths are separated, and the saved result payloads
-already contain the diagnostics needed for mechanism-level auditing.
-
-That matters because the current issue is not ``the model was never built''.
-The issue is that the presently implemented adaptation maps and evaluation path
-do not yet exploit that structure in an intent-aligned way.
-
-\subsection*{What remains approximate or wrong}
-Several mismatches still separate the current code from the intended final
-PARH-OSSM story.
-\begin{itemize}[nosep]
-\item The current COHFACE rerun now reflects the separated helper path, softer
-      $q_{\mathrm{dyn}}$/$q_{\mathrm{osc}}$ mappings, corrected Student-$t$
-      algebra, and warm-up-only KFstd initialisation, but it still does not
-      solve the observation bottleneck.
-\item The calibration CSV is now informative for PARH-OSSM, but comparator
-      symmetry is incomplete because KFstd does not save matching per-frame
-      calibration arrays and posterior frequency uncertainty is still missing.
-\item Three observation-calibration prototypes now exist in the repository,
-      but the component-wise, global-scalar, and oscillator-vs-auxiliary
-      variants have all failed to produce a promotable COHFACE gate result.
-\item Additional helper-only and helper-blend observation-routing variants also
-      failed the same gate, which means the next redesign step must move beyond
-      preprocessing-policy switching.
-\item The current bridge observation path is still an interim family-specific
-      workaround rather than a final observation-calibrated generative model.
-\end{itemize}
-
-\subsection*{Limitations and next steps}
-This manuscript intentionally omits several claims that were present in the
-previous draft. There is no MAHNOB-HCI quantitative section because the current
-production run was incomplete at audit time. The current T6 table is
-PARH-specific because KFstd does not yet expose matching per-frame diagnostics.
-There are no cross-dataset transfer or synthetic outlier-injection claims
-because the current persistent production artifacts do not support them.
-
-The repository now contains a live COHFACE scaffold reference, so the next
-stage should prioritise four concrete tasks before the manuscript is
-stabilised: (1) retain the six-family COHFACE ladder as the current evidence
-boundary; (2) strengthen OF-family observation semantics beyond the present
-raw-vs-bridge split while preserving waveform meaning; (3) make the residual
-branch more identifiable than the current release heuristics allow; and
-(4) complete the MAHNOB-HCI production run under the current code while
-extending comparator-side diagnostics so calibration and uncertainty can be
-compared more symmetrically. Only then will it be possible to assess whether
-the decomposition truly pays off in irregular regimes rather than only in
-stationary ones.
-
-\section*{Methods}
-\subsection*{Observation families}
-We use six heterogeneous chest-motion proxy families that are already
-implemented in the repository: raw OF-Farneb\"ack dense optical flow, an
-OF-derived displacement-compatible bridge (\texttt{OF\_bridge}), DoF, and three
-one-dimensional spatial profile families (linear, quadratic, and cubic).
-These observation families are treated as separate single-family inference
-paths rather than fused into one multi-family model in the current manuscript.
-That restriction is intentional: the current evidence boundary supports fair
-single-family comparison, not yet a joint-fusion claim.
-
-These families should not be described as if they all observe the same
-waveform. Raw OF-Farneb\"ack is the median vertical component of dense optical
-flow between adjacent ROI frames, so it is closer to a signed oscillatory
-motion or velocity-like proxy than to absolute displacement. \texttt{OF\_bridge} is
-derived from raw OF through an OF-to-displacement bridge and therefore acts as
-a displacement-compatible OF-family route rather than a new extractor. DoF is
-a thresholded count of large inter-frame pixel changes and is therefore closer
-to motion energy than to a clean respiratory waveform. The Profile1D families
-estimate a frame-to-frame chest-shift surrogate from one-dimensional vertical
-profiles and are therefore closer to displacement-like proxies, with the
-quadratic and cubic variants exposing richer harmonic morphology than the
-linear variant. The observation model should therefore use a shared latent
-respiratory decomposition but family-specific observation semantics.
-
-This also explains why the current redesign introduces an additional
-\texttt{OF\_bridge} family but does not yet introduce an analogous
-``DoF-bridge.'' Raw OF retains signed directional structure from a motion field,
-which makes a displacement-compatible reconstruction at least identifiable in
-principle. DoF does not: it is an aggregated motion-energy count after
-thresholding, so its sign, phase, and direct displacement meaning are already
-collapsed before state-space inference begins. Under the present code and data,
-DoF is therefore better treated as a nuisance-limited auxiliary family than as
-a near-displacement waveform proxy that merely awaits a bridge transform.
+\subsection*{Observation construction and failure-case manifests}
+The eight motion-observation classes above are instantiated as persistent
+single-observation routes for diagnosis and for the representative
+baseline/comparator rows. The integrated PARH-OSSM readout reported in
+Tables~\ref{tab:cohface_t3} and \ref{tab:cohface_t4} uses the final
+observation-law package rather than a target-specific best route. Raw
+Farneb\"ack optical flow is computed from the median vertical component of dense
+motion between adjacent chest-ROI frames~\cite{Farneback2003}; the bridge,
+depth-of-flow, and Profile1D variants then provide the complementary
+construction routes summarized in Supplementary Table S2.
 
 For that reason, preprocessing is part of the observation definition rather
-than a generic denoising block. The raw extractor output, the current
-inference-path signal, and the helper-path signal all have different meanings.
-The current scaffold now reflects this more explicitly: raw OF uses a light
-observation path, \texttt{OF\_bridge} provides a separate OF-derived
-displacement-compatible route, DoF remains on the legacy path because nuisance
-contamination is still too strong, P1D-linear remains a conservative
-displacement-like family with selective frequency rescue, and
-P1D-quadratic/cubic are the only families for which bounded observation-side
-calibration has passed the COHFACE no-harm gate. Stronger relaxed OF helper
-blending was also tested but failed the full-dataset confirmation step, which
-reinforces the need for better OF observation semantics rather than a looser
-output-side gate. The intended final model keeps the latent state shared
-across families while replacing the current generic observation row with
-bounded family-specific visibility and lag semantics.
-The current COHFACE evidence also shows why constructed observation families
-deserve to be treated as first-class model objects: raw OF and
-\texttt{OF\_bridge} invert the usual rate-versus-waveform ranking across the same
-underlying optical-flow source, which would be impossible to explain if
-observation construction were merely a cosmetic preprocessing step.
+than a generic denoising block. The raw extractor output, the inference-path
+signal, and the helper-path signal all have different meanings. PARH-OSSM
+keeps raw, bridged, band-limited, sign-coded, current, and helper views
+separate until the adaptive observation law estimates reliability and nuisance.
+The integrated readout is therefore not a hard choice of one observation for
+all clips. It is a bounded integration of candidate evidence into a shared
+respiratory state, with diagnostics that expose when the available evidence is
+too weak. The COHFACE evidence also shows why constructed observations deserve
+to be treated as first-class measurement routes: raw optical flow and the
+optical-flow bridge invert the usual rate-versus-waveform ranking across the
+same underlying source, which would be impossible to explain if observation
+construction were merely cosmetic preprocessing.
 
 Figure~\ref{fig:cohface_f6_failure_cases} makes two of these limitations
 visible without post hoc cherry-picking because both panels are selected from
-persistent manifests. The top row shows a residual-heavy raw-OF PARH case. The
-residual branch is clearly active and the non-oscillatory-need trace rises, but
-the waveform fit remains poor. This is exactly the current repository truth:
-the residual path is no longer dormant, yet it is still not a fully
-identifiable physiological branch that can rescue a strongly mismatched
-observation. The bottom row shows the worst \texttt{OF\_bridge} case from the
-bridge manifest. This keeps the story honest: \texttt{OF\_bridge} is a useful
-new observation family for rate-oriented analysis, but it is not a universal
-replacement for raw OF. That is why the paper currently promotes
-\texttt{OF\_bridge} as an additional family rather than collapsing the two.
+persistent manifests. The top row shows a residual-heavy PARH case selected
+without forcing a particular observation class; in the predefined manifest it is
+an optical-flow-bridge trial. The residual branch is clearly active and the
+non-oscillatory-need trace rises, but the waveform fit remains poor. This shows
+the observed limitation directly: the residual path is no longer dormant,
+yet it is still not a fully identifiable physiological branch that can rescue a
+strongly mismatched observation. The bottom row shows the worst
+optical-flow-bridge case from the bridge manifest. This keeps the story honest:
+the optical-flow bridge is a useful observation route for rate-oriented
+analysis, but it is not a universal replacement for raw OF. We therefore treat
+it as an additional observation route rather than collapsing the two.
 
 \begin{figure}[!ht]
 \centering
 \includegraphics[width=\linewidth]{figures/F6_failure_cases.pdf}
-\caption{Failure cases selected from persistent manifests. Top row:
-\texttt{COHFACE\_residual\_heavy\_of} from
-\texttt{paper/manifests/cohface\_failure\_case\_manifest.csv} shows a raw-OF
-PARH trial with elevated residual energy and non-oscillatory need, but still
-poor waveform fidelity. Bottom row: the worst \texttt{OF\_bridge} case from the
-same manifest shows that observation construction is not uniformly beneficial.
-Together these panels bound the current claims: the model is more interpretable
+\caption{Failure cases selected from predefined manifests. Top row: the
+residual-heavy PARH case shows elevated residual energy and non-oscillatory
+need, but still poor waveform fidelity. Bottom row: the worst optical-flow
+bridge case from the bridge manifest shows that observation construction is not
+uniformly beneficial.
+Together these panels bound the claims: the model is more interpretable
 than a generic robust filter, but the observation and residual branches are
 still incomplete.}
 \label{fig:cohface_f6_failure_cases}
 \end{figure}
 
-\subsection*{Datasets and current artifact status}
+Figure~\ref{fig:cohface_f6_failure_cases} closes the evidence chain by showing
+where the current decomposition is informative but incomplete. The residual
+diagnostic can detect non-oscillatory need, yet a high residual contribution is
+not automatically a recoverable respiratory waveform when the observation is
+poor. Likewise, the bridge construction can create a useful rate-oriented cue
+in some trials, but the worst-case panel shows that it can also fail under the
+same audited pipeline. These panels therefore prevent the discussion from
+overstating the method: PARH-OSSM improves interpretability and hard-regime
+rate tracking, but the current observation bank remains the limiting factor for
+universal morphology recovery.
+
+\subsection*{Datasets and evaluation scope}
 COHFACE contains 160 recordings from 40 subjects in a controlled
 lab setting~\cite{COHFACE2017}. MAHNOB-HCI provides a more heterogeneous
 emotion-elicitation environment with longer and higher-frame-rate
-recordings~\cite{MAHNOB2012}. The intended final PARH-OSSM paper uses COHFACE
+recordings~\cite{MAHNOB2012}. PARH-OSSM uses COHFACE
 as a regular, do-no-harm regime and MAHNOB-HCI as an irregular regime where
 the residual pathway should matter more.
 
-At the time of the present manuscript state, the all-family COHFACE production
-run including \texttt{OF\_bridge} had completed and its metrics and metadata were
-available. The MAHNOB-HCI production directory still lacks the completed
-metrics and metadata required for benchmark tables. We therefore restrict
-quantitative claims to COHFACE. Figure~\ref{fig:dataset_observation_regime}
-shows why the observation family should be treated as part of the modelled
-measurement channel rather than as a generic interchangeable preprocessing
-choice.
+The main quantitative layer is a predefined complete-cohort evaluation for each
+dataset. The purpose of this evaluation is to report the
+PARH-OSSM readout on every eligible trial while preserving traceable per-trial
+diagnostics and explicitly marking any comparator computability limits.
+Single-observation comparison results are retained as diagnostic context rather than used as
+target-specific best-observation selection. The quantitative scope is therefore
+cross-dataset but deliberately bounded.
+Figure~\ref{fig:dataset_observation_regime} compares the clean COHFACE
+regime with the harder MAHNOB-HCI regime using the same observation-stage EDA
+axes. It shows why the observation class should be treated as part of the
+modelled measurement channel rather than as a generic interchangeable
+preprocessing choice: observation/stage effects that look usable in COHFACE become
+weaker, less correlated, or nuisance-dominated in MAHNOB-HCI.
 
-\begin{figure}[!ht]
-\centering
-\includegraphics[width=\linewidth]{figures/F2_dataset_and_observation_regime.pdf}
-\caption{Dataset-regime and observation-characterization summary derived from
-the current COHFACE observation EDA. The family-dependent preprocessing effect
-is part of the scientific claim: the observation gap is not uniform across raw
-OF, \texttt{OF\_bridge}, DoF, and the Profile1D families, so the final model
-must use family-specific observation semantics rather than one shared
-preprocessing assumption.}
-\label{fig:dataset_observation_regime}
-\end{figure}
+Supplementary Table S1 defines the evidence boundary for every
+dataset considered here. COHFACE and MAHNOB-HCI support
+the main real-data waveform/rate claims. V4V is useful only for external
+rate-only validation because it does not contain a raw respiratory waveform.
+SCAMPS is useful only as a controlled synthetic diagnostic or optional
+pretraining source and must not be mixed into real-data performance claims.
+The evaluation package therefore includes a mandatory external weak-evidence
+analysis and a four-dataset distribution EDA rather than treating these datasets
+as additional main benchmark rows. V4V contributes only its RR-label
+distribution and rate-only scope. SCAMPS contributes synthetic
+$d_{\mathrm{br}}$ breathing-signal coverage and a controlled peak-rate
+distribution computed under the dataset-scope assumptions. Neither dataset
+contributes hidden training, target tuning, or real waveform main-table metrics.
+For respiratory estimation, a dataset may contain a breathing label while still
+lacking the camera-observation conditions needed to support morphology or
+deployment claims.
+
+The complete dataset-and-claim-scope table is provided as Supplementary Table S1.
+Figure~\ref{fig:dataset_observation_regime} is placed at the start of Results so
+that the clean/hard dataset regime and the V4V/SCAMPS evidence boundary are
+visible before performance claims are introduced.
 
 \subsection*{Evaluation protocol}
-The current manuscript uses three quantitative sources.
+We use role-routed quantitative sources rather than a
+single waveform-derived score for all claims.
 \begin{itemize}[nosep]
-\item Table~\ref{tab:cohface_t3} comes from the regenerated
-      \texttt{paper/tables\_ready/T3\_rate\_main.csv}, which is itself derived
-      from the persistent \texttt{metrics\_freq\_domain\_raw.csv} file. Base
-      rows use the signal-spectral fallback; KFstd and PARH-OSSM use the saved
-      \texttt{track\_hz}.
-\item Table~\ref{tab:cohface_t4} comes from the regenerated
-      \texttt{paper/tables\_ready/T4\_waveform\_main.csv}, which is derived
-      from \texttt{metrics\_waveform\_raw.csv}. Under the current locked policy,
-      Base and KFstd use \texttt{signal\_hat} while PARH-OSSM uses
-      \texttt{z\_full}, all in smoothed mode.
-\item Table~\ref{tab:cohface_t6} comes from the regenerated
-      \texttt{paper/tables\_ready/T6\_diagnostics\_main.csv}, which is derived
-      from \texttt{metrics\_filter\_diagnostics\_raw.csv}. In the current
-      repository state, meaningful NIS/lambda rows are available only for
-      PARH-OSSM because those arrays are saved in the PARH trial payloads.
+\item Table~\ref{tab:cohface_t3} reports rate accuracy from the integrated
+      oscillatory rate source.
+\item Table~\ref{tab:cohface_t4} reports waveform fidelity from
+      $z_{\mathrm{full}}$ in smoothed mode.
+\item The supplementary calibration table reports PARH diagnostics plus
+      limited OSSM-KF stability context. NIS and $\lambda_t$ rows are
+      available only for PARH-OSSM because those adaptive arrays are not part of
+      the standard comparator.
+\item The T4b strict-waveform and T4c cycle-timing companions are both derived
+      from the strict waveform raw metrics. These rows are not substitutes for
+      the aligned morphology table; they are the harder zero-lag,
+      unit-preserving checks.
 \end{itemize}
 
+Every main-table value is linked to a metric-provenance record containing the
+dataset, method label, result directory, metric file, trial count, and whether
+the row is main-table or diagnostic-only. COHFACE main-table rows share the same
+160 trials. MAHNOB-HCI main PARH rows use all 525 tail-aligned trials, while
+the representative P1D quad baseline and OSSM-KF comparator are available on
+488 trials; common-488 paired deltas are therefore reported separately as
+supplementary statistics. Target respiratory labels are used for evaluation and
+after-the-fact oracle analyses only, not for label-free reliability calibration or
+trial-specific source selection.
+
 This differs intentionally from the evaluation protocol adopted in the
-\texttt{resPyre} benchmark review~\cite{Boccignone2025Review}. In that benchmark,
+resPyre benchmark review~\cite{Boccignone2025Review}. In that benchmark,
 each method is first treated as a respiratory-waveform estimator and
 respiration rate is then derived from the estimated waveform by spectral peak
 selection. That design is appropriate for comparing heterogeneous extractors in
-a common benchmark pipeline, but it is not sufficient for the current PARH
+a common benchmark pipeline, but it is not sufficient for the PARH-OSSM
 question because it collapses oscillatory-rate behaviour and full-waveform
 behaviour back onto a single output. We therefore keep the benchmark spirit
 and datasets, but change the evaluation routing to match the latent semantics:
-T3 uses the oscillatory output when the model provides it, T4 uses the full
-output, and T6 reports calibration diagnostics separately.
+rate accuracy is evaluated through the oscillatory output when the model
+provides it, waveform fidelity is evaluated through the full output, and
+calibration diagnostics are reported separately.
 
-The waveform metrics follow a common pipeline: bandpass filtering to the
-respiratory band, per-signal z-scoring, cross-correlation alignment, then
-whole-trial concordance correlation coefficient, waveform MAE, and normalised
-DTW~\cite{LinCCC1989}. Calibration metrics are computed from saved per-frame
+The waveform metrics are intentionally split into two tiers. The main waveform
+table is morphology-friendly: bandpass filtering to the respiratory band,
+per-signal z-scoring, cross-correlation alignment, then whole-trial
+concordance correlation coefficient, waveform MAE, and normalised
+DTW~\cite{LinCCC1989}. This is appropriate when the question is whether the
+recovered signal preserves respiratory morphology after removing trivial affine
+and lag mismatch. Calibration metrics are computed from per-frame
 diagnostics arrays when present, with frame logs used only for supplementary
 failure and uncertainty fields.
 
-For the final submission, all overlay figures and case studies should be drawn
-from a persistent case-selection manifest rather than manual inspection, and
-all confirmatory method comparisons should use paired non-parametric tests on
-the regenerated rerun artifacts. That policy is not yet exercised in the
-current manuscript because the necessary MAHNOB-HCI rerun and ablation
-artifacts are still pending, but it is already locked at the paper-planning
-level to reduce reviewer exposure to cherry-picking or post hoc metric
-selection.
+We also generate a stricter supplementary reconstruction check from the
+trial-level outputs. That strict protocol keeps the respiratory-band
+filter but removes per-trial z-scoring and cross-correlation alignment, uses a
+zero-lag resampled overlap only, and reports strict CCC/MAE/RMSE/DTW together
+with cycle-level peak, trough, and peak-to-peak timing errors. The evaluation
+boundary is therefore explicit: the main waveform table is an aligned
+morphology comparison, while the strict table and cycle-level table are the
+harder tests of unit-preserving waveform reconstruction.
 
-\subsection*{Implementation audit procedure}
-Beyond the table-ready CSVs, we audited the current implementation by reading
-the model, wrapper, and evaluation code paths and by aggregating the saved
-per-sample diagnostic arrays directly from the COHFACE production PKLs. This
-allowed us to compare the intended design against the actual implementation and
-to diagnose why the current COHFACE behaviour now shows family-specific gains:
-better rate tracking than KFstd in most families, an observation-construction
-gain for \texttt{OF\_bridge}, and still incomplete waveform dominance in the
-stronger profile families.
+All overlay figures and case studies are drawn from predefined case-selection
+manifests rather than manual inspection. Additional confirmatory comparisons
+should likewise be run as paired analyses on regenerated result records.
 
+\subsection*{Implementation verification and reproducibility checks}
+The reported tables are generated from persistent trial-level output records,
+not from manually transcribed values. The verification package checks that the
+model head, wrapper, evaluation scripts, table-ready CSV files, figure
+manifests, and manuscript numbers agree before submission. It also aggregates
+the per-sample diagnostic arrays from the trial payloads to separate integrated
+PARH-OSSM performance from diagnostic single-observation evidence. These checks
+support the interpretation that MAHNOB-HCI is primarily an observability and
+target-shift limitation rather than a simple filter-instability failure.
+
+\section*{Data availability}
+COHFACE and MAHNOB-HCI are public research datasets available from their
+respective providers under their original access terms. V4V and SCAMPS are used
+only as external rate-only and synthetic-control scope checks, respectively, and
+are not mixed into the real-data waveform main metrics. The metric tables,
+figure manifests, and diagnostic summaries used in this study are
+included with the release artifacts and can be regenerated from the command
+ledger once the raw datasets have been obtained from their providers. Raw
+third-party video and physiology files are not redistributed.
+
+\section*{Code availability}
+The code base contains the PARH-OSSM implementation, fixed observation
+operators, figure/table generation scripts, and verification scripts used to produce
+the reported analyses. The public release includes the command ledger
+\texttt{execute.md}, configuration files, table-ready CSVs, figure manifests,
+environment/setup notes, and audit scripts used to reproduce the reported
+values. The code and derived artifacts are available in the repository
+accompanying this submission. A DOI-minting archival release will be created
+before publication.
+
+\section*{Ethics declarations}
+This work uses previously released public or research datasets and does not
+introduce new human-subject data collection. Dataset-specific consent and
+ethics conditions remain governed by the original dataset releases. The present
+analysis reports aggregate algorithmic performance and diagnostic summaries.
+
+\begingroup
+\small
 \bibliography{refs}
+\endgroup
 
 \section*{Acknowledgements}
-This work was supported by the authors' institutions. The present manuscript is
-an audit-driven reset of the repository's current reproducible evidence.
+This work was supported by the authors' institutions.
 
 \section*{Author contributions statement}
-Y.-J.C.\ performed the reverse-audit, implemented the current PARH-OSSM code
-base, analysed the saved artifacts, and prepared the manuscript. D.-Y.K.\
+Y.-J.C.\ implemented PARH-OSSM, performed the reproducibility checks, analysed
+the trial-level diagnostic results, and prepared the manuscript. D.-Y.K.\
 supervised the project and reviewed the manuscript direction and interpretation.
 
-\section*{Additional information}
+\paragraph*{Additional information}
 The authors declare no competing interests.
 
 \end{document}

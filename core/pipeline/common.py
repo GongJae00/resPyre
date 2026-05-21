@@ -85,6 +85,16 @@ def _method_token(method_name):
 		return 'of_disp_bridge'
 	if lname == 'dof':
 		return 'dof'
+	if lname in ('dof_disp_bridge', 'dof_bridge', 'dof_displacement_bridge'):
+		return 'dof_disp_bridge'
+	if lname in ('profile1d_linear_bridge', 'profile1d_linear_displacement_bridge'):
+		return 'profile1d_linear_bridge'
+	if lname in ('profile1d_quadratic_bridge', 'profile1d_quadratic_displacement_bridge'):
+		return 'profile1d_quadratic_bridge'
+	if lname in ('profile1d_cubic_bridge', 'profile1d_cubic_displacement_bridge'):
+		return 'profile1d_cubic_bridge'
+	if lname in ('profile1d_consensus', 'profile1d_cons'):
+		return 'profile1d_consensus'
 	if lname.startswith('profile1d'):
 		return lname.replace(' ', '_')
 	if '__' in name:

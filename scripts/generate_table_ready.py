@@ -18,7 +18,11 @@ if str(ROOT) not in sys.path:
 OUT_DIR = ROOT / "paper" / "tables_ready"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-from components.observations.semantics import get_observation_family_semantics
+from components.observations.semantics import (
+    CANONICAL_OBSERVATION_FAMILY_ORDER,
+    get_observation_family_semantics,
+    observation_family_order_key,
+)
 
 DEFAULT_DATASETS = {
     "COHFACE": ROOT / "results" / "cohface_parh_ossm_prod" / "cohface_parh_ossm_prod" / "metrics",
@@ -85,7 +89,10 @@ def _median_or_nan(series):
 def classify_method(method_name):
     """Return (family, variant) tuple."""
     m = method_name.lower().replace(" ", "_")
-    if "__parh_ossm" in m:
+    if m in {"parh_ossm", "target_calibrated_multifamily_parh_ossm"}:
+        variant = "PARH"
+        family = "PARH-OSSM"
+    elif "__parh_ossm" in m:
         variant = "PARH"
         family = m.split("__parh_ossm")[0]
     elif "__kfstd" in m:
@@ -100,15 +107,35 @@ def classify_method(method_name):
         "of_disp_bridge": "OF_bridge",
         "of": "OF",
         "dof": "DoF",
+        "dof_disp_bridge": "DoF_bridge",
         "profile1d_linear": "P1D_lin",
+        "profile1d_linear_bridge": "P1D_lin_bridge",
         "profile1d_quadratic": "P1D_quad",
+        "profile1d_quadratic_bridge": "P1D_quad_bridge",
         "profile1d_cubic": "P1D_cub",
+        "profile1d_cubic_bridge": "P1D_cub_bridge",
+        "profile1d_consensus": "P1D_cons",
         "fusion_of_p1d_quadratic": "Fused_OF+P1D_quad",
         "pair_of_p1d_quadratic": "Pair_OF+P1D_quad",
         "assist_of_p1d_quadratic": "Assist_OF->P1D_quad",
     }
     family = family_map.get(family, family)
     return family, variant
+
+
+DISPLAY_TO_CANONICAL = {
+    str(get_observation_family_semantics(name).get("display_name")): name
+    for name in CANONICAL_OBSERVATION_FAMILY_ORDER
+}
+
+
+def _family_display_order_key(family: str):
+    canonical = DISPLAY_TO_CANONICAL.get(str(family), str(family))
+    return observation_family_order_key(canonical)
+
+
+def _ordered_display_families(families):
+    return sorted((str(f) for f in families), key=_family_display_order_key)
 
 
 def _best_row(df, primary, ascending, secondary=None):
@@ -164,7 +191,15 @@ def _aggregate_waveform_rows(wf_main):
 
 
 def generate_t3(datasets, out_dir):
-    """T3: Rate accuracy (MAE, RMSE, PearsonR) — median across trials per dataset×family."""
+    """T3: Rate accuracy (MAE, RMSE, PearsonR) — median across trials per dataset×family.
+
+    Policy lock:
+    - Base rows use the legacy signal-spectral rate path.
+    - OSSM-KF / PARH rows use track_hz when present.
+
+    This keeps the exported paper table aligned with the evaluation design docs
+    even if future raw CSVs contain mixed rate_source rows for a single family.
+    """
     rows = []
     for ds_name, metrics_dir in datasets.items():
         csv_path = metrics_dir / "metrics_freq_domain_raw.csv"
@@ -175,11 +210,21 @@ def generate_t3(datasets, out_dir):
         df[["family", "variant"]] = df["method"].apply(
             lambda m: pd.Series(classify_method(m))
         )
-        for family in sorted(df["family"].unique()):
+        for family in _ordered_display_families(df["family"].dropna().unique()):
             fdf = df[df["family"] == family]
             row = {"dataset": ds_name, "family": family}
             for variant in ["Base", "KFstd", "PARH"]:
-                vdf = fdf[fdf["variant"] == variant]
+                vdf = fdf[fdf["variant"] == variant].copy()
+                if "rate_source" in vdf.columns:
+                    preferred = "signal_spectral" if variant == "Base" else "track_hz"
+                    preferred_vdf = vdf[vdf["rate_source"] == preferred]
+                    if not preferred_vdf.empty:
+                        vdf = preferred_vdf
+                row[f"{variant}_rate_source"] = (
+                    str(vdf["rate_source"].iloc[0])
+                    if (not vdf.empty and "rate_source" in vdf.columns)
+                    else ""
+                )
                 if vdf.empty:
                     for col in ["MAE", "RMSE", "PearsonR"]:
                         row[f"{variant}_{col}"] = np.nan
@@ -197,7 +242,7 @@ def generate_t3(datasets, out_dir):
 
 def generate_t4(datasets, out_dir):
     """T4: Waveform fidelity (CCC, wMAE, DTW) — unified comparison.
-    Main: Base(signal_hat) / KFstd(signal_hat) / PARH(z_full) smoothed only.
+    Main: Base(signal_hat) / OSSM-KF(signal_hat) / PARH(z_full) smoothed only.
     """
     rows = []
     for ds_name, metrics_dir in datasets.items():
@@ -212,7 +257,7 @@ def generate_t4(datasets, out_dir):
         # Main T4: smoothed only
         df_smooth = df[df["causal_or_smoothed"] == "smoothed"]
 
-        for family in sorted(df_smooth["family"].unique()):
+        for family in _ordered_display_families(df_smooth["family"].dropna().unique()):
             fdf = df_smooth[df_smooth["family"] == family]
             row = {"dataset": ds_name, "family": family}
             for variant, otype in [("Base", "signal_hat"), ("KFstd", "signal_hat"), ("PARH", "z_full")]:
@@ -229,6 +274,84 @@ def generate_t4(datasets, out_dir):
     return t4
 
 
+def _strict_main_filter(df: pd.DataFrame) -> pd.DataFrame:
+    df = df[df["causal_or_smoothed"] == "smoothed"].copy()
+    return pd.concat([
+        df[(df["variant"].isin(["Base", "KFstd"])) & (df["output_type"] == "signal_hat")],
+        df[(df["variant"] == "PARH") & (df["output_type"] == "z_full")],
+    ], ignore_index=True)
+
+
+def generate_t4_strict(datasets, out_dir):
+    """Supplementary strict waveform table.
+
+    Harder than T4 main: zero-lag, unit-preserving, no z-score alignment.
+    """
+    rows = []
+    for ds_name, metrics_dir in datasets.items():
+        csv_path = metrics_dir / "metrics_waveform_strict_raw.csv"
+        if not csv_path.exists():
+            print(f"  SKIP T4-strict {ds_name}: {csv_path} not found")
+            continue
+        df = pd.read_csv(csv_path)
+        df[["family", "variant"]] = df["method"].apply(lambda m: pd.Series(classify_method(m)))
+        df_main = _strict_main_filter(df)
+        for family in _ordered_display_families(df_main["family"].dropna().unique()):
+            fdf = df_main[df_main["family"] == family]
+            row = {"dataset": ds_name, "family": family}
+            for variant, otype in [("Base", "signal_hat"), ("KFstd", "signal_hat"), ("PARH", "z_full")]:
+                vdf = fdf[(fdf["variant"] == variant) & (fdf["output_type"] == otype)]
+                strict_cols = [
+                    "strict_CCC",
+                    "strict_MAE",
+                    "strict_RMSE",
+                    "strict_DTW",
+                    "gt_span_p95p05",
+                    "strict_NMAE_span",
+                    "strict_NRMSE_span",
+                    "strict_NDTW_span",
+                ]
+                for col in strict_cols:
+                    if col not in vdf.columns:
+                        continue
+                    short = col.replace("strict_", "")
+                    row[f"{variant}_{short}"] = _median_or_nan(vdf[col]) if not vdf.empty else np.nan
+                row[f"{variant}_N"] = len(vdf)
+            rows.append(row)
+    t4s = pd.DataFrame(rows)
+    out_path = out_dir / "T4b_waveform_strict.csv"
+    t4s.to_csv(out_path, index=False, float_format="%.3f")
+    print(f"  T4-strict saved: {out_path} ({len(t4s)} rows)")
+    return t4s
+
+
+def generate_t4_cycle(datasets, out_dir):
+    """Supplementary cycle-level waveform timing table."""
+    rows = []
+    for ds_name, metrics_dir in datasets.items():
+        csv_path = metrics_dir / "metrics_waveform_strict_raw.csv"
+        if not csv_path.exists():
+            print(f"  SKIP T4-cycle {ds_name}: {csv_path} not found")
+            continue
+        df = pd.read_csv(csv_path)
+        df[["family", "variant"]] = df["method"].apply(lambda m: pd.Series(classify_method(m)))
+        df_main = _strict_main_filter(df)
+        for family in _ordered_display_families(df_main["family"].dropna().unique()):
+            fdf = df_main[df_main["family"] == family]
+            row = {"dataset": ds_name, "family": family}
+            for variant, otype in [("Base", "signal_hat"), ("KFstd", "signal_hat"), ("PARH", "z_full")]:
+                vdf = fdf[(fdf["variant"] == variant) & (fdf["output_type"] == otype)]
+                for col in ["peak_time_mae_s", "trough_time_mae_s", "cycle_ppi_mae_s", "cycle_ie_abs_err"]:
+                    row[f"{variant}_{col}"] = _median_or_nan(vdf[col]) if not vdf.empty else np.nan
+                row[f"{variant}_N"] = len(vdf)
+            rows.append(row)
+    t4c = pd.DataFrame(rows)
+    out_path = out_dir / "T4c_cycle_main.csv"
+    t4c.to_csv(out_path, index=False, float_format="%.4f")
+    print(f"  T4-cycle saved: {out_path} ({len(t4c)} rows)")
+    return t4c
+
+
 def generate_t2(t3, t4, out_dir):
     """T2: Observation-family semantics and current PARH role map."""
     if t3 is None or t4 is None or t3.empty or t4.empty:
@@ -239,19 +362,19 @@ def generate_t2(t3, t4, out_dir):
     order = [
         ("OF", "of_farneback"),
         ("OF_bridge", "of_disp_bridge"),
+        ("DoF", "dof"),
+        ("DoF_bridge", "dof_disp_bridge"),
         ("P1D_lin", "profile1d_linear"),
         ("P1D_quad", "profile1d_quadratic"),
         ("P1D_cub", "profile1d_cubic"),
-        ("DoF", "dof"),
+        ("P1D_cons", "profile1d_consensus"),
     ]
     rows = []
     for display_name, semantic_key in order:
-        rate_row = t3c[t3c["family"] == display_name]
-        wave_row = t4c[t4c["family"] == display_name]
-        if rate_row.empty or wave_row.empty:
-            continue
-        rate_row = rate_row.iloc[0]
-        wave_row = wave_row.iloc[0]
+        rate_df = t3c[t3c["family"] == display_name]
+        wave_df = t4c[t4c["family"] == display_name]
+        rate_row = rate_df.iloc[0] if not rate_df.empty else None
+        wave_row = wave_df.iloc[0] if not wave_df.empty else None
         sem = get_observation_family_semantics(semantic_key)
         current_strength = "mixed"
         if sem.get("waveform_primary"):
@@ -262,35 +385,53 @@ def generate_t2(t3, t4, out_dir):
             current_strength = "helper-heavy"
         elif sem.get("nuisance_risk") == "high":
             current_strength = "nuisance-limited"
+        def _safe_float(row, key):
+            if row is None or key not in row.index:
+                return np.nan
+            val = row[key]
+            if pd.isna(val) or str(val).strip() == "":
+                return np.nan
+            try:
+                return float(val)
+            except Exception:
+                return np.nan
+
+        parh_rate_mae = _safe_float(rate_row, "PARH_MAE")
+        parh_rate_r = _safe_float(rate_row, "PARH_PearsonR")
+        parh_wave_ccc = _safe_float(wave_row, "PARH_CCC")
+        parh_wave_dtw = _safe_float(wave_row, "PARH_DTW")
+        base_rate_mae = _safe_float(rate_row, "Base_MAE")
+        base_wave_ccc = _safe_float(wave_row, "Base_CCC")
+
         rows.append(
             {
-                "family": display_name,
+                "observation_class": display_name,
                 "construction": sem.get("construction", ""),
                 "domain": sem.get("observation_domain", ""),
                 "primary_information": str(sem.get("primary_information", "")).replace("_", " "),
                 "secondary_information": str(sem.get("secondary_information", "")).replace("_", " "),
                 "nuisance_risk": sem.get("nuisance_risk", ""),
-                "current_parh_role": sem.get("current_parh_role", ""),
+                "current_parh_role": str(sem.get("current_parh_role", "")).replace("family", "observation class"),
                 "current_strength": current_strength,
-                "PARH_rate_MAE": float(rate_row["PARH_MAE"]),
-                "PARH_rate_R": float(rate_row["PARH_PearsonR"]),
-                "PARH_waveform_CCC": float(wave_row["PARH_CCC"]),
-                "PARH_waveform_DTW": float(wave_row["PARH_DTW"]),
-                "Base_rate_MAE": float(rate_row["Base_MAE"]),
-                "Base_waveform_CCC": float(wave_row["Base_CCC"]),
-                "rate_gap_vs_base": float(rate_row["PARH_MAE"] - rate_row["Base_MAE"]),
-                "waveform_gap_vs_base": float(wave_row["PARH_CCC"] - wave_row["Base_CCC"]),
+                "PARH_rate_MAE": parh_rate_mae,
+                "PARH_rate_R": parh_rate_r,
+                "PARH_waveform_CCC": parh_wave_ccc,
+                "PARH_waveform_DTW": parh_wave_dtw,
+                "Base_rate_MAE": base_rate_mae,
+                "Base_waveform_CCC": base_wave_ccc,
+                "rate_gap_vs_base": parh_rate_mae - base_rate_mae if not (np.isnan(parh_rate_mae) or np.isnan(base_rate_mae)) else np.nan,
+                "waveform_gap_vs_base": parh_wave_ccc - base_wave_ccc if not (np.isnan(parh_wave_ccc) or np.isnan(base_wave_ccc)) else np.nan,
             }
         )
     t2 = pd.DataFrame(rows)
-    out_path = out_dir / "T2_observation_family_map.csv"
+    out_path = out_dir / "T2_observation_class_map.csv"
     t2.to_csv(out_path, index=False, float_format="%.3f")
     print(f"  T2 saved: {out_path} ({len(t2)} rows)")
     return t2
 
 
 def generate_t6(datasets, out_dir):
-    """T6: Filter diagnostics — per dataset×family (KFstd and PARH only)."""
+    """T6: Filter diagnostics by dataset and observation class (OSSM-KF and PARH only)."""
     diag_cols = [
         "NIS_Mean", "NIS_InBand", "Lambda_Mean", "Lambda_LT1_Frac",
         "Coverage95", "Stability_Sec",
@@ -305,8 +446,8 @@ def generate_t6(datasets, out_dir):
         df[["family", "variant"]] = df["method"].apply(
             lambda m: pd.Series(classify_method(m))
         )
-        # Only KFstd and PARH have diagnostics
-        for family in sorted(df["family"].unique()):
+        # Only OSSM-KF and PARH have diagnostics in the internal variant map.
+        for family in _ordered_display_families(df["family"].dropna().unique()):
             fdf = df[df["family"] == family]
             row = {"dataset": ds_name, "family": family}
             for variant in ["KFstd", "PARH"]:
@@ -328,14 +469,14 @@ def generate_fusion_ladder(datasets, out_dir):
 
     Rows:
     1. best single-family Base
-    2. best single-family KFstd
+    2. best single-family OSSM-KF
     3. best single-family PARH
     4. fused Base
-    5. fused KFstd
+    5. fused OSSM-KF
     6. fused PARH
     """
     ladder_rows = []
-    single_families = {"OF", "OF_bridge", "DoF", "P1D_lin", "P1D_quad", "P1D_cub"}
+    single_families = {"OF", "OF_bridge", "DoF", "DoF_bridge", "P1D_lin", "P1D_lin_bridge", "P1D_quad", "P1D_quad_bridge", "P1D_cub", "P1D_cub_bridge", "P1D_cons"}
     fused_base_family = "Fused_OF+P1D_quad"
     fused_pair_family = "Pair_OF+P1D_quad"
     for ds_name, metrics_dir in datasets.items():
@@ -457,6 +598,8 @@ if __name__ == "__main__":
     print("Generating table-ready CSVs...")
     t3 = generate_t3(datasets, out_dir)
     t4 = generate_t4(datasets, out_dir)
+    t4_strict = generate_t4_strict(datasets, out_dir)
+    t4_cycle = generate_t4_cycle(datasets, out_dir)
     t2 = generate_t2(t3, t4, out_dir)
     t6 = generate_t6(datasets, out_dir)
     fusion = generate_fusion_ladder(datasets, out_dir)
@@ -467,6 +610,12 @@ if __name__ == "__main__":
     if t4 is not None and len(t4) > 0:
         print("\n=== T4 Preview ===")
         print(t4.to_string(index=False))
+    if t4_strict is not None and len(t4_strict) > 0:
+        print("\n=== T4-strict Preview ===")
+        print(t4_strict.to_string(index=False))
+    if t4_cycle is not None and len(t4_cycle) > 0:
+        print("\n=== T4-cycle Preview ===")
+        print(t4_cycle.to_string(index=False))
     if t2 is not None and len(t2) > 0:
         print("\n=== T2 Preview ===")
         print(t2.to_string(index=False))

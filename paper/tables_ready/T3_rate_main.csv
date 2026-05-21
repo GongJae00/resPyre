@@ -1,7 +1,3 @@
-dataset,family,Base_MAE,Base_RMSE,Base_PearsonR,Base_N,KFstd_MAE,KFstd_RMSE,KFstd_PearsonR,KFstd_N,PARH_MAE,PARH_RMSE,PARH_PearsonR,PARH_N
-COHFACE,DoF,2.400,4.015,0.370,160,3.110,3.230,0.300,160,2.110,2.310,0.390,160
-COHFACE,OF,0.290,0.390,0.890,160,0.550,0.650,0.730,160,0.510,0.565,0.740,160
-COHFACE,OF_bridge,0.245,0.325,0.900,160,0.260,0.335,0.835,160,0.295,0.370,0.850,160
-COHFACE,P1D_cub,0.220,0.275,0.940,160,0.500,0.605,0.790,160,0.300,0.380,0.870,160
-COHFACE,P1D_lin,0.335,0.435,0.840,160,0.620,0.820,0.655,160,0.465,0.590,0.715,160
-COHFACE,P1D_quad,0.195,0.270,0.950,160,0.485,0.580,0.800,160,0.295,0.370,0.890,160
+dataset,observation_class,Base_method,Base_rate_source,Base_MAE,Base_RMSE,Base_PearsonR,Base_N,OSSM_KF_method,OSSM_KF_rate_source,OSSM_KF_MAE,OSSM_KF_RMSE,OSSM_KF_PearsonR,OSSM_KF_N,PARH_method,PARH_rate_source,PARH_MAE,PARH_RMSE,PARH_PearsonR,PARH_N,comparison_scope,coverage_note
+COHFACE,PARH-OSSM,profile1D quadratic,signal_spectral,0.1950,0.2700,0.9500,160,profile1d_quadratic__ossm_kf,track_hz,0.4850,0.5800,0.8000,160,parh_ossm,track_hz,0.3350,0.4100,0.8550,160,same_trials,all reported methods evaluated on N=160 trials
+MAHNOB,PARH-OSSM,profile1D quadratic,signal_spectral,6.6000,8.0250,-0.0300,488,profile1d_quadratic__ossm_kf,track_hz,4.3250,4.9100,-0.0200,488,parh_ossm,track_hz,2.4100,2.9200,0.2300,525,full_dataset_with_baseline_coverage_limit,"PARH-OSSM reports the full final dataset; representative direct and OSSM-KF comparator rows are computable for Base_N=488, OSSM_KF_N=488, PARH_N=525 trials"

@@ -31,7 +31,8 @@ _DEFAULT_CFG = {
     },
     "runtime": {},
     "steps": [],
-    "gating": {}
+    "gating": {},
+    "storage": {}
 }
 
 
@@ -140,5 +141,15 @@ def load_config(path):
     cfg['report'] = report_cfg
 
     cfg['steps'] = [step.lower() for step in cfg.get('steps', [])]
+
+    storage_cfg = cfg.get('storage', {})
+    if not isinstance(storage_cfg, dict):
+        storage_cfg = {}
+    else:
+        storage_cfg = copy.deepcopy(storage_cfg)
+    storage_cfg.setdefault('save_aux', True)
+    storage_cfg.setdefault('save_frame_logs', bool(storage_cfg.get('save_aux', True)))
+    storage_cfg.setdefault('save_component_aux', bool(storage_cfg.get('save_aux', True)))
+    cfg['storage'] = storage_cfg
 
     return cfg

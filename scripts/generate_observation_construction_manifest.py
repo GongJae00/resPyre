@@ -76,12 +76,12 @@ def parse_args():
     parser.add_argument(
         "--waveform-csv",
         type=Path,
-        default=root / "results" / "20260408_cohface_prod_ofbridge_full" / "cohface_parh_ossm_prod_ofbridge" / "metrics" / "metrics_waveform_raw.csv",
+        default=root / "results" / "20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow" / "cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons" / "metrics" / "metrics_waveform_raw.csv",
     )
     parser.add_argument(
         "--freq-csv",
         type=Path,
-        default=root / "results" / "20260408_cohface_prod_ofbridge_full" / "cohface_parh_ossm_prod_ofbridge" / "metrics" / "metrics_freq_domain_raw.csv",
+        default=root / "results" / "20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow" / "cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons" / "metrics" / "metrics_freq_domain_raw.csv",
     )
     parser.add_argument(
         "--dataset-name",

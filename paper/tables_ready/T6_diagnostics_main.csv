@@ -1,7 +1,3 @@
-dataset,family,KFstd_NIS_Mean,KFstd_NIS_InBand,KFstd_Lambda_Mean,KFstd_Lambda_LT1_Frac,KFstd_Coverage95,KFstd_Stability_Sec,KFstd_N,PARH_NIS_Mean,PARH_NIS_InBand,PARH_Lambda_Mean,PARH_Lambda_LT1_Frac,PARH_Coverage95,PARH_Stability_Sec,PARH_N
-COHFACE,DoF,,,,,,26.5250,160,0.8912,0.9581,1.0091,0.0142,,40.5000,160
-COHFACE,OF,,,,,,60.4000,160,0.9374,0.9292,1.0193,0.0858,,9.8250,160
-COHFACE,OF_bridge,,,,,,59.3750,160,0.8414,0.9496,1.0146,0.0000,,18.5750,160
-COHFACE,P1D_cub,,,,,,60.4500,160,0.8333,0.9557,1.0125,0.0000,,60.5000,160
-COHFACE,P1D_lin,,,,,,52.2750,160,0.8392,0.9424,1.0170,0.0045,,60.4500,160
-COHFACE,P1D_quad,,,,,,60.4500,160,0.8324,0.9532,1.0131,0.0000,,60.5000,160
+dataset,observation_class,OSSM_KF_method,OSSM_KF_Stability_Sec,OSSM_KF_N,PARH_method,PARH_NIS_Mean,PARH_NIS_InBand,PARH_Lambda_Mean,PARH_Lambda_LT1_Frac,PARH_Stability_Sec,PARH_N,comparison_scope,coverage_note
+COHFACE,PARH-OSSM,profile1d_quadratic__ossm_kf,60.4500,160,parh_ossm,0.9359,1.0000,1.0456,0.0000,60.9250,160,same_trials,diagnostic comparator and PARH evaluated on N=160 trials
+MAHNOB,PARH-OSSM,profile1d_quadratic__ossm_kf,117.9671,488,parh_ossm,0.9871,1.0000,1.0667,0.0000,90.3770,525,full_dataset_with_baseline_coverage_limit,"PARH-OSSM reports the full final dataset; OSSM-KF diagnostic comparator is computable for OSSM_KF_N=488, PARH_N=525 trials"

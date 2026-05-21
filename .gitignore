@@ -44,21 +44,55 @@ paper/*.out
 paper/*.fls
 paper/*.fdb_latexmk
 paper/*.synctex.gz
+*.aux
+*.blg
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+!paper/main.bbl
+
+# --- Future generated-paper boundary ---
+paper/generated/
+paper/tmp/
+analysis/tmp/
+submission_package/
 
 # --- Results (large data: PKL, NPZ, plots) ---
 results/
 **/obs_*.npy
 **/obs_roi_stats_v1.npz
 
+# --- Local dataset links / raw data ---
+dataset/COHFACE
+dataset/MAHNOB
+dataset/V4V
+dataset/SCAMPS
+dataset/BP4Ddef
+
 # --- Logs ---
+logs/
 *.log
 !paper/*.tex
 
 # --- Large reference PDFs ---
-notes/공진자호흡논문_KCI.pdf
+paper/s41598-*.pdf
+mainko.*
+paper/main_ko.*
+paper/figures/*_draft_source.png
 
 # --- Prompt scratch files ---
-notes/prompts/
+goal.md
+scripts/legacy/
+analysis/legacy_*/
+analysis/reconstructed_trial_priors/
+analysis/final_priors/*_edges.csv
+analysis/final_resource_profile.json
+prompt*.md
+feedbackprompt*.md
+tmp_*.sh
+.tmp_*/
 
 # --- OS files ---
 .DS_Store

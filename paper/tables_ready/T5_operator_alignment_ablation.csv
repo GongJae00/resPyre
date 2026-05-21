@@ -1,0 +1,7 @@
+row_id,intent,source_run,method,rate_MAE,rate_RMSE,rate_PearsonR,waveform_CCC,waveform_MAE,waveform_DTW,strict_CCC
+base_raw_p1dquad,raw single-class reference,decoupled_system_gate,profile1D quadratic,0.1700,0.2200,0.9650,0.8647,0.4079,0.3428,0.0022
+parh_rate_expert,structured rate expert,decoupled_system_gate,profile1d_quadratic__parh_ossm,0.1450,0.2000,0.9000,0.8905,0.3757,0.3160,0.1444
+adaptive_observation_law,local observation adaptation control,decoupled_system_gate,adaptive_observation_law__torch,0.3400,0.4800,0.7900,0.8444,0.3418,0.3317,0.6110
+staged_routed_multihead,coupled routed multi-output,decoupled_system_gate,adaptive_observation_law_staged_routed_multihead__torch,0.3400,0.4800,0.7900,0.9190,0.2980,0.2747,0.8497
+waveform_expert_only,waveform-specialized learned expert,decoupled_system_gate,temporal_fusion_comparator__torch,0.6200,0.7600,0.7850,0.9190,0.2980,0.2747,0.8497
+decoupled_system,current best honest overall system,decoupled_system_gate,p1dquad_rate_temporal_waveform__decoupled_system,0.1450,0.2000,0.9000,0.9190,0.2980,0.2747,0.8497

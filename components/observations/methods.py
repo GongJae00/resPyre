@@ -4,7 +4,17 @@ import os
 import numpy as np
 import cv2 as cv
 from scipy import signal as sps
+from scipy import interpolate as spi
 from components.observations.motion import OF, DoF, profile1D
+
+
+DOF_BRIDGE_CACHE_FILE = "obs_dof_bridge_v2.npy"
+P1D_BRIDGE_CACHE_FILES = {
+	"linear": "obs_p1d_lin_bridge_v1.npy",
+	"quadratic": "obs_p1d_quad_bridge_v1.npy",
+	"cubic": "obs_p1d_cub_bridge_v1.npy",
+}
+P1D_CONSENSUS_CACHE_FILE = "obs_p1d_consensus_v1.npy"
 
 
 def _trial_dir(data):
@@ -28,6 +38,8 @@ def _load_obs_cache(data, filename):
 	mem_cache = _get_obs_signal_cache(data)
 	cached = mem_cache.get(filename)
 	if isinstance(cached, np.ndarray):
+		if cached.size == 0:
+			return None
 		return cached
 	trial_dir = _trial_dir(data)
 	if not trial_dir:
@@ -37,6 +49,8 @@ def _load_obs_cache(data, filename):
 		return None
 	try:
 		loaded = np.load(cache_path, allow_pickle=False)
+		if not isinstance(loaded, np.ndarray) or loaded.size == 0:
+			return None
 		mem_cache[filename] = loaded
 		return loaded
 	except Exception:
@@ -44,14 +58,17 @@ def _load_obs_cache(data, filename):
 
 
 def _save_obs_cache(data, filename, arr):
+	arr = np.asarray(arr, dtype=np.float32)
+	if arr.size == 0:
+		return None
 	mem_cache = _get_obs_signal_cache(data)
-	mem_cache[filename] = np.asarray(arr, dtype=np.float32)
+	mem_cache[filename] = arr
 	trial_dir = _trial_dir(data)
 	if not trial_dir:
 		return None
 	try:
 		cache_path = os.path.join(trial_dir, filename)
-		np.save(cache_path, np.asarray(arr, dtype=np.float32))
+		np.save(cache_path, arr)
 		return cache_path
 	except Exception:
 		return None
@@ -147,6 +164,97 @@ class DoF_Model(MethodBase):
 		_save_obs_cache(data, "obs_dof.npy", dof)
 		return dof
 
+
+def _dof_to_displacement_bridge(g_rois, fs: float) -> np.ndarray:
+	"""Construct a signed motion trajectory from DoF frames.
+
+	Raw DoF collapses motion into a positive count, which is useful for gross
+	motion energy but discards phase/sign information. This bridge keeps the same
+	frame-difference source while restoring a coarse signed trajectory via:
+	1) a signed vertical moment of the frame difference,
+	2) the vertical centroid of absolute motion energy,
+	3) light smoothing and detrending instead of hard threshold counting.
+	"""
+	if not g_rois or len(g_rois) < 2:
+		return np.array([], dtype=np.float64)
+
+	ref_shape = None
+	prev = None
+	bridge_vel = []
+	for roi in g_rois:
+		curr = np.asarray(roi)
+		if ref_shape is None:
+			ref_shape = curr.shape[:2]
+		elif curr.shape[:2] != ref_shape:
+			curr = cv.resize(curr, (ref_shape[1], ref_shape[0]))
+		curr = curr.astype(np.float64, copy=False)
+		if prev is None:
+			prev = curr
+			continue
+
+		diff = curr - prev
+		prev = curr
+		if diff.ndim != 2 or diff.size == 0:
+			bridge_vel.append(0.0)
+			continue
+
+		diff = np.nan_to_num(diff, nan=0.0, posinf=0.0, neginf=0.0)
+		absdiff = np.abs(diff)
+		energy = float(np.mean(absdiff))
+		if not np.isfinite(energy) or energy <= 1e-9:
+			bridge_vel.append(0.0)
+			continue
+
+		h = int(diff.shape[0])
+		row_axis = np.linspace(-1.0, 1.0, h, dtype=np.float64)
+		row_weights = row_axis[:, None]
+
+		signed_moment = float(np.mean(diff * row_weights))
+		global_mean = float(np.mean(diff))
+		row_energy = np.mean(absdiff, axis=1)
+		row_total = float(np.sum(row_energy))
+		if row_total > 1e-9:
+			centroid = float(np.dot(row_axis, row_energy) / row_total)
+		else:
+			centroid = 0.0
+
+		# Penalize lighting/global-shift contamination by removing the pure mean term.
+		signed_term = signed_moment - 0.35 * global_mean
+		bridge_vel.append((signed_term / max(energy, 1e-6)) + 0.25 * centroid)
+
+	bridge_vel = np.asarray(bridge_vel, dtype=np.float64).reshape(-1)
+	if bridge_vel.size == 0:
+		return bridge_vel
+	bridge_vel = np.nan_to_num(bridge_vel, nan=0.0, posinf=0.0, neginf=0.0)
+	bridge_vel -= float(np.median(bridge_vel))
+
+	if bridge_vel.size >= 5:
+		k = min(9, int(bridge_vel.size) if int(bridge_vel.size) % 2 == 1 else int(bridge_vel.size) - 1)
+		if k >= 5:
+			bridge_vel = sps.savgol_filter(bridge_vel, window_length=k, polyorder=2, mode="interp")
+
+	if bridge_vel.size >= 8:
+		bridge_vel = sps.detrend(bridge_vel, type='linear')
+	return bridge_vel.astype(np.float64, copy=False)
+
+
+class DoFDisplacementBridge_Model(MethodBase):
+
+	def __init__(self):
+		super().__init__()
+		self.name = 'dof_disp_bridge'
+		self.data_type = 'chest'
+
+	def process(self, data):
+		cached = _load_obs_cache(data, DOF_BRIDGE_CACHE_FILE)
+		if cached is not None:
+			return cached
+
+		g_rois = _get_gray_chest_rois(data)
+		dof_bridge = _dof_to_displacement_bridge(g_rois, float(data['fps']))
+		_save_obs_cache(data, DOF_BRIDGE_CACHE_FILE, dof_bridge)
+		return dof_bridge
+
 class profile1D_Model(MethodBase):
 
 	def __init__(self, interp_type='quadratic'):
@@ -169,6 +277,196 @@ class profile1D_Model(MethodBase):
 		profile, _ = profile1D(g_rois, data['fps'], self.interp_type)
 		_save_obs_cache(data, cache_name, profile)
 		return profile
+
+
+def _profile1d_signed_lag_bridge(g_rois, interp_type: str = "linear") -> np.ndarray:
+	"""Construct a signed displacement-like profile signal from centered xcorr lag.
+
+	The legacy `profile1D` extractor keeps the absolute argmax index of the full
+	cross-correlation. That preserves coarse periodicity after downstream
+	normalization, but it discards the centered signed-lag interpretation that is
+	closer to a true displacement surrogate. This bridge restores that meaning.
+	"""
+	if not g_rois or len(g_rois) < 2:
+		return np.array([], dtype=np.float64)
+
+	ref_shape = None
+	prevp = None
+	out = []
+	for roi in g_rois:
+		curr = np.asarray(roi)
+		if ref_shape is None:
+			ref_shape = curr.shape[:2]
+		elif curr.shape[:2] != ref_shape:
+			curr = cv.resize(curr, (ref_shape[1], ref_shape[0]))
+		currp = np.diff(0.5 * (np.mean(curr, axis=1) + np.std(curr, axis=1)))
+		if currp.size == 0:
+			continue
+		if prevp is None:
+			prevp = currp
+			continue
+		if prevp.size == 0:
+			prevp = currp
+			continue
+
+		xcorr = np.correlate(currp, prevp, mode="full")
+		if xcorr.size < 3:
+			prevp = currp
+			continue
+		lags = np.arange(-(prevp.size - 1), currp.size, dtype=np.float64)
+		if lags.size != xcorr.size:
+			prevp = currp
+			continue
+
+		up = 64
+		if xcorr.size >= 4:
+			safe_interp = interp_type if xcorr.size > 3 else "linear"
+			interp_fn = spi.interp1d(lags, xcorr, kind=safe_interp)
+			xfine = np.linspace(lags[0], lags[-1], xcorr.size * up)
+			xcorr_interp = interp_fn(xfine)
+			lag_hat = float(xfine[int(np.argmax(xcorr_interp))])
+		else:
+			lag_hat = float(lags[int(np.argmax(xcorr))])
+
+		norm = max(float(currp.size), 1.0)
+		out.append(lag_hat / norm)
+		prevp = currp
+
+	bridge = np.asarray(out, dtype=np.float64).reshape(-1)
+	if bridge.size == 0:
+		return bridge
+	bridge = np.nan_to_num(bridge, nan=0.0, posinf=0.0, neginf=0.0)
+	bridge -= float(np.median(bridge))
+	if bridge.size >= 8:
+		bridge = sps.detrend(bridge, type="linear")
+	if bridge.size >= 9:
+		k = min(11, int(bridge.size) if int(bridge.size) % 2 == 1 else int(bridge.size) - 1)
+		if k >= 5:
+			bridge = sps.savgol_filter(bridge, window_length=k, polyorder=2, mode="interp")
+	return bridge.astype(np.float64, copy=False)
+
+
+class Profile1DDisplacementBridge_Model(MethodBase):
+
+	def __init__(self, interp_type='linear'):
+		super().__init__()
+		self.interp_type = interp_type
+		self.name = f'profile1d_{interp_type}_bridge'
+		self.data_type = 'chest'
+
+	def process(self, data):
+		cache_name = P1D_BRIDGE_CACHE_FILES.get(self.interp_type, f"obs_p1d_{self.interp_type}_bridge_v1.npy")
+		cached = _load_obs_cache(data, cache_name)
+		if cached is not None:
+			return cached
+
+		g_rois = _get_gray_chest_rois(data)
+		bridge = _profile1d_signed_lag_bridge(g_rois, self.interp_type)
+		_save_obs_cache(data, cache_name, bridge)
+		return bridge
+
+
+class Profile1DConsensus_Model(MethodBase):
+
+	def __init__(self):
+		super().__init__()
+		self.name = "profile1d_consensus"
+		self.data_type = "chest"
+		self.component_names = ["profile1d_linear", "profile1d_quadratic", "profile1d_cubic"]
+		self.lin_model = profile1D_Model("linear")
+		self.quad_model = profile1D_Model("quadratic")
+		self.cub_model = profile1D_Model("cubic")
+
+	@staticmethod
+	def _robust_scale(x: np.ndarray) -> float:
+		x = np.asarray(x, dtype=np.float64).reshape(-1)
+		if x.size == 0:
+			return 1.0
+		med = float(np.median(x))
+		mad = float(np.median(np.abs(x - med)))
+		sigma = 1.4826 * mad
+		if not np.isfinite(sigma) or sigma < 1e-6:
+			sigma = float(np.std(x))
+		if not np.isfinite(sigma) or sigma < 1e-6:
+			sigma = 1.0
+		return sigma
+
+	@staticmethod
+	def _spectral_peak_ratio(x: np.ndarray, fs: float, f_min: float = 0.08, f_max: float = 0.5) -> float:
+		x = np.asarray(x, dtype=np.float64).reshape(-1)
+		if x.size < max(16, int(round(2.0 * fs))):
+			return 1.0
+		nperseg = min(x.size, max(64, int(round(fs * 8.0))))
+		freqs, psd = sps.welch(x, fs=fs, nperseg=nperseg)
+		mask = (freqs >= float(f_min)) & (freqs <= float(f_max))
+		if not np.any(mask):
+			return 1.0
+		band = np.asarray(psd[mask], dtype=np.float64)
+		peak = float(np.max(band))
+		med = float(np.median(band))
+		ratio = peak / max(med, 1e-9)
+		if not np.isfinite(ratio) or ratio <= 0.0:
+			return 1.0
+		return ratio
+
+	@staticmethod
+	def _bandpass(x: np.ndarray, fs: float, f_min: float = 0.08, f_max: float = 0.5) -> np.ndarray:
+		x = np.asarray(x, dtype=np.float64).reshape(-1)
+		if x.size == 0:
+			return x
+		x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+		x = sps.detrend(x, type="linear")
+		nyq = 0.5 * float(fs)
+		lo = max(float(f_min), 0.05)
+		hi = min(float(f_max), nyq - 1e-3)
+		if hi > lo and hi < nyq and lo > 0.0:
+			b, a = sps.butter(3, [lo / nyq, hi / nyq], btype="bandpass")
+			x = sps.filtfilt(b, a, x, method="gust")
+		return x
+
+	def process(self, data):
+		cached = _load_obs_cache(data, P1D_CONSENSUS_CACHE_FILE)
+		if cached is not None:
+			return cached
+
+		fs = float(data.get("fps", 20.0))
+		lin = np.asarray(self.lin_model.process(data), dtype=np.float64).reshape(-1)
+		quad = np.asarray(self.quad_model.process(data), dtype=np.float64).reshape(-1)
+		cub = np.asarray(self.cub_model.process(data), dtype=np.float64).reshape(-1)
+		n = int(min(lin.size, quad.size, cub.size))
+		if n <= 0:
+			return np.array([], dtype=np.float64)
+
+		signals = {
+			"linear": lin[:n],
+			"quadratic": quad[:n],
+			"cubic": cub[:n],
+		}
+		z = {}
+		ref = None
+		for key, sig in signals.items():
+			bp = self._bandpass(sig, fs)
+			scale = self._robust_scale(bp)
+			zsig = bp / scale
+			z[key] = zsig
+			if key == "quadratic":
+				ref = zsig
+
+		for key in ("linear", "cubic"):
+			if ref is None or z[key].size != ref.size or z[key].size < 8:
+				continue
+			corr = float(np.corrcoef(z[key], ref)[0, 1])
+			if np.isfinite(corr) and corr < 0.0:
+				z[key] = -z[key]
+
+		prior = {"linear": 0.90, "quadratic": 1.15, "cubic": 1.10}
+		weights = {}
+		for key, sig in z.items():
+			weights[key] = prior[key] * self._spectral_peak_ratio(sig, fs)
+		wsum = max(sum(weights.values()), 1e-6)
+		out = sum((weights[key] / wsum) * z[key] for key in ("linear", "quadratic", "cubic"))
+		_save_obs_cache(data, P1D_CONSENSUS_CACHE_FILE, out)
+		return out.astype(np.float64, copy=False)
 
 
 def _of_to_displacement_bridge(of: np.ndarray, fs: float) -> np.ndarray:
@@ -412,3 +710,45 @@ class FusionOFP1DQuadratic_Model(MethodBase):
 		w_of /= w_sum
 		w_p1d /= w_sum
 		return (w_of * of_z + w_p1d * p1d_z).astype(np.float64)
+
+
+class FamilyMultiViewHypothesisSet_Model(MethodBase):
+
+	def __init__(self):
+		super().__init__()
+		self.name = 'family_multiview_hypothesis_set'
+		self.data_type = 'chest'
+		self.component_names = [
+			'of_farneback',
+			'of_disp_bridge',
+			'dof',
+			'dof_disp_bridge',
+			'profile1d_linear',
+			'profile1d_quadratic',
+			'profile1d_cubic',
+			'profile1d_consensus',
+		]
+		self.of_model = OF_Model()
+		self.of_bridge_model = OFDisplacementBridge_Model()
+		self.dof_model = DoF_Model()
+		self.dof_bridge_model = DoFDisplacementBridge_Model()
+		self.p1d_lin_model = profile1D_Model('linear')
+		self.p1d_quad_model = profile1D_Model('quadratic')
+		self.p1d_cub_model = profile1D_Model('cubic')
+		self.p1d_cons_model = Profile1DConsensus_Model()
+
+	def process(self, data):
+		channels = [
+			np.asarray(self.of_model.process(data), dtype=np.float64).reshape(-1),
+			np.asarray(self.of_bridge_model.process(data), dtype=np.float64).reshape(-1),
+			np.asarray(self.dof_model.process(data), dtype=np.float64).reshape(-1),
+			np.asarray(self.dof_bridge_model.process(data), dtype=np.float64).reshape(-1),
+			np.asarray(self.p1d_lin_model.process(data), dtype=np.float64).reshape(-1),
+			np.asarray(self.p1d_quad_model.process(data), dtype=np.float64).reshape(-1),
+			np.asarray(self.p1d_cub_model.process(data), dtype=np.float64).reshape(-1),
+			np.asarray(self.p1d_cons_model.process(data), dtype=np.float64).reshape(-1),
+		]
+		n = int(min((c.size for c in channels), default=0))
+		if n <= 0:
+			return np.zeros((len(self.component_names), 0), dtype=np.float64)
+		return np.vstack([c[:n] for c in channels])

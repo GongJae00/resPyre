@@ -25,9 +25,14 @@ def classify_family(method_name: str) -> str:
         "of_disp_bridge": "OF_bridge",
         "of": "OF",
         "dof": "DoF",
+        "dof_disp_bridge": "DoF_bridge",
         "profile1d_linear": "P1D_lin",
+        "profile1d_linear_bridge": "P1D_lin_bridge",
         "profile1d_quadratic": "P1D_quad",
+        "profile1d_quadratic_bridge": "P1D_quad_bridge",
         "profile1d_cubic": "P1D_cub",
+        "profile1d_cubic_bridge": "P1D_cub_bridge",
+        "profile1d_consensus": "P1D_cons",
     }
     return family_map.get(base, base)
 

@@ -26,11 +26,15 @@ def get_vid_stats(path):
     cap.release()
     return count, fps
 
-def extract_respiration(datasets, methods, results_dir, run_label=None, manifest_methods=None, method_order=None):
+def extract_respiration(datasets, methods, results_dir, run_label=None, manifest_methods=None, method_order=None, storage_cfg=None):
     os.makedirs(results_dir, exist_ok=True)
     all_methods = manifest_methods or methods
     method_order = method_order or [m.name if hasattr(m, 'name') else str(m) for m in all_methods]
     method_suffix = _method_suffix(all_methods)
+    storage_cfg = storage_cfg if isinstance(storage_cfg, dict) else {}
+    save_aux = bool(storage_cfg.get('save_aux', True))
+    save_frame_logs = bool(storage_cfg.get('save_frame_logs', save_aux))
+    save_component_aux = bool(storage_cfg.get('save_component_aux', save_aux))
     sanitized_label = _sanitize_run_label(run_label) if run_label else None
     single_dataset = len(datasets) == 1
 
@@ -114,7 +118,12 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
                 tqdm.write("> Applying method %s ..." % m.name)
                 skip_method = False
                 aux_dir = os.path.join(dataset_results_dir, 'aux', m.name.replace(' ', '_'))
-                d['aux_save_dir'] = aux_dir
+                d['aux_save_dir'] = aux_dir if (save_aux or save_frame_logs) else None
+                d['storage_policy'] = {
+                    'save_aux': save_aux,
+                    'save_frame_logs': save_frame_logs,
+                    'save_component_aux': save_component_aux,
+                }
                 needs_roi_meta = hasattr(m, 'osc_head') or ('__' in getattr(m, 'name', ''))
 
                 if m.data_type == 'chest':
@@ -203,6 +212,7 @@ def extract_respiration(datasets, methods, results_dir, run_label=None, manifest
 
             # release some memory between videos
             d.pop('aux_save_dir', None)
+            d.pop('storage_policy', None)
             d.pop('trial_key', None)
             d.pop('trial_key_full', None)
             d.pop('trial_uid', None)

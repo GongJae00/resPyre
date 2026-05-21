@@ -105,7 +105,7 @@ def test_trial_key_propagation(monkeypatch):
             return []
 
     method = create_wrapped_method(
-        "profile1d_linear__robust_ossm_ekf",
+        "profile1d_linear__narossm",
         params={"params": {"fs": 20.0, "f_min": 0.08, "f_max": 0.5, "trace_cap": 50.0}},
     )
     out_root = tempfile.mkdtemp(prefix="trial_key_prop_")
@@ -120,7 +120,7 @@ def test_trial_key_propagation(monkeypatch):
         out_root,
         "trial_key_run",
         "aux",
-        "profile1d_linear__robust_ossm_ekf",
+        "profile1d_linear__narossm",
         "frame_logs",
     )
     logs = sorted(glob.glob(os.path.join(frame_dir, "*.npz")))
@@ -131,7 +131,7 @@ def test_trial_key_propagation(monkeypatch):
 
 def test_create_wrapped_method_applies_global_oscillator_defaults():
     method = create_wrapped_method(
-        "profile1d_linear__robust_ossm_ekf",
+        "profile1d_linear__narossm",
         params={"params": {"oscillator": {"qx": 1e-4}}},
         oscillator_defaults={"qx": 0.005, "qf": 2e-5, "no_autotune": True, "em_mode": "off"},
     )

@@ -1,0 +1,60 @@
+# Pre-Full Paper Contract Audit (2026-05-21)
+
+This CPU-only audit checks whether the paper-facing sources agree before
+the GPU-heavy complete-cohort validation is launched.
+
+- Total checks: 50
+- Failed checks: 0
+
+| check | severity | status | path | detail |
+|---|---|---|---|---|
+| required_artifact | error | pass | `execute.md` | exists, size_or_children=15992 |
+| required_artifact | error | pass | `paper/main.tex` | exists, size_or_children=66569 |
+| required_artifact | error | pass | `paper/FIGURE_TABLE_INDEX.md` | exists, size_or_children=3863 |
+| required_artifact | error | pass | `paper/tables_ready/T1_dataset_protocol_scope.csv` | exists, size_or_children=1466 |
+| required_artifact | error | pass | `paper/tables_ready/T2_observation_class_map.csv` | exists, size_or_children=1935 |
+| required_artifact | error | pass | `paper/tables_ready/T3_rate_main.csv` | exists, size_or_children=914 |
+| required_artifact | error | pass | `paper/tables_ready/T4_waveform_main.csv` | exists, size_or_children=772 |
+| required_artifact | error | pass | `paper/tables_ready/T4b_waveform_strict.csv` | exists, size_or_children=1264 |
+| required_artifact | error | pass | `paper/tables_ready/T4c_cycle_main.csv` | exists, size_or_children=1002 |
+| required_artifact | error | pass | `paper/tables_ready/T5_component_ablation_evidence.csv` | exists, size_or_children=4818 |
+| required_artifact | error | pass | `paper/tables_ready/T5_operator_alignment_ablation.csv` | exists, size_or_children=1070 |
+| required_artifact | error | pass | `paper/tables_ready/T6_diagnostics_main.csv` | exists, size_or_children=664 |
+| required_artifact | error | pass | `paper/tables_ready/T7_observability_failure_taxonomy.csv` | exists, size_or_children=2154 |
+| required_artifact | error | pass | `paper/figures/F1_architecture.pdf` | exists, size_or_children=1405038 |
+| required_artifact | error | pass | `paper/figures/F2_dataset_and_observation_regime.pdf` | exists, size_or_children=109114 |
+| required_artifact | error | pass | `paper/figures/F3_rate_observation_class_summary.pdf` | exists, size_or_children=17835 |
+| required_artifact | error | pass | `paper/figures/F4_waveform_overlay_grid.pdf` | exists, size_or_children=363584 |
+| required_artifact | error | pass | `paper/figures/F5_mechanism_activation.pdf` | exists, size_or_children=20054 |
+| required_artifact | error | pass | `paper/figures/F6_failure_cases.pdf` | exists, size_or_children=54838 |
+| stale_text_token | error | pass | `execute.md` | token='results/final_validation/' absent |
+| stale_text_token | error | pass | `execute.md` | token='results/final_inputs/' absent |
+| stale_text_token | error | pass | `execute.md` | token='analysis/parh_design_boundary_audit_20260429' absent |
+| stale_text_token | error | pass | `paper/main.tex` | token='results/final_validation/' absent |
+| stale_text_token | error | pass | `paper/main.tex` | token='results/final_inputs/' absent |
+| stale_text_token | error | pass | `paper/main.tex` | token='analysis/parh_design_boundary_audit_20260429' absent |
+| stale_text_token | error | pass | `paper/FIGURE_TABLE_INDEX.md` | token='results/final_validation/' absent |
+| stale_text_token | error | pass | `paper/FIGURE_TABLE_INDEX.md` | token='results/final_inputs/' absent |
+| stale_text_token | error | pass | `paper/FIGURE_TABLE_INDEX.md` | token='analysis/parh_design_boundary_audit_20260429' absent |
+| required_text_token | error | pass | `execute.md` | token='full reproducible paper package' present |
+| required_text_token | error | pass | `execute.md` | token='results/final_full_validation/cohface' present |
+| required_text_token | error | pass | `execute.md` | token='results/final_full_validation/mahnob_tailaligned' present |
+| required_text_token | error | pass | `execute.md` | token='external timing-evidence comparator channel' present |
+| required_text_token | error | pass | `paper/main.tex` | token='integrated PARH-OSSM run' present |
+| required_text_token | error | pass | `paper/main.tex` | token='Table~\\ref{tab:cohface_t3}' present |
+| required_text_token | error | pass | `paper/main.tex` | token='observation-to-state topology' present |
+| required_text_token | error | pass | `paper/main.tex` | token='OSSM-KF comparator' present |
+| required_text_token | error | pass | `paper/FIGURE_TABLE_INDEX.md` | token='S_T_final_observation_class_comparison.csv' present |
+| required_text_token | error | pass | `paper/FIGURE_TABLE_INDEX.md` | token='T2_observation_class_map.csv' present |
+| required_text_token | error | pass | `paper/FIGURE_TABLE_INDEX.md` | token='F1_architecture.pdf' present |
+| observation_class_order | error | pass | `paper/tables_ready/T2_observation_class_map.csv` | observed=['OF', 'OF_bridge', 'DoF', 'DoF_bridge', 'P1D_lin', 'P1D_quad', 'P1D_cub', 'P1D_cons']; expected=['OF', 'OF_bridge', 'DoF', 'DoF_bridge', 'P1D_lin', 'P1D_quad', 'P1D_cub', 'P1D_cons'] |
+| table_nonempty | error | pass | `paper/tables_ready/T1_dataset_protocol_scope.csv` | rows=5 cols=13 |
+| table_nonempty | error | pass | `paper/tables_ready/T2_observation_class_map.csv` | rows=9 cols=16 |
+| table_nonempty | error | pass | `paper/tables_ready/T3_rate_main.csv` | rows=3 cols=22 |
+| table_nonempty | error | pass | `paper/tables_ready/T4_waveform_main.csv` | rows=3 cols=19 |
+| table_nonempty | error | pass | `paper/tables_ready/T4b_waveform_strict.csv` | rows=3 cols=34 |
+| table_nonempty | error | pass | `paper/tables_ready/T4c_cycle_main.csv` | rows=3 cols=22 |
+| table_nonempty | error | pass | `paper/tables_ready/T5_component_ablation_evidence.csv` | rows=10 cols=24 |
+| table_nonempty | error | pass | `paper/tables_ready/T5_operator_alignment_ablation.csv` | rows=7 cols=11 |
+| table_nonempty | error | pass | `paper/tables_ready/T6_diagnostics_main.csv` | rows=3 cols=14 |
+| table_nonempty | error | pass | `paper/tables_ready/T7_observability_failure_taxonomy.csv` | rows=7 cols=11 |

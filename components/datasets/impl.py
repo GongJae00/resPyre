@@ -146,7 +146,20 @@ class MAHNOB(DatasetBase):
 		self.path = self.resolve('MAHNOB') + os.sep
 		self.data = []
 
-	def load_gt(self, sbj_path):
+	def _video_duration_sec(self, video_path):
+		try:
+			import cv2
+			cap = cv2.VideoCapture(video_path)
+			frames = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+			fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+			cap.release()
+			if frames > 0.0 and fps > 0.0:
+				return frames / fps
+		except Exception:
+			return None
+		return None
+
+	def load_gt(self, sbj_path, video_path=None):
 		from pyedflib import EdfReader
 		bdf_file = None
 		for fn in os.listdir(sbj_path):
@@ -160,6 +173,15 @@ class MAHNOB(DatasetBase):
 		self.fs_gt = reader.getSampleFrequency(channel)
 		gt = reader.readSignal(channel)
 		reader.close()
+		if video_path is not None:
+			duration_sec = self._video_duration_sec(video_path)
+			if duration_sec is not None:
+				n = int(round(float(duration_sec) * float(self.fs_gt)))
+				if 16 <= n < len(gt):
+					# MAHNOB-HCI trial BDFs include pre-video samples in this layout.
+					# Tail-aligning the physiological trace to the section video avoids
+					# zero-lag waveform evaluation against a longer, earlier BDF span.
+					gt = gt[-n:]
 		return gt
 
 
@@ -180,7 +202,7 @@ class MAHNOB(DatasetBase):
 				d['subject'] = sub
 				d['chest_rois'] = []
 				d['face_rois'] = []
-				d['gt'] = self.load_gt(sub_path)
+				d['gt'] = self.load_gt(sub_path, video_path=video_path)
 				self.data.append(d)
 
 		print('%d items loaded!' % len(self.data)) 
