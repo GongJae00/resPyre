@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use this software or the accompanying paper artifacts, please cite the paper and the archived software release."
+title: "ResPyre: PARH-OSSM framework for camera-derived respiratory motion"
+type: software
+authors:
+  - family-names: Cho
+    given-names: Young-Jae
+    affiliation: "University of Ulsan"
+  - family-names: Kim
+    given-names: Dae-Yeol
+    affiliation: "University of Ulsan"
+repository-code: "https://github.com/GongJae00/resPyre"
+url: "https://github.com/GongJae00/resPyre"
+license: GPL-3.0-only
+version: "1.0.0-paper-submission"
+date-released: "2026-05-21"
+abstract: "ResPyre provides the PARH-OSSM implementation, fixed camera-motion observation operators, paper-facing evaluation scripts, figure/table generation scripts, and verification audits used for the physiology-aligned state-space decomposition study of camera-derived respiratory motion."
+keywords:
+  - contactless respiration
+  - camera-derived motion
+  - state-space model
+  - respiratory waveform
+  - observability
+preferred-citation:
+  type: article
+  title: "A Physiology-Aligned State-Space Decomposition Framework for Camera-Derived Respiratory Motion"
+  authors:
+    - family-names: Cho
+      given-names: Young-Jae
+      affiliation: "University of Ulsan"
+    - family-names: Kim
+      given-names: Dae-Yeol
+      affiliation: "University of Ulsan"
+  year: 2026

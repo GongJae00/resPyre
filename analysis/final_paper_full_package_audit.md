@@ -95,8 +95,8 @@ table, and manuscript artifacts.
 | manifests | `paper/manifests/f4_allbase_same_trial_overlay_manifest.csv` | 1 | 1 | 8597 | main same-trial all-base overlay manifest |
 | manifests | `paper/manifests/s_f15_cohface_observation_class_overlay_manifest.csv` | 1 | 1 | 5487 | COHFACE observation-class overlay manifest |
 | manifests | `paper/manifests/s_f16_mahnob_observation_class_overlay_manifest.csv` | 1 | 1 | 5617 | MAHNOB-HCI observation-class overlay manifest |
-| manuscript | `paper/main.tex` | 1 | 1 | 66568 | paper source |
-| manuscript | `paper/main.pdf` | 1 | 1 | 2122505 | compiled paper PDF |
+| manuscript | `paper/main.tex` | 1 | 1 | 66645 | paper source |
+| manuscript | `paper/main.pdf` | 1 | 1 | 2122847 | compiled paper PDF |
 | manuscript | `paper/supplementary_information.tex` | 1 | 1 | 15153 | supplementary information source |
 | manuscript | `paper/supplementary_information.pdf` | 1 | 1 | 3320257 | compiled supplementary information PDF |
 | submission | `analysis/final_submission_package_audit.md` | 1 | 1 | 5621 | final submission package audit |

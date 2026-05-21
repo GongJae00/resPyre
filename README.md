@@ -30,6 +30,14 @@ The final paper-facing full validation is intentionally driven by `execute.md`,
 because it also wires target-side priors, the adaptive observation law, and the
 post-run rate-source / observability audits.
 
+## Citation and Archival Release
+
+This repository is prepared for the paper-submission snapshot
+`v1.0.0-paper-submission`. Citation metadata is provided in `CITATION.cff`, and
+Zenodo release metadata is provided in `.zenodo.json`. After the GitHub release
+is archived through Zenodo, cite the DOI-minted software record together with
+the accompanying paper.
+
 ## Repository Layout
 
 ```text

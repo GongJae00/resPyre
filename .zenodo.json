@@ -1,0 +1,33 @@
+{
+  "title": "ResPyre: PARH-OSSM framework for camera-derived respiratory motion",
+  "upload_type": "software",
+  "description": "Paper-submission release of ResPyre, including the PARH-OSSM implementation, fixed camera-motion observation operators, paper-facing evaluation scripts, figure/table generation scripts, and verification audits used for the physiology-aligned state-space decomposition study of camera-derived respiratory motion. Raw third-party video and physiology datasets are not redistributed.",
+  "creators": [
+    {
+      "name": "Cho, Young-Jae",
+      "affiliation": "University of Ulsan"
+    },
+    {
+      "name": "Kim, Dae-Yeol",
+      "affiliation": "University of Ulsan"
+    }
+  ],
+  "access_right": "open",
+  "license": "gpl-3.0-only",
+  "version": "1.0.0-paper-submission",
+  "publication_date": "2026-05-21",
+  "keywords": [
+    "contactless respiration",
+    "camera-derived motion",
+    "state-space model",
+    "respiratory waveform",
+    "observability"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/GongJae00/resPyre",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
