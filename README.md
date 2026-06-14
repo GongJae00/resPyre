@@ -48,15 +48,15 @@ resPyre/
 │   └── models/
 │       ├── core/          # Shared oscillator parameters and base helpers
 │       └── heads/         # OSSM-KF, PARH-OSSM, and other oscillator heads
-├── analysis/              # Paper-facing audit artifacts and compact priors
+├── analysis/              # Released audit artifacts and compact priors
 ├── core/
 │   ├── evaluation/        # Metrics, plotting, frame-log utilities
 │   ├── pipeline/          # Runner, wrapper, evaluation, visualization, metadata
 │   └── utils/             # Config loader and shared utilities
 ├── configs/               # Experiment configs
-├── dataset/               # Default dataset root
-├── paper/                 # Manuscript, figures, tables, and SI source
-├── results/               # Generated run artifacts
+├── dataset/               # Public dataset notes and small metadata files
+├── paper/                 # Local manuscript workspace, ignored by Git
+├── results/               # Generated run artifacts, ignored by Git
 ├── setup/                 # Environment bootstrap
 ├── tests/                 # Regression and pipeline tests
 ├── execute.md             # Final paper-facing regeneration ledger
@@ -91,11 +91,17 @@ To use another dataset root, set:
 export RESPIRE_DATA_DIR=/path/to/datasets
 ```
 
-The expected dataset subdirectories are:
+The expected local dataset subdirectories are:
 
 - `dataset/BP4Ddef`
 - `dataset/COHFACE`
 - `dataset/MAHNOB`
+- `dataset/V4V`
+- `dataset/SCAMPS`
+
+Raw datasets and local symlinks are intentionally ignored by Git. The tracked
+`dataset/` directory contains only dataset instructions and small metadata files
+needed by the loaders.
 
 ## Quick Start
 
@@ -253,7 +259,9 @@ fixed observation classes
 `OSSM-KF` is a comparator and external timing-evidence source in the final
 materialization command. It is not a nested fallback that replaces PARH-OSSM.
 Run the commands in `execute.md` to regenerate the current COHFACE and MAHNOB
-tail-aligned validation bundles and required post-run audits.
+tail-aligned validation bundles and required post-run audits. Manuscript source
+and rendered paper files live in the local `paper/` workspace and are not tracked
+in the public code repository.
 
 ## Results Layout
 

@@ -127,8 +127,8 @@ def plot_t3_family_summary(t3_df: pd.DataFrame, out_path: Path, headline_df: pd.
     x = np.arange(len(families))
 
     set_manuscript_style("paper")
-    fig, axes = plt.subplots(1, 2, figsize=(13.2, 5.2), constrained_layout=False)
-    fig.subplots_adjust(left=0.065, right=0.985, bottom=0.16, top=0.80, wspace=0.12)
+    fig, axes = plt.subplots(1, 2, figsize=(15.8, 4.25), constrained_layout=False)
+    fig.subplots_adjust(left=0.055, right=0.990, bottom=0.18, top=0.76, wspace=0.10)
     panels = [
         ("MAE", "Rate MAE", False),
         ("PearsonR", "Rate Pearson r", True),
@@ -359,8 +359,8 @@ def plot_allbase_fusion_ladder(master_df: pd.DataFrame, out_path: Path):
     colors = {"COHFACE": "#1f3a5f", "MAHNOB": "#b85c2b"}
 
     set_manuscript_style("paper")
-    fig, axes = plt.subplots(1, 3, figsize=(14.8, 6.4), constrained_layout=False, sharey=True)
-    fig.subplots_adjust(left=0.205, right=0.988, bottom=0.105, top=0.825, wspace=0.135)
+    fig, axes = plt.subplots(1, 3, figsize=(18.2, 4.9), constrained_layout=False, sharey=True)
+    fig.subplots_adjust(left=0.165, right=0.990, bottom=0.125, top=0.790, wspace=0.115)
     panels = [
         ("rate_MAE", "Rate MAE (bpm)", "lower is better", True),
         ("waveform_CCC", "Aligned waveform CCC", "higher is better", False),
@@ -391,6 +391,7 @@ def plot_allbase_fusion_ladder(master_df: pd.DataFrame, out_path: Path):
             ax.set_xlim(-0.05, 1.02)
         ax.set_yticks(np.arange(len(rung_order)))
         ax.set_yticklabels([_allbase_rung_label(r).replace("\n", " ") for r in rung_order])
+        ax.tick_params(axis="y", labelsize=8.2)
         ax.invert_yaxis()
         ax.set_xlabel(ylabel)
         ax.set_title(ylabel, loc="center")
@@ -402,13 +403,13 @@ def plot_allbase_fusion_ladder(master_df: pd.DataFrame, out_path: Path):
             handles,
             labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.915),
+            bbox_to_anchor=(0.5, 0.895),
             ncol=len(handles),
             frameon=False,
             handlelength=2.5,
             columnspacing=1.8,
         )
-    fig.suptitle("All fixed observations, comparator, and PARH-OSSM on final full-dataset trials", fontsize=13, y=0.985)
+    fig.suptitle("All fixed observations, comparator, and PARH-OSSM on final full-dataset trials", fontsize=12, y=0.975)
     save_figure(fig, out_path)
 
 
@@ -435,7 +436,7 @@ def plot_fusion_ladder(ladder_df: pd.DataFrame, out_path: Path):
     colors = {"COHFACE": "#1f3a5f", "MAHNOB": "#b85c2b"}
 
     set_manuscript_style("paper")
-    fig, axes = plt.subplots(1, 3, figsize=(17.2, 5.2), constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(18.4, 3.55), constrained_layout=True)
     panels = [
         ("rate_MAE", "Rate MAE (bpm)", "lower is better", True),
         ("waveform_CCC", "Aligned waveform CCC", "higher is better", False),
@@ -469,8 +470,8 @@ def plot_fusion_ladder(ladder_df: pd.DataFrame, out_path: Path):
         add_metric_box(ax, box, loc="upper right", fontsize=8.2)
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
-        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.04), ncol=len(handles), frameon=False)
-    fig.suptitle("Fixed observations, comparator, and PARH-OSSM on the same final full-dataset trials", fontsize=13)
+        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=len(handles), frameon=False)
+    fig.suptitle("Fixed observations, comparator, and PARH-OSSM on final full-dataset trials", fontsize=12, y=1.01)
     save_figure(fig, out_path)
 
 

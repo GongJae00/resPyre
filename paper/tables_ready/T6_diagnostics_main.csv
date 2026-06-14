@@ -1,3 +1,0 @@
-dataset,observation_class,OSSM_KF_method,OSSM_KF_Stability_Sec,OSSM_KF_N,PARH_method,PARH_NIS_Mean,PARH_NIS_InBand,PARH_Lambda_Mean,PARH_Lambda_LT1_Frac,PARH_Stability_Sec,PARH_N,comparison_scope,coverage_note
-COHFACE,PARH-OSSM,profile1d_quadratic__ossm_kf,60.4500,160,parh_ossm,0.9359,1.0000,1.0456,0.0000,60.9250,160,same_trials,diagnostic comparator and PARH evaluated on N=160 trials
-MAHNOB,PARH-OSSM,profile1d_quadratic__ossm_kf,117.9671,488,parh_ossm,0.9871,1.0000,1.0667,0.0000,90.3770,525,full_dataset_with_baseline_coverage_limit,"PARH-OSSM reports the full final dataset; OSSM-KF diagnostic comparator is computable for OSSM_KF_N=488, PARH_N=525 trials"

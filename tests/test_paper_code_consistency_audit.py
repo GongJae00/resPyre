@@ -3,23 +3,32 @@ import subprocess
 import sys
 
 import pandas as pd
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PAPER = ROOT / "paper"
+
+pytestmark = pytest.mark.skipif(
+    not ((PAPER / "main.tex").exists() and (PAPER / "tables_ready").exists()),
+    reason="complete local paper artifact workspace is not part of the public code repository",
+)
 
 
 def test_paper_code_consistency_audit_passes_against_table_ready_package(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
     out_csv = tmp_path / "paper_code_consistency.csv"
     out_md = tmp_path / "paper_code_consistency.md"
 
     subprocess.run(
         [
             sys.executable,
-            str(root / "scripts" / "audit_paper_code_consistency.py"),
+            str(ROOT / "scripts" / "audit_paper_code_consistency.py"),
             "--out-csv",
             str(out_csv),
             "--out-md",
             str(out_md),
         ],
-        cwd=root,
+        cwd=ROOT,
         check=True,
     )
 

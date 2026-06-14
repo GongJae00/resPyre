@@ -1,5 +1,0 @@
-dataset,role,paper_use,n_units,n_subjects,rate_source,rate_median_bpm,rate_iqr_bpm,rate_p05_bpm,rate_p95_bpm,duration_median_sec,duration_iqr_sec,label_samples_median,waveform_gt_available,real_or_synthetic,claim_boundary
-COHFACE,primary real waveform/rate,main benchmark,160,40.000000,respiratory waveform spectral peak,12.000000,4.000000,8.000000,20.000000,61.200000,1.200000,,True,real,supports real waveform/rate claims
-MAHNOB-HCI,hard real waveform/rate,hard-regime benchmark,525,,respiratory waveform spectral peak,8.000021,8.000042,8.000000,20.000052,117.950513,31.245820,,True,real,supports observability-boundary analysis
-V4V,external real rate-only,supplementary rate-only scope,724,100.000000,frame-aligned RR label median,13.820000,4.667500,5.085500,19.066500,,,820.500000,False,real,no waveform or morphology claims
-SCAMPS,synthetic controlled diagnostic,supplementary synthetic control,2800,,"synthetic d_br spectral peak, assumed 30 fps",,,,,,,,True,synthetic,no real-data performance claims

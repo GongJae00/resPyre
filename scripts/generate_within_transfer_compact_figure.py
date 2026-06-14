@@ -44,6 +44,25 @@ def _load_transfer_baseline(run_dir: Path) -> dict:
     }
 
 
+def _load_summary_or_run(path: Path) -> dict:
+    if path.is_dir():
+        return _load_transfer_baseline(path)
+    return _read_json(path)
+
+
+def _flat_values(summary: dict) -> dict:
+    if 'rate_mae' in summary:
+        return summary
+    return {
+        'rate_mae': float(summary['rate']['MAE']),
+        'aligned_ccc': float(summary['waveform']['waveform_CCC']),
+        'strict_ccc': float(summary['waveform_strict']['strict_CCC']),
+        'consistency': float(summary['consistency']['consistency_score']),
+        'track_diff': float(summary['consistency']['rate_waveform_track_abs_diff_bpm']),
+        'system_confidence': float(summary['consistency']['system_confidence_score']),
+    }
+
+
 def build_figure(
     within_default_summary: Path,
     within_robust_summary: Path,
@@ -51,37 +70,16 @@ def build_figure(
     transfer_robust_summary: Path,
     out_pdf: Path,
 ):
-    within_default = _read_json(within_default_summary)
-    within_robust = _read_json(within_robust_summary)
+    within_default = _flat_values(_load_summary_or_run(within_default_summary))
+    within_robust = _flat_values(_load_summary_or_run(within_robust_summary))
     transfer_default = _load_transfer_baseline(transfer_default_run)
-    transfer_robust = _read_json(transfer_robust_summary)
+    transfer_robust = _flat_values(_load_summary_or_run(transfer_robust_summary))
 
     rows = [
-        ('Within / Default', {
-            'rate_mae': float(within_default['rate']['MAE']),
-            'aligned_ccc': float(within_default['waveform']['waveform_CCC']),
-            'strict_ccc': float(within_default['waveform_strict']['strict_CCC']),
-            'consistency': float(within_default['consistency']['consistency_score']),
-            'track_diff': float(within_default['consistency']['rate_waveform_track_abs_diff_bpm']),
-            'system_confidence': float(within_default['consistency']['system_confidence_score']),
-        }),
-        ('Within / Robust', {
-            'rate_mae': float(within_robust['rate']['MAE']),
-            'aligned_ccc': float(within_robust['waveform']['waveform_CCC']),
-            'strict_ccc': float(within_robust['waveform_strict']['strict_CCC']),
-            'consistency': float(within_robust['consistency']['consistency_score']),
-            'track_diff': float(within_robust['consistency']['rate_waveform_track_abs_diff_bpm']),
-            'system_confidence': float(within_robust['consistency']['system_confidence_score']),
-        }),
+        ('Within / Default', within_default),
+        ('Within / Robust', within_robust),
         ('Transfer / Default', transfer_default),
-        ('Transfer / Robust', {
-            'rate_mae': float(transfer_robust['rate']['MAE']),
-            'aligned_ccc': float(transfer_robust['waveform']['waveform_CCC']),
-            'strict_ccc': float(transfer_robust['waveform_strict']['strict_CCC']),
-            'consistency': float(transfer_robust['consistency']['consistency_score']),
-            'track_diff': float(transfer_robust['consistency']['rate_waveform_track_abs_diff_bpm']),
-            'system_confidence': float(transfer_robust['consistency']['system_confidence_score']),
-        }),
+        ('Transfer / Robust', transfer_robust),
     ]
 
     df = pd.DataFrame({name: vals for name, vals in rows}).T
@@ -104,8 +102,8 @@ def build_figure(
             norm[col] = (vals - lo) / (hi - lo)
 
     set_manuscript_style('paper')
-    fig = plt.figure(figsize=(14.0, 7.2))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.2, 1.0])
+    fig = plt.figure(figsize=(16.4, 5.05))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.25, 1.0], wspace=0.18)
     ax1 = fig.add_subplot(gs[0, 0])
     ax2 = fig.add_subplot(gs[0, 1])
 
@@ -160,10 +158,10 @@ def write_report(
     out_md: Path,
     figure_rel: str,
 ):
-    within_default = _read_json(within_default_summary)
-    within_robust = _read_json(within_robust_summary)
+    within_default = _flat_values(_load_summary_or_run(within_default_summary))
+    within_robust = _flat_values(_load_summary_or_run(within_robust_summary))
     transfer_default = _load_transfer_baseline(transfer_default_run)
-    transfer_robust = _read_json(transfer_robust_summary)
+    transfer_robust = _flat_values(_load_summary_or_run(transfer_robust_summary))
     lines = [
         '# Within vs Transfer Compact Comparison',
         '',
@@ -174,12 +172,12 @@ def write_report(
         f'- Transfer robust summary: `{transfer_robust_summary}`',
         '',
         '## Key values',
-        f"- Within aligned CCC: `{float(within_default['waveform']['waveform_CCC']):.3f} -> {float(within_robust['waveform']['waveform_CCC']):.3f}`",
-        f"- Within strict CCC: `{float(within_default['waveform_strict']['strict_CCC']):.3f} -> {float(within_robust['waveform_strict']['strict_CCC']):.3f}`",
-        f"- Within consistency: `{float(within_default['consistency']['consistency_score']):.3f} -> {float(within_robust['consistency']['consistency_score']):.3f}`",
-        f"- Transfer aligned CCC: `{transfer_default['aligned_ccc']:.3f} -> {float(transfer_robust['waveform']['waveform_CCC']):.3f}`",
-        f"- Transfer strict CCC: `{transfer_default['strict_ccc']:.2e} -> {float(transfer_robust['waveform_strict']['strict_CCC']):.2e}`",
-        f"- Transfer consistency: `{transfer_default['consistency']:.3f} -> {float(transfer_robust['consistency']['consistency_score']):.3f}`",
+        f"- Within aligned CCC: `{within_default['aligned_ccc']:.3f} -> {within_robust['aligned_ccc']:.3f}`",
+        f"- Within strict CCC: `{within_default['strict_ccc']:.3f} -> {within_robust['strict_ccc']:.3f}`",
+        f"- Within consistency: `{within_default['consistency']:.3f} -> {within_robust['consistency']:.3f}`",
+        f"- Transfer aligned CCC: `{transfer_default['aligned_ccc']:.3f} -> {transfer_robust['aligned_ccc']:.3f}`",
+        f"- Transfer strict CCC: `{transfer_default['strict_ccc']:.2e} -> {transfer_robust['strict_ccc']:.2e}`",
+        f"- Transfer consistency: `{transfer_default['consistency']:.3f} -> {transfer_robust['consistency']:.3f}`",
         '',
         '## Interpretation',
         '- The robust fallback barely changes the easy within-dataset regime.',

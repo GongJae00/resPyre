@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
+import math
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -214,15 +215,20 @@ def plot_manifest(
     set_manuscript_style("review" if style == "review" else "paper")
     row_groups = _row_groups(manifest)
     variants = _variant_order(manifest)
-    fig_w = max(10.5, style_cfg["figsize_per_col"] * len(variants))
-    fig_h = max(7.2, style_cfg["figsize_per_row"] * len(row_groups))
-    fig, axes = plt.subplots(len(row_groups), len(variants), figsize=(fig_w, fig_h), sharex=False, sharey=True, constrained_layout=True)
-    if len(row_groups) == 1:
+    group_cols = 2 if len(row_groups) >= 6 and len(variants) <= 3 else 1
+    plot_rows = int(math.ceil(len(row_groups) / group_cols))
+    plot_cols = len(variants) * group_cols
+    fig_w = max(10.5, style_cfg["figsize_per_col"] * plot_cols)
+    fig_h = max(7.2, style_cfg["figsize_per_row"] * plot_rows)
+    fig, axes = plt.subplots(plot_rows, plot_cols, figsize=(fig_w, fig_h), sharex=False, sharey=True, constrained_layout=True)
+    if plot_rows == 1:
         axes = np.expand_dims(axes, axis=0)
-    if len(variants) == 1:
+    if plot_cols == 1:
         axes = np.expand_dims(axes, axis=1)
 
     for r, row_meta in row_groups.iterrows():
+        block_row = r // group_cols
+        block_col = r % group_cols
         panel_group = str(row_meta["panel_group"])
         case_rank = str(row_meta.get("case_rank", ""))
         dataset_label = str(row_meta.get("dataset", ""))
@@ -230,7 +236,7 @@ def plot_manifest(
         case_df = case_df.set_index("variant")
         video_label = str(row_meta.get("video", "")) if not case_df.empty else ""
         for c, variant in enumerate(variants):
-            ax = axes[r, c]
+            ax = axes[block_row, block_col * len(variants) + c]
             style_axis(ax, grid="y")
             if variant not in case_df.index:
                 ax.axis("off")
@@ -243,7 +249,7 @@ def plot_manifest(
             t, pred_w, gt_w = _window_signals(pred, gt, fs, window_sec)
             ax.plot(t, gt_w, color="#111111", linewidth=style_cfg["line_gt"], label="GT")
             ax.plot(t, pred_w, color=_variant_color(variant), linewidth=style_cfg["line_pred"], label=variant)
-            if r == 0:
+            if block_row == 0:
                 title_label = VARIANT_DISPLAY_LABELS.get(variant, variant)
                 ax.set_title(title_label, fontsize=style_cfg["title_size"], loc="center")
             add_metric_box(ax, _panel_metric_text(row), loc="upper left", fontsize=style_cfg["metric_box_size"])
@@ -253,7 +259,7 @@ def plot_manifest(
                 detail = " / ".join([part for part in [case_rank.capitalize(), video_label] if part])
                 ylabel = "\n".join([part for part in [header, detail] if part])
                 ax.set_ylabel(ylabel, fontsize=style_cfg["label_size"])
-            if r == len(row_groups) - 1:
+            if block_row == plot_rows - 1:
                 ax.set_xlabel("Time (s)", fontsize=style_cfg["label_size"])
             ax.set_ylim(-3.2, 3.2)
 

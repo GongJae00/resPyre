@@ -3,10 +3,19 @@ import subprocess
 import sys
 
 import pandas as pd
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PAPER = ROOT / "paper"
+
+pytestmark = pytest.mark.skipif(
+    not ((PAPER / "main.tex").exists() and (PAPER / "tables_ready").exists()),
+    reason="complete local paper artifact workspace is not part of the public code repository",
+)
 
 
 def test_final_submission_readiness_audit_generates_nonfailing_reports(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
     ref_csv = tmp_path / "reference.csv"
     ref_md = tmp_path / "reference.md"
     pkg_csv = tmp_path / "package.csv"
@@ -16,7 +25,7 @@ def test_final_submission_readiness_audit_generates_nonfailing_reports(tmp_path:
     subprocess.run(
         [
             sys.executable,
-            str(root / "scripts" / "audit_final_submission_readiness.py"),
+            str(ROOT / "scripts" / "audit_final_submission_readiness.py"),
             "--reference-csv",
             str(ref_csv),
             "--reference-md",
@@ -28,7 +37,7 @@ def test_final_submission_readiness_audit_generates_nonfailing_reports(tmp_path:
             "--checklist-md",
             str(checklist),
         ],
-        cwd=root,
+        cwd=ROOT,
         check=True,
     )
 

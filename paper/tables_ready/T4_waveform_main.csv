@@ -1,3 +1,0 @@
-dataset,observation_class,Base_method,Base_CCC,Base_MAE,Base_DTW,Base_N,OSSM_KF_method,OSSM_KF_CCC,OSSM_KF_MAE,OSSM_KF_DTW,OSSM_KF_N,PARH_method,PARH_CCC,PARH_MAE,PARH_DTW,PARH_N,comparison_scope,coverage_note
-COHFACE,PARH-OSSM,profile1D quadratic,0.8110,0.4840,0.3680,160,profile1d_quadratic__ossm_kf,0.8520,0.4170,0.3420,160,parh_ossm,0.8590,0.4230,0.3470,160,same_trials,all reported methods evaluated on N=160 trials
-MAHNOB,PARH-OSSM,profile1D quadratic,0.3520,0.9120,0.6020,488,profile1d_quadratic__ossm_kf,0.3450,0.9100,0.6400,488,parh_ossm,0.3420,0.9100,0.6610,525,full_dataset_with_baseline_coverage_limit,"PARH-OSSM reports the full final dataset; representative direct and OSSM-KF comparator rows are computable for Base_N=488, OSSM_KF_N=488, PARH_N=525 trials"

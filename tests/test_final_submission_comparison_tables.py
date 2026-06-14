@@ -1,11 +1,17 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE_DIR = ROOT / "paper" / "tables_ready"
 ANALYSIS_DIR = ROOT / "analysis"
+
+pytestmark = pytest.mark.skipif(
+    not TABLE_DIR.exists(),
+    reason="local paper table workspace is not part of the public code repository",
+)
 
 
 def _csv(path: Path) -> pd.DataFrame:

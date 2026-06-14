@@ -158,7 +158,7 @@ def _draw_dataset_rate_panel(ax, rate_df: pd.DataFrame):
         ax.text(0.5, 0.5, "dataset-rate EDA missing", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
         return
-    box = ax.boxplot(data, labels=labels, patch_artist=True, showfliers=False)
+    box = ax.boxplot(data, tick_labels=labels, patch_artist=True, showfliers=False)
     for patch, dataset in zip(box["boxes"], labels):
         patch.set_facecolor(colors.get(dataset, "#777777"))
         patch.set_alpha(0.72)
@@ -230,6 +230,173 @@ def _draw_dataset_claim_scope_panel(ax, summary_df: pd.DataFrame):
     )
 
 
+def _draw_main_scope_table(ax, dataset_summary: pd.DataFrame):
+    ax.set_axis_off()
+    ax.set_title("a  Evaluation scope", fontsize=10.8, weight="bold", loc="left", pad=6)
+    colors = {
+        "COHFACE": "#19766f",
+        "MAHNOB-HCI": "#19766f",
+        "V4V": "#d29532",
+        "SCAMPS": "#d29532",
+    }
+    rows = [
+        ("COHFACE", "Real waveform + rate", "Clean benchmark"),
+        ("MAHNOB-HCI", "Real waveform + rate", "Hard benchmark"),
+        ("V4V", "Real rate only", "Auxiliary scope check"),
+        ("SCAMPS", "Synthetic control", "Diagnostic context"),
+    ]
+    n_lookup = {}
+    if not dataset_summary.empty and "dataset" in dataset_summary:
+        for _, row in dataset_summary.iterrows():
+            n_lookup[str(row.get("dataset"))] = row.get("n_units")
+
+    x0 = 0.02
+    widths = [0.31, 0.36, 0.31]
+    xs = [x0]
+    for width in widths[:-1]:
+        xs.append(xs[-1] + width)
+    header_y = 0.82
+    row_h = 0.145
+    headers = ["Dataset", "Evidence", "Use in paper"]
+
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x0, header_y),
+            sum(widths),
+            0.09,
+            facecolor="#1f2933",
+            edgecolor="#1f2933",
+            transform=ax.transAxes,
+        )
+    )
+    for x, width, header in zip(xs, widths, headers):
+        ax.text(
+            x + 0.012,
+            header_y + 0.045,
+            header,
+            color="white",
+            fontsize=7.7,
+            weight="bold",
+            va="center",
+            transform=ax.transAxes,
+        )
+
+    for idx, (dataset, evidence, claim) in enumerate(rows):
+        y = header_y - (idx + 1) * row_h
+        color = colors[dataset]
+        face = "#f8fafc" if idx % 2 == 0 else "#ffffff"
+        ax.add_patch(
+            matplotlib.patches.Rectangle(
+                (x0, y),
+                sum(widths),
+                row_h,
+                facecolor=face,
+                edgecolor="#c8d0d8",
+                linewidth=0.8,
+                transform=ax.transAxes,
+            )
+        )
+        ax.add_patch(
+            matplotlib.patches.Rectangle(
+                (x0, y),
+                0.010,
+                row_h,
+                facecolor=color,
+                edgecolor=color,
+                transform=ax.transAxes,
+            )
+        )
+        n_value = n_lookup.get(dataset)
+        n_text = f"{int(n_value)}" if pd.notna(n_value) else "[verify]"
+        dataset_label = f"{dataset}\nN={n_text}"
+        values = [dataset_label, evidence, claim]
+        for x, width, value in zip(xs, widths, values):
+            ax.text(
+                x + 0.012,
+                y + row_h / 2,
+                value,
+                fontsize=7.5,
+                weight="bold" if value == dataset_label else "normal",
+                color=color if value == dataset_label else "#1f2933",
+                va="center",
+                ha="left",
+                linespacing=1.05,
+                transform=ax.transAxes,
+            )
+    ax.text(
+        x0,
+        0.095,
+        "Real waveform claims use COHFACE and MAHNOB-HCI only.",
+        fontsize=7.4,
+        color="#2a2f36",
+        transform=ax.transAxes,
+    )
+    key_y = 0.035
+    key_items = [("COHFACE", "#256d85"), ("MAHNOB-HCI", "#b55a30")]
+    key_x = x0
+    for label, color in key_items:
+        ax.add_patch(
+            matplotlib.patches.Rectangle(
+                (key_x, key_y),
+                0.026,
+                0.020,
+                facecolor=color,
+                edgecolor=color,
+                transform=ax.transAxes,
+            )
+        )
+        ax.text(
+            key_x + 0.034,
+            key_y + 0.010,
+            label,
+            fontsize=7.2,
+            va="center",
+            color="#2a2f36",
+            transform=ax.transAxes,
+        )
+        key_x += 0.22
+
+
+def _stage_summary(summary: pd.DataFrame, metric: str, stages: list[str]) -> list[float]:
+    values = []
+    for stage in stages:
+        vals = pd.to_numeric(summary.loc[summary["stage"].eq(stage), metric], errors="coerce").dropna()
+        values.append(float(vals.median()) if not vals.empty else np.nan)
+    return values
+
+
+def _draw_stage_bar_summary(ax, cohface_summary: pd.DataFrame, mahnob_summary: pd.DataFrame, metric: str, title: str, ylabel: str, higher_better: bool, panel_label: str):
+    stages = ["raw", "bandpass_only", "current_preprocess", "helper_preprocess"]
+    labels = ["Raw", "Band", "Current", "Helper"]
+    coh = _stage_summary(cohface_summary, metric, stages)
+    mah = _stage_summary(mahnob_summary, metric, stages)
+    x = np.arange(len(stages))
+    width = 0.36
+    bars1 = ax.bar(x - width / 2, coh, width, label="COHFACE", color="#256d85", alpha=0.86)
+    bars2 = ax.bar(x + width / 2, mah, width, label="MAHNOB-HCI", color="#b55a30", alpha=0.86)
+    ax.set_title(f"{panel_label}  {title}", fontsize=10.8, weight="bold", loc="left", pad=5)
+    ax.set_ylabel(ylabel, fontsize=8.2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=7.6)
+    ax.grid(axis="y", linestyle="--", alpha=0.22)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(axis="y", labelsize=7.5)
+    ax.set_ylim(0, 1.02)
+    for bars in (bars1, bars2):
+        for bar in bars:
+            height = bar.get_height()
+            if np.isfinite(height):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    min(height + 0.025, 0.98),
+                    f"{height:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=6.9,
+                    color="#1d252d",
+                )
+
+
 def main():
     args = _parse_args()
     datasets = [("COHFACE", pd.read_csv(args.summary_csv), pd.read_csv(args.delta_csv))]
@@ -248,31 +415,69 @@ def main():
     if args.dataset_rate_csv.exists() and args.dataset_summary_csv.exists():
         rate_df = pd.read_csv(args.dataset_rate_csv)
         summary_df = pd.read_csv(args.dataset_summary_csv)
-        fig = plt.figure(figsize=(12.8, 3.0 + 4.3 * len(datasets)), constrained_layout=True)
-        grid = fig.add_gridspec(len(datasets) + 1, len(metrics_main), height_ratios=[0.78] + [1.0] * len(datasets))
-        top_left = fig.add_subplot(grid[0, 0])
-        top_right = fig.add_subplot(grid[0, 1])
-        _draw_dataset_rate_panel(top_left, rate_df)
-        _draw_dataset_claim_scope_panel(top_right, summary_df)
-        axes = np.empty((len(datasets), len(metrics_main)), dtype=object)
-        for r in range(len(datasets)):
-            for c in range(len(metrics_main)):
-                axes[r, c] = fig.add_subplot(grid[r + 1, c])
+        if len(datasets) == 2:
+            fig = plt.figure(figsize=(7.25, 4.15), constrained_layout=True)
+            grid = fig.add_gridspec(
+                2,
+                2,
+                width_ratios=[1.38, 1.0],
+                height_ratios=[1.0, 1.0],
+                wspace=0.18,
+                hspace=0.28,
+            )
+            main_axes = [
+                fig.add_subplot(grid[:, 0]),
+                fig.add_subplot(grid[0, 1]),
+                fig.add_subplot(grid[1, 1]),
+            ]
+            _draw_main_scope_table(main_axes[0], summary_df)
+            _draw_stage_bar_summary(
+                main_axes[1],
+                datasets[0][1],
+                datasets[1][1],
+                "corr_wave_best_median",
+                "Waveform evidence",
+                "median correlation",
+                higher_better=True,
+                panel_label="b",
+            )
+            _draw_stage_bar_summary(
+                main_axes[2],
+                datasets[0][1],
+                datasets[1][1],
+                "highfreq_energy_ratio_median",
+                "High-frequency burden",
+                "median energy ratio",
+                higher_better=False,
+                panel_label="c",
+            )
+            save_figure(fig, args.out_main)
+        else:
+            fig = plt.figure(figsize=(12.8, 3.0 + 4.3 * len(datasets)), constrained_layout=True)
+            grid = fig.add_gridspec(len(datasets) + 1, len(metrics_main), height_ratios=[0.78] + [1.0] * len(datasets))
+            top_left = fig.add_subplot(grid[0, 0])
+            top_right = fig.add_subplot(grid[0, 1])
+            axes = np.empty((len(datasets), len(metrics_main)), dtype=object)
+            for r in range(len(datasets)):
+                for c in range(len(metrics_main)):
+                    axes[r, c] = fig.add_subplot(grid[r + 1, c])
+            _draw_dataset_rate_panel(top_left, rate_df)
+            _draw_dataset_claim_scope_panel(top_right, summary_df)
     else:
         fig, axes = plt.subplots(len(datasets), len(metrics_main), figsize=(12.4, 4.8 * len(datasets)), constrained_layout=True)
         if len(datasets) == 1:
             axes = np.expand_dims(axes, axis=0)
-    for r, (dataset_label, summary, _delta) in enumerate(datasets):
-        for c, (metric, title, cmap, vmin, vmax, value_fmt) in enumerate(metrics_main):
-            ax = axes[r, c]
-            arr = _pivot_metric(summary, metric)
-            panel_title = title if len(datasets) == 1 else f"{dataset_label}: {title}"
-            im = _draw_heatmap(ax, arr, panel_title, cmap, vmin=vmin, vmax=vmax, value_fmt=value_fmt)
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
-            if c > 0:
-                ax.set_yticklabels([])
-    fig.suptitle("Dataset and observation-class EDA: claim scope, label regime, and nuisance energy", fontsize=13)
-    save_figure(fig, args.out_main)
+        for r, (dataset_label, summary, _delta) in enumerate(datasets):
+            for c, (metric, title, cmap, vmin, vmax, value_fmt) in enumerate(metrics_main):
+                ax = axes[r, c]
+                arr = _pivot_metric(summary, metric)
+                panel_title = title if len(datasets) == 1 else f"{dataset_label}: {title}"
+                im = _draw_heatmap(ax, arr, panel_title, cmap, vmin=vmin, vmax=vmax, value_fmt=value_fmt)
+                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
+                if c > 0:
+                    ax.set_yticklabels([])
+        fig.suptitle("Dataset and observation-class EDA: claim scope, label regime, and nuisance energy", fontsize=13)
+        save_figure(fig, args.out_main)
 
     metrics_delta = [
         ("corr_wave_best_delta_median", "Waveform Corr Δ vs Raw", "RdYlGn", -0.4, 0.4, "{:+.2f}"),

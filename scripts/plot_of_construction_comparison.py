@@ -52,6 +52,35 @@ def _extract_rows(t3: pd.DataFrame, t4: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _extract_rows_from_long(comparison: pd.DataFrame) -> pd.DataFrame:
+    variant_map = {'Base': 'Base', 'OSSM-KF': 'KFstd', 'class-local PARH': 'PARH', 'PARH': 'PARH'}
+    comparison = comparison.copy()
+    comparison['variant_canonical'] = comparison['variant'].map(variant_map)
+    sub = comparison[
+        (comparison['dataset'].astype(str) == 'COHFACE')
+        & (comparison['observation_class'].isin(FAMILIES))
+        & (comparison['variant_canonical'].isin(VARIANTS))
+    ].copy()
+    rows = []
+    for family in FAMILIES:
+        for variant in VARIANTS:
+            vdf = sub[(sub['observation_class'] == family) & (sub['variant_canonical'] == variant)]
+            if vdf.empty:
+                continue
+            row = vdf.iloc[0]
+            rows.append(
+                {
+                    'family': family,
+                    'variant': variant,
+                    'rate_mae': float(row['rate_MAE']),
+                    'rate_r': float(row['rate_PearsonR']),
+                    'waveform_ccc': float(row['waveform_CCC']),
+                    'waveform_dtw': float(row['waveform_DTW']),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def _plot_placeholder(out_pdf: Path, message: str) -> pd.DataFrame:
     set_manuscript_style('paper')
     fig, ax = plt.subplots(figsize=(8.8, 3.8), constrained_layout=True)
@@ -62,7 +91,12 @@ def _plot_placeholder(out_pdf: Path, message: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def plot_comparison(t3_csv: Path, t4_csv: Path, out_pdf: Path) -> pd.DataFrame:
+def plot_comparison(t3_csv: Path, t4_csv: Path, out_pdf: Path, comparison_csv: Path | None = None) -> pd.DataFrame:
+    if comparison_csv is not None and comparison_csv.exists():
+        data = _extract_rows_from_long(pd.read_csv(comparison_csv))
+        if not data.empty and set(data['family']) == set(FAMILIES):
+            return _plot_data(data, out_pdf)
+
     t3 = pd.read_csv(t3_csv)
     t4 = pd.read_csv(t4_csv)
     t3 = t3[t3['dataset'] == 'COHFACE'].copy()
@@ -70,9 +104,12 @@ def plot_comparison(t3_csv: Path, t4_csv: Path, out_pdf: Path) -> pd.DataFrame:
     data = _extract_rows(t3, t4)
     if data.empty or set(data['family']) != set(FAMILIES):
         return _plot_placeholder(out_pdf, 'Current table-ready CSVs do not contain both raw OF and OF_bridge families.')
+    return _plot_data(data, out_pdf)
 
+
+def _plot_data(data: pd.DataFrame, out_pdf: Path) -> pd.DataFrame:
     set_manuscript_style('paper')
-    fig, axes = plt.subplots(2, 2, figsize=(12.4, 7.8), constrained_layout=True)
+    fig, axes = plt.subplots(2, 2, figsize=(8.4, 7.4), constrained_layout=True)
     metrics = [
         ('rate_mae', 'Rate MAE', True),
         ('rate_r', 'Rate Pearson r', False),
@@ -108,8 +145,8 @@ def plot_comparison(t3_csv: Path, t4_csv: Path, out_pdf: Path) -> pd.DataFrame:
         ax.set_title(title + suffix, loc='left')
         ax.tick_params(axis='x', pad=8)
 
-    axes[0, 0].legend(frameon=False, ncol=3, loc='upper center', bbox_to_anchor=(1.08, 1.24))
-    fig.suptitle('Raw OF vs OF bridge observation construction', y=1.02)
+    axes[0, 0].legend(frameon=False, ncol=3, loc='upper center', bbox_to_anchor=(1.08, 1.18))
+    fig.suptitle('Raw OF vs OF bridge observation construction', y=1.01)
     save_figure(fig, out_pdf)
     return data
 
@@ -118,13 +155,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Plot raw OF vs OF_bridge comparison.')
     parser.add_argument('--t3-csv', type=Path, default=ROOT / 'paper' / 'tables_ready' / 'T3_rate_main.csv')
     parser.add_argument('--t4-csv', type=Path, default=ROOT / 'paper' / 'tables_ready' / 'T4_waveform_main.csv')
+    parser.add_argument('--comparison-csv', type=Path, default=ROOT / 'paper' / 'tables_ready' / 'S_T_final_observation_class_comparison.csv')
     parser.add_argument('--out-pdf', type=Path, default=ROOT / 'paper' / 'figures' / 'S_F6_of_construction_comparison.pdf')
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    data = plot_comparison(args.t3_csv, args.t4_csv, args.out_pdf)
+    data = plot_comparison(args.t3_csv, args.t4_csv, args.out_pdf, comparison_csv=args.comparison_csv)
     print(f'Saved: {args.out_pdf}')
     if data.empty:
         print(json.dumps({'status': 'placeholder', 'out': str(args.out_pdf)}, indent=2))

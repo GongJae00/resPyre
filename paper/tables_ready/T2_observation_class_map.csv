@@ -1,9 +1,0 @@
-observation_class,construction,domain,primary_information,secondary_information,nuisance_risk,current_parh_role,current_strength,PARH_rate_MAE,PARH_rate_R,PARH_waveform_CCC,PARH_waveform_DTW,Base_rate_MAE,Base_waveform_CCC,rate_gap_vs_base,waveform_gap_vs_base
-OF,raw vertical optical-flow surrogate,velocity,oscillatory motion,local phase frequency,medium,helper-heavy rate evidence,rate-primary,0.515,0.735,0.789,0.403,0.290,0.711,0.225,0.078
-OF_bridge,OF-derived displacement-compatible bridge,displacement,bridged oscillatory displacement,rate plus waveform,medium,rate-oriented constructed cue,rate-primary,0.270,0.850,0.735,0.430,0.245,0.685,0.025,0.050
-DoF,thresholded frame-difference count,energy,thresholded motion energy,burst sensitivity,high,nuisance-limited auxiliary cue,nuisance-limited,2.195,0.375,0.584,0.468,2.400,0.438,-0.205,0.147
-DoF_bridge,signed DoF motion-centroid trajectory bridge,signed_motion,coarse signed motion trajectory,nuisance reduced motion energy,high,experimental constructed DoF cue,nuisance-limited,1.835,0.360,0.650,0.449,1.990,0.560,-0.155,0.090
-P1D_lin,linear 1D profile shift surrogate,displacement,fundamental displacement,smooth shift surrogate,medium,conservative displacement class,mixed,0.485,0.730,0.706,0.431,0.335,0.578,0.150,0.128
-P1D_quad,quadratic 1D profile shift surrogate,displacement,harmonic morphology,inhale exhale asymmetry,low,waveform-primary harmonic class,waveform-primary,0.300,0.890,0.849,0.346,0.195,0.811,0.105,0.038
-P1D_cub,cubic 1D profile shift surrogate,displacement,harmonic morphology,inhale exhale asymmetry,low,waveform-primary harmonic class,waveform-primary,0.300,0.870,0.846,0.349,0.220,0.806,0.080,0.041
-P1D_cons,weighted consensus of linear/quadratic/cubic profile surrogates,displacement,consensus displacement morphology,cross interp stability,low,experimental constructed P1D class,waveform-primary,0.285,0.830,0.825,0.369,0.220,0.786,0.065,0.039

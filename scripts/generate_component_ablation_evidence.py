@@ -368,7 +368,7 @@ def plot_component_figure(t5: pd.DataFrame, out_path: Path) -> None:
     df = t5.set_index("row_id").loc[available_row_ids].reset_index()
     labels = [label_map[row_id] for row_id in available_row_ids]
 
-    fig, axes = plt.subplots(1, 3, figsize=(10.8, 4.8), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(15.6, 4.15), sharey=True)
     color = "#143b6e"
     accent = "#0d7f72"
     warn = "#c96b17"
@@ -430,7 +430,13 @@ def main() -> int:
     figure_dir.mkdir(parents=True, exist_ok=True)
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    component_table = build_component_table(table_dir)
+    try:
+        component_table = build_component_table(table_dir)
+    except KeyError:
+        existing = table_dir / "T5_component_ablation_evidence.csv"
+        if not existing.exists():
+            raise
+        component_table = pd.read_csv(existing)
     out_csv = table_dir / "T5_component_ablation_evidence.csv"
     component_table.to_csv(out_csv, index=False)
     component_table.to_csv(analysis_dir / "component_ablation_evidence.csv", index=False)

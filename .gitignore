@@ -54,22 +54,31 @@ paper/*.synctex.gz
 !paper/main.bbl
 
 # --- Future generated-paper boundary ---
+paper/
 paper/generated/
 paper/tmp/
 analysis/tmp/
 submission_package/
+submission_support/
+
+# --- Local manuscript/review notes ---
+analysis/final_manual_review_checklist.md
+analysis/final_operating_point_research_feedback.md
+analysis/final_reviewer_risk_response.md
+analysis/final_scientific_lessons.md
+analysis/revision_response_summary.md
 
 # --- Results (large data: PKL, NPZ, plots) ---
 results/
+results_*.zip
 **/obs_*.npy
 **/obs_roi_stats_v1.npz
 
 # --- Local dataset links / raw data ---
-dataset/COHFACE
-dataset/MAHNOB
-dataset/V4V
-dataset/SCAMPS
-dataset/BP4Ddef
+dataset/*
+!dataset/
+!dataset/README_dataset.md
+!dataset/*.tsv
 
 # --- Logs ---
 logs/
