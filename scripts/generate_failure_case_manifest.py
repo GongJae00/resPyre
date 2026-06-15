@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a compact persistent manifest for main-paper failure cases."""
+"""Generate a compact persistent manifest for main failure cases."""
 
 import argparse
 from pathlib import Path
@@ -54,7 +54,7 @@ def build_manifest(
 
 def parse_args():
     root = Path(__file__).resolve().parent.parent
-    parser = argparse.ArgumentParser(description='Generate main-paper failure-case manifest.')
+    parser = argparse.ArgumentParser(description='Generate main failure-case manifest.')
     parser.add_argument(
         '--residual-manifest',
         type=Path,

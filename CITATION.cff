@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use this software or the accompanying paper artifacts, please cite the paper and the archived software release."
+message: "If you use this software, please cite the paper and archived software release."
 title: "ResPyre: PARH-OSSM framework for camera-derived respiratory motion"
 type: software
 authors:
@@ -12,9 +12,9 @@ authors:
 repository-code: "https://github.com/GongJae00/resPyre"
 url: "https://github.com/GongJae00/resPyre"
 license: GPL-3.0-only
-version: "1.0.0-paper-submission"
+version: "1.0.0"
 date-released: "2026-05-21"
-abstract: "ResPyre provides the PARH-OSSM implementation, fixed camera-motion observation operators, paper-facing evaluation scripts, figure/table generation scripts, and verification audits used for the physiology-aligned state-space decomposition study of camera-derived respiratory motion."
+abstract: "ResPyre provides the PARH-OSSM implementation, fixed camera-motion observation operators, and evaluation scripts used for the physiology-aligned state-space decomposition study of camera-derived respiratory motion."
 keywords:
   - contactless respiration
   - camera-derived motion

@@ -257,7 +257,7 @@ def _draw_main_scope_table(ax, dataset_summary: pd.DataFrame):
         xs.append(xs[-1] + width)
     header_y = 0.82
     row_h = 0.145
-    headers = ["Dataset", "Evidence", "Use in paper"]
+    headers = ["Dataset", "Evidence", "Use in release"]
 
     ax.add_patch(
         matplotlib.patches.Rectangle(

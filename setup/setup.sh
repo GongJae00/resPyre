@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Minimal setup for the paper build (motion + oscillator heads only).
+# Minimal setup for the motion and oscillator stack.
 # Creates a conda env and installs requirements via conda+pip.
 
 ENV_NAME="resPyre"

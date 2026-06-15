@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate formal paired tests for the paper headline comparisons.
+"""Generate formal paired tests for the headline comparisons.
 
 The existing final statistical-comparison table reports paired median deltas.
 This script adds inferential statistics for the same common-subset comparisons:

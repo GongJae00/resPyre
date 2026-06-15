@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate dataset-level RR distribution EDA for the paper package.
+"""Generate dataset-level RR distribution EDA for the reproduction package.
 
 This script deliberately separates four dataset roles:
 
@@ -225,7 +225,7 @@ def _summarize(rate_df: pd.DataFrame) -> pd.DataFrame:
             {
                 "dataset": dataset,
                 "role": role,
-                "paper_use": use,
+                "release_use": use,
                 "n_units": int(len(sub)),
                 "n_subjects": n_subjects,
                 "rate_source": "; ".join(sorted(set(sub["rate_source"].astype(str)))),
@@ -254,7 +254,7 @@ def _write_md(summary: pd.DataFrame, out_path: Path) -> None:
         "",
         "## Summary",
         "",
-        "| dataset | role | N | median RR bpm | IQR | duration median | paper use | boundary |",
+        "| dataset | role | N | median RR bpm | IQR | duration median | release use | boundary |",
         "| --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for _, row in summary.iterrows():
@@ -263,7 +263,7 @@ def _write_md(summary: pd.DataFrame, out_path: Path) -> None:
         lines.append(
             f"| {row['dataset']} | {row['role']} | {int(row['n_units'])} | "
             f"{float(row['rate_median_bpm']):.2f} | {float(row['rate_iqr_bpm']):.2f} | "
-            f"{dur_s} | {row['paper_use']} | {row['claim_boundary']} |"
+            f"{dur_s} | {row['release_use']} | {row['claim_boundary']} |"
         )
     lines.extend(
         [
@@ -351,8 +351,8 @@ def _plot(rate_df: pd.DataFrame, summary: pd.DataFrame, out_path: Path) -> None:
     capability_cols = [
         ("real", lambda r: r["real_or_synthetic"] == "real"),
         ("waveform GT", lambda r: bool(r["waveform_gt_available"])),
-        ("headline", lambda r: "benchmark" in str(r["paper_use"])),
-        ("rate-only ext.", lambda r: "rate-only" in str(r["paper_use"])),
+        ("headline", lambda r: "benchmark" in str(r["release_use"])),
+        ("rate-only ext.", lambda r: "rate-only" in str(r["release_use"])),
         ("synthetic", lambda r: r["real_or_synthetic"] == "synthetic"),
     ]
     arr = np.zeros((len(order), len(capability_cols)), dtype=float)

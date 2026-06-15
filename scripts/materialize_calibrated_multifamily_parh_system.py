@@ -99,7 +99,7 @@ DERIVED_PARENT_GROUPS = {
     "G_OF_bridge": "G_OF",
     "G_DoF_bridge": "G_DoF",
 }
-PAPER_CANDIDATE_RATE_POSTERIOR_OUTPUTS = {"final", "calibrated_mean"}
+RELEASE_RATE_POSTERIOR_OUTPUTS = {"final", "calibrated_mean"}
 DIAGNOSTIC_RATE_POSTERIOR_OUTPUTS = {
     "mode",
     "mean",
@@ -116,7 +116,7 @@ DIAGNOSTIC_RATE_POSTERIOR_OUTPUTS = {
 
 def _normalize_rate_posterior_output_source(source: str) -> str:
     source = str(source or "off").strip().lower()
-    if source in {"final", "paper", "paper_candidate", "bounded"}:
+    if source in {"final", "bounded"}:
         return "calibrated_mean"
     return source
 
@@ -132,10 +132,10 @@ def _rate_posterior_output_role(source: str) -> str:
     source = str(source or "off").strip().lower()
     if source == "off":
         return "native_state_update_only"
-    if source in PAPER_CANDIDATE_RATE_POSTERIOR_OUTPUTS:
-        return "paper_candidate_bounded_readout"
+    if source in RELEASE_RATE_POSTERIOR_OUTPUTS:
+        return "release_bounded_readout"
     if source in DIAGNOSTIC_RATE_POSTERIOR_OUTPUTS:
-        return "diagnostic_or_legacy_not_paper_facing"
+        return "diagnostic_or_compatibility"
     return "unknown"
 
 
@@ -354,11 +354,11 @@ def parse_args() -> argparse.Namespace:
         default="final",
         help=(
             "Select how the candidate-rate posterior affects the decoupled "
-            "z_osc rate readout. Use 'final' for the paper-facing bounded "
+            "z_osc rate readout. Use 'final' for the release bounded "
             "readout, or 'off' to keep posterior evidence as state-update/"
             "diagnostic context without overriding the readout. Legacy "
             "diagnostic names are accepted for old analysis scripts but are "
-            "not paper-facing."
+            "not release."
         ),
     )
     p.add_argument("--skip-eval", action="store_true")
@@ -690,7 +690,7 @@ def _state_role_prior_runtime(
 ) -> Dict[str, List[List[float]]]:
     """Build per-channel, per-time state-role reliability matrices.
 
-    Unlike the legacy channel context prior, these matrices keep the reliability
+    Unlike the older channel context prior, these matrices keep the reliability
     of the fundamental oscillator, harmonic scaffold, baseline, and residual as
     separate signals. PARH can then combine them using the actual observation
     row `H` instead of collapsing a family into one scalar winner.
@@ -2984,7 +2984,7 @@ def _decoupled_rate_readout_runtime(
             "calibration": "none",
             "abstention_guard": "no_supported_readout_windows",
             "coverage": 0.0,
-            "paper_candidate_hard_abstention": True,
+            "release_hard_abstention": True,
         }
     readout_track = np.full(n, np.nan, dtype=np.float64)
     confidence_track = np.zeros(n, dtype=np.float64)
@@ -4485,14 +4485,14 @@ def _copy_payload_skeleton(payload: dict, estimate: dict, method_name: str) -> d
     return out
 
 
-def _is_strict_paper_candidate_cfg(cfg: Dict[str, object]) -> bool:
+def _is_strict_release_cfg(cfg: Dict[str, object]) -> bool:
     return bool(cfg.get("enable_observation_law", False)) and bool(cfg.get("enable_rate_posterior", False)) and (
         str(cfg.get("rate_posterior_output_public_source", cfg.get("rate_posterior_output_source", "off"))).strip().lower()
         == "final"
     )
 
 
-def _require_paper_candidate_activation(
+def _require_locked_activation(
     *,
     video: str,
     cfg: Dict[str, object],
@@ -4503,13 +4503,13 @@ def _require_paper_candidate_activation(
     target_observability_runtime: Optional[Dict[str, object]],
     target_observability_meta: Dict[str, object],
 ) -> None:
-    """Fail paper-candidate runs when required adaptive evidence is inactive.
+    """Fail locked runs when required adaptive evidence is inactive.
 
     The final path must not silently degrade into a trial-level prior or a
     plain multichannel filter.  Diagnostic/ablation runs can still disable
-    these modules by not requesting the paper-candidate contract.
+    these modules by not requesting the locked contract.
     """
-    if not _is_strict_paper_candidate_cfg(cfg):
+    if not _is_strict_release_cfg(cfg):
         return
     missing: List[str] = []
     if str(cfg.get("parh_input", "")) != "multichannel":
@@ -4529,9 +4529,9 @@ def _require_paper_candidate_activation(
         # trials can have no GT-free readout windows.  That is a valid failure
         # mode to report, not a reason to silently drop the trial from the
         # full artifact package.  All other inactive-readout reasons still
-        # violate the paper-candidate contract.
+        # violate the locked contract.
         if reason == "no_supported_readout_windows":
-            output_rate_meta["paper_candidate_hard_abstention"] = True
+            output_rate_meta["release_hard_abstention"] = True
             output_rate_meta.setdefault("abstention_guard", reason)
             output_rate_meta.setdefault("source", "abstained_no_supported_readout_windows")
             output_rate_meta.setdefault("coverage", 0.0)
@@ -4543,7 +4543,7 @@ def _require_paper_candidate_activation(
         missing.append(f"target observability runtime inactive ({target_observability_meta.get('reason', 'unknown')})")
     if missing:
         raise RuntimeError(
-            f"paper-candidate activation contract failed for {video}: "
+            f"locked activation contract failed for {video}: "
             + "; ".join(str(x) for x in missing)
         )
 
@@ -4889,7 +4889,7 @@ def _process_file(args: Tuple[str, str, Dict[str, object]]) -> Tuple[str, List[D
                 fps=fps,
                 enable_signal_sqi_observability=bool(cfg.get("enable_signal_sqi_observability", False)),
             )
-        _require_paper_candidate_activation(
+        _require_locked_activation(
             video=path.stem,
             cfg=cfg,
             state_window_rows=state_window_rows,
@@ -4903,7 +4903,7 @@ def _process_file(args: Tuple[str, str, Dict[str, object]]) -> Tuple[str, List[D
         if bool(cfg.get("enable_observation_law", False)):
             # The final observation-law path is structural, not an
             # environment-dependent experiment switch. Force the required
-            # PARH modules on after construction so locked paper/runtime
+            # PARH modules on after construction so locked runtime
             # profiles cannot silently disable the multichannel law.
             head.ENABLE_DYNAMIC_MIXTURE = True
             head.ENABLE_RATE_OBSERVABILITY_MIXTURE = True
@@ -4917,7 +4917,7 @@ def _process_file(args: Tuple[str, str, Dict[str, object]]) -> Tuple[str, List[D
             "base_method": str(cfg.get("parh_base_method", "of_disp_bridge")),
             "target_calibrated_multifamily": True,
             "observation_law_enabled": bool(cfg.get("enable_observation_law", False)),
-            "observation_law_design_lock": "paper/main.tex; paper/supplementary_information.tex",
+            "observation_law_design_lock": "PARH-OSSM release configuration",
             "calibration_space": "bandpass_z",
             "source_key": source_key,
             "calibration": cal_meta,
@@ -5023,10 +5023,10 @@ def _process_file(args: Tuple[str, str, Dict[str, object]]) -> Tuple[str, List[D
                     "video": path.stem,
                     "method": method_name,
                     "enabled": bool(output_rate_meta.get("enabled", False)),
-                    "readout_abstained": bool(output_rate_meta.get("paper_candidate_hard_abstention", False)),
+                    "readout_abstained": bool(output_rate_meta.get("release_hard_abstention", False)),
                     "readout_inactive_reason": str(output_rate_meta.get("reason", "")),
-                    "paper_candidate_hard_abstention": bool(
-                        output_rate_meta.get("paper_candidate_hard_abstention", False)
+                    "release_hard_abstention": bool(
+                        output_rate_meta.get("release_hard_abstention", False)
                     ),
                     "source": str(output_rate_meta.get("source", "")),
                     "calibration": str(output_rate_meta.get("calibration", "")),
@@ -5246,7 +5246,7 @@ def main() -> int:
     if rate_output_role == "unknown":
         raise SystemExit(
             f"unknown --rate-posterior-output-source={args.rate_posterior_output_source!r}; "
-            "use 'final' for the paper-facing path or 'off' to disable the posterior readout"
+            "use 'final' for the release path or 'off' to disable the posterior readout"
         )
     data_dir = Path(args.data_dir).expanduser().absolute()
     out_run = Path(args.out_run).expanduser().absolute()
@@ -5338,8 +5338,8 @@ def main() -> int:
         "data_dir": str(data_dir),
         "out_run": str(out_run),
         "n_files": len(files),
-        "paper_candidate_status": (
-            "paper_candidate"
+        "release_status": (
+            "release_candidate"
             if (
                 bool(args.enable_observation_law)
                 and bool(args.enable_rate_posterior)
@@ -5365,12 +5365,12 @@ def main() -> int:
         json.dumps(manifest, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    if bool(args.enable_rate_posterior) and cfg["rate_posterior_output_role"] == "diagnostic_or_legacy_not_paper_facing":
+    if bool(args.enable_rate_posterior) and cfg["rate_posterior_output_role"] == "diagnostic_or_compatibility":
         print(
             "[materialize] WARNING: --rate-posterior-output-source="
-            f"{rate_output_public} is marked diagnostic/legacy, "
-            "not paper-facing. Use final for the current bounded "
-            "paper-candidate readout."
+            f"{rate_output_public} is marked diagnostic/compatibility, "
+            "not release. Use final for the current bounded "
+            "locked readout."
         )
 
     jobs = _worker_count(args.jobs)
@@ -5438,8 +5438,8 @@ def main() -> int:
     if errors:
         errors_path.write_text("\n".join(errors) + "\n", encoding="utf-8")
         print(f"> Materialization completed with {len(errors)} skipped/error trials")
-        if _is_strict_paper_candidate_cfg(cfg):
-            print("> Paper-candidate activation contract failed; refusing to continue to evaluation.")
+        if _is_strict_release_cfg(cfg):
+            print("> Locked activation contract failed; refusing to continue to evaluation.")
             return 1
     else:
         if errors_path.exists():

@@ -277,7 +277,7 @@ def _coerce_roi_stats_frame(raw: Mapping[str, Any]) -> Dict[str, float]:
 
 def compute_roi_stats_time_series(rois: Optional[list]) -> Tuple[List[Dict[str, float]], float, float, float]:
     """
-    Compute per-frame ROI statistics for quality estimation and legacy scalars.
+    Compute per-frame ROI statistics for quality estimation and compatibility scalars.
 
     Returns:
         roi_stats_t: List of dicts with keys

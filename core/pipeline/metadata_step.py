@@ -372,9 +372,9 @@ def _default_artifacts(run_dir: Path) -> Dict[str, str]:
         if resolver_diag.exists():
             artifacts['frame_log_resolver_diag'] = str(resolver_diag.resolve())
         # Legacy single-file name
-        legacy_pkl = metrics_dir / 'metrics.pkl'
-        if legacy_pkl.exists():
-            artifacts['metrics_pickle_legacy'] = str(legacy_pkl.resolve())
+        compat_pkl = metrics_dir / 'metrics.pkl'
+        if compat_pkl.exists():
+            artifacts['metrics_pickle_compat'] = str(compat_pkl.resolve())
         eval_settings = metrics_dir / 'eval_settings.json'
         if eval_settings.exists():
             artifacts['eval_settings'] = str(eval_settings.resolve())

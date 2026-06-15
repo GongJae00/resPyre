@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a paper-ready observation-class semantics table."""
+"""Generate a table-ready observation-class semantics table."""
 
 from __future__ import annotations
 

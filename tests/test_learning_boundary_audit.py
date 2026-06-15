@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 
-def test_learning_boundary_audit_generates_paper_facing_contract(tmp_path: Path) -> None:
+def test_learning_boundary_audit_generates_release_contract(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     out_md = tmp_path / "learning_boundary.md"
     out_csv = tmp_path / "learning_boundary.csv"

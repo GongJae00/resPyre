@@ -19,7 +19,7 @@ resPyre/
 │   │       └── Ground_truth/Physiology/<trial>.txt
 │   ├── SCAMPS/
 │   │   └── scamps_videos/P*.mat
-│   └── BP4Ddef/              # optional legacy BP4D layout
+│   └── BP4Ddef/              # optional compatibility layout
 └── main.py
 ```
 
@@ -32,7 +32,7 @@ resPyre/
   morphology, CCC, DTW, strict waveform, or cycle-shape claims.
 - `SCAMPS`: synthetic diagnostic/control evidence only. Do not mix it with
   real-data headline performance claims.
-- `BP4Ddef`: optional legacy layout used by older code paths.
+- `BP4Ddef`: optional compatibility layout used by older code paths.
 
 ## Local Symlinks
 
@@ -45,8 +45,8 @@ ln -s /path/to/V4V dataset/V4V
 ln -s /path/to/SCAMPS dataset/SCAMPS
 ```
 
-The paper-facing helper can also create the expected local links when its
-default paths match your machine:
+The dataset helper can also create the expected local links when its default
+paths match your machine:
 
 ```bash
 python scripts/build_rr_experiment_assets.py --create-symlinks

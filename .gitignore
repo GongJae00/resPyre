@@ -53,20 +53,19 @@ paper/*.synctex.gz
 *.toc
 !paper/main.bbl
 
-# --- Future generated-paper boundary ---
+# --- Local manuscript workspace ---
 paper/
 paper/generated/
 paper/tmp/
-analysis/tmp/
 submission_package/
 submission_support/
 
-# --- Local manuscript/review notes ---
-analysis/final_manual_review_checklist.md
-analysis/final_operating_point_research_feedback.md
-analysis/final_reviewer_risk_response.md
-analysis/final_scientific_lessons.md
-analysis/revision_response_summary.md
+# --- Generated analysis artifacts ---
+analysis/*
+!analysis/
+!analysis/README.md
+!analysis/final_priors/
+!analysis/final_priors/README.md
 
 # --- Results (large data: PKL, NPZ, plots) ---
 results/
@@ -94,10 +93,6 @@ paper/figures/*_draft_source.png
 # --- Prompt scratch files ---
 goal.md
 scripts/legacy/
-analysis/legacy_*/
-analysis/reconstructed_trial_priors/
-analysis/final_priors/*_edges.csv
-analysis/final_resource_profile.json
 prompt*.md
 feedbackprompt*.md
 tmp_*.sh

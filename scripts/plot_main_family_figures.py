@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate main-paper observation-class summary figures from table-ready CSVs."""
+"""Generate main observation-class summary figures from table-ready CSVs."""
 
 import argparse
 import sys
@@ -345,7 +345,7 @@ def _allbase_ladder_from_master(master_df: pd.DataFrame) -> pd.DataFrame:
 def plot_allbase_fusion_ladder(master_df: pd.DataFrame, out_path: Path):
     """Plot all eight fixed observation operators against comparator and PARH.
 
-    This is the paper-facing mechanism ladder. It keeps the main text honest:
+    This is the release mechanism ladder. It keeps the main text honest:
     the fixed Base bank is not collapsed to a single representative when the
     figure's purpose is to show the observation-bank topology and hard-regime
     boundary.
@@ -414,7 +414,7 @@ def plot_allbase_fusion_ladder(master_df: pd.DataFrame, out_path: Path):
 
 
 def plot_fusion_ladder(ladder_df: pd.DataFrame, out_path: Path):
-    """Plot a dense paper-facing ladder from fixed operators to PARH-OSSM.
+    """Plot a dense release ladder from fixed operators to PARH-OSSM.
 
     This replaces sparse mechanism-only plots in the main text. It uses the
     final same-trial comparison layer, so every point has the same provenance

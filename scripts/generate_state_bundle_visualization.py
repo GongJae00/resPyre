@@ -131,7 +131,7 @@ def main():
         '- global observation row',
         '- bootstrap latent mix matrix',
         '',
-        'This figure is for mechanistic debugging and paper-facing explanatory follow-up; it is not a performance figure.',
+        'This figure is for mechanistic debugging and release explanatory follow-up; it is not a performance figure.',
         '',
     ]
     Path(args.out_md).write_text('\n'.join(lines))

@@ -3,7 +3,7 @@
 
 The project intentionally mixes fixed physiological structure, target-side
 self-calibration, and a small amount of source-supervised reliability fitting.
-This audit makes that boundary explicit so paper-facing claims do not become
+This audit makes that boundary explicit so release claims do not become
 ambiguous hyperparameter search or hidden target-GT selection.
 """
 
@@ -54,7 +54,7 @@ ITEMS: tuple[BoundaryItem, ...] = (
         boundary="Fixed signal-processing views used as evidence",
         target_gt="Forbidden",
         promoted_status="Keep with locked definitions",
-        evidence="components/models/heads/parh_ossm.py; paper/figures/F2_dataset_and_observation_regime.pdf",
+        evidence="components/models/heads/parh_ossm.py; scripts/plot_observation_eda.py",
         rationale=(
             "Views expose different nuisances and supports. They should inform reliability, not act as "
             "separate target-GT-selected models."
@@ -67,7 +67,7 @@ ITEMS: tuple[BoundaryItem, ...] = (
         boundary="Fixed physiology-aligned state structure",
         target_gt="Forbidden",
         promoted_status="Keep",
-        evidence="components/models/heads/parh_ossm.py; paper/main.tex",
+        evidence="components/models/heads/parh_ossm.py; execute.md",
         rationale=(
             "The oscillator/harmonic/baseline/residual split is the model thesis: timing and morphology are "
             "coupled through physiology but not forced into one waveform objective."
@@ -105,7 +105,7 @@ ITEMS: tuple[BoundaryItem, ...] = (
         component="Windowed target reliability graph",
         boundary="Target-computable time-local reliability prior for the observation law",
         target_gt="Forbidden",
-        promoted_status="Required in final paper path",
+        promoted_status="Required in release path",
         evidence="scripts/extract_target_reliability_graph_features.py; tests/test_target_reliability_graph_features.py; execute.md",
         rationale=(
             "The final path needs local, target-computable evidence about which observation family/view is "
@@ -114,19 +114,19 @@ ITEMS: tuple[BoundaryItem, ...] = (
         ),
         current_gap=(
             "Full validation has not been rerun after the closure patch, so the final priors must be "
-            "regenerated before the paper package is complete."
+            "regenerated before the reproduction package is complete."
         ),
         next_action=(
             "Regenerate `analysis/final_priors/*_windowed.csv` from `execute.md` before full materialization; "
-            "the paper-candidate activation audit must show the runtime prior was applied."
+            "the locked activation audit must show the runtime prior was applied."
         ),
     ),
     BoundaryItem(
         component="Candidate-rate posterior final bounded readout",
         boundary="Deterministic target-computable timing evidence readout with preservation guards",
         target_gt="Forbidden",
-        promoted_status="Final paper-candidate readout when `--rate-posterior-output-source final` is used",
-        evidence="scripts/materialize_calibrated_multifamily_parh_system.py; tests/test_rate_posterior_calibrated_readout.py; tests/test_paper_candidate_activation_contract.py; execute.md",
+        promoted_status="Release-candidate readout when `--rate-posterior-output-source final` is used",
+        evidence="scripts/materialize_calibrated_multifamily_parh_system.py; tests/test_rate_posterior_calibrated_readout.py; tests/test_locked_activation_contract.py; execute.md",
         rationale=(
             "The posterior may adjust z_osc only when candidate evidence is specific and target-observable; "
             "otherwise it must preserve the native state-space readout. This keeps OSSM-KF from becoming "
@@ -165,7 +165,7 @@ ITEMS: tuple[BoundaryItem, ...] = (
         boundary="Deep/black-box learned controls",
         target_gt="Subject-split only; not target-GT selection",
         promoted_status="Not current promoted path",
-        evidence="paper/main.tex; paper/supplementary_information.tex",
+        evidence="components/models/heads/parh_ossm.py; execute.md",
         rationale=(
             "They are useful controls showing what learned capacity can do, but they weaken interpretability "
             "and several branches failed transfer or rate/waveform decoupling."
@@ -206,7 +206,7 @@ def _markdown(items: Iterable[BoundaryItem]) -> str:
         "",
         "This audit fixes what is rule-based, what is target-side self-calibration,",
         "what is shallow source-supervised fitting, and what remains diagnostic/no-go.",
-        "It is a paper-facing guardrail: performance claims must be consistent with this boundary.",
+        "It is a release guardrail: performance claims must be consistent with this boundary.",
         "",
         "## Boundary Thesis",
         "",

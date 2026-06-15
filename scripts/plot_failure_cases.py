@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot main-paper failure cases from a persistent manifest."""
+"""Plot main failure cases from a persistent manifest."""
 
 import argparse
 import json
@@ -184,7 +184,7 @@ def plot_failure_cases(manifest_csv: Path, run_dir: Path, out_path: Path):
 
 def parse_args():
     root = ROOT
-    parser = argparse.ArgumentParser(description='Plot main-paper failure cases from a persistent manifest.')
+    parser = argparse.ArgumentParser(description='Plot main failure cases from a persistent manifest.')
     parser.add_argument('--manifest-csv', type=Path, required=True)
     parser.add_argument('--run-dir', type=Path, required=True)
     parser.add_argument('--out', type=Path, default=root / 'paper' / 'figures' / 'F6_failure_cases.pdf')

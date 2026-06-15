@@ -71,28 +71,3 @@ def test_external_weak_evidence_audit_writes_scope_outputs(tmp_path: Path) -> No
     assert "waveform CCC/DTW" in out_md.read_text(encoding="utf-8")
     assert table_out.exists()
     assert figure_out.exists()
-
-
-def test_final_paper_package_audit_can_report_missing_without_failing(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
-    out_csv = tmp_path / "package.csv"
-    out_md = tmp_path / "package.md"
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(root / "scripts" / "audit_final_paper_full_package.py"),
-            "--out-csv",
-            str(out_csv),
-            "--out-md",
-            str(out_md),
-            "--allow-missing",
-        ],
-        cwd=root,
-        check=True,
-    )
-
-    report = out_md.read_text(encoding="utf-8")
-    assert "Final Paper Full Package Audit" in report
-    assert "external weak-evidence" in report
-    assert out_csv.exists()

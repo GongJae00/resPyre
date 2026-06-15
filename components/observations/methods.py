@@ -282,7 +282,7 @@ class profile1D_Model(MethodBase):
 def _profile1d_signed_lag_bridge(g_rois, interp_type: str = "linear") -> np.ndarray:
 	"""Construct a signed displacement-like profile signal from centered xcorr lag.
 
-	The legacy `profile1D` extractor keeps the absolute argmax index of the full
+	The compatibility `profile1D` extractor keeps the absolute argmax index of the full
 	cross-correlation. That preserves coarse periodicity after downstream
 	normalization, but it discards the centered signed-lag interpretation that is
 	closer to a true displacement surrogate. This bridge restores that meaning.

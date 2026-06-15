@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plot the main same-trial overlay atlas across all fixed base observations.
 
-The main paper overlay should answer a different question from the
+The main overlay should answer a different question from the
 observation-class supplementary atlases: on the same clip, what topology does each
 fixed observation operator produce, and how does the promoted PARH-OSSM readout
 compare?  This script therefore uses one COHFACE clip and one MAHNOB-HCI clip
@@ -326,11 +326,11 @@ def plot_atlas(out: Path, manifest_out: Path, window_sec: float = 30.0) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot main all-base same-trial waveform overlay atlas.")
-    parser.add_argument("--out", type=Path, default=ROOT / "paper/figures/F4_waveform_overlay_grid.pdf")
+    parser.add_argument("--out", type=Path, default=ROOT / "paper" / "figures" / "F4_waveform_overlay_grid.pdf")
     parser.add_argument(
         "--manifest-out",
         type=Path,
-        default=ROOT / "paper/manifests/f4_allbase_same_trial_overlay_manifest.csv",
+        default=ROOT / "paper" / "manifests" / "f4_allbase_same_trial_overlay_manifest.csv",
     )
     parser.add_argument("--window-sec", type=float, default=30.0)
     return parser.parse_args()

@@ -4,7 +4,7 @@
 This is a diagnostic-only audit. It may use GT-derived rate-source MAE columns
 to label failure modes, but the observability scores themselves are computed
 from target-side metadata and source agreement. The output is intended to guide
-the next PARH-OSSM observation-law patch, not to promote a new paper-facing
+the next PARH-OSSM observation-law patch, not to promote a new release
 readout.
 """
 

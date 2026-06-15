@@ -44,7 +44,7 @@ class OperatingPoint:
 LOCKED_OPERATING_POINTS: tuple[OperatingPoint, ...] = (
     OperatingPoint(
         slug="locked_default",
-        description="current locked paper setting; balanced locality and stability",
+        description="current locked release setting; balanced locality and stability",
         window_sec=30.0,
         window_stride_sec=10.0,
         min_support_corr=0.25,

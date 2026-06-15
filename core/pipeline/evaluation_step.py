@@ -1703,7 +1703,7 @@ def run_evaluation(
             
             if bool(save_metric_pickles):
                 # Save Pickles for plots
-                # Reconstruct legacy structure for plotting compatibility
+                # Reconstruct compatibility structure for plotting.
                 method_metrics = {}
                 for rec in records:
                     m = rec['method']
@@ -1787,7 +1787,7 @@ def run_evaluation(
                 split_json = os.path.join(metrics_dir, "metrics_filter_calibration_split.json")
                 split_df.to_csv(split_csv, index=False)
                 split_all_df.to_csv(split_all_csv, index=False)
-                # Human-readable summary table for quick paper/debug review.
+                # Human-readable summary table for quick inspection.
                 txt_path = os.path.join(metrics_dir, "metrics_filter_calibration_split.txt")
                 if not split_df.empty:
                     table_headers = [

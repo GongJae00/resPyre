@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build RR-study dataset manifests, scope tables, and a scope figure.
 
-This script is intentionally paper-facing. It does not copy raw data and it
+This script is release-oriented. It does not copy raw data and it
 does not force every dataset into the same evaluation protocol. Instead it
 locks the role of each usable dataset:
 
@@ -52,7 +52,7 @@ class DatasetRole:
     real_or_synthetic: str
     label_scope: str
     metric_scope: str
-    paper_use: str
+    release_use: str
     claim_boundary: str
 
 
@@ -63,7 +63,7 @@ DATASET_ROLES = (
         real_or_synthetic="real",
         label_scope="respiration waveform + derived RR",
         metric_scope="rate + aligned waveform + strict waveform + cycle diagnostics",
-        paper_use="main real benchmark",
+        release_use="main real benchmark",
         claim_boundary="supports waveform reconstruction and rate estimation claims",
     ),
     DatasetRole(
@@ -72,7 +72,7 @@ DATASET_ROLES = (
         real_or_synthetic="real",
         label_scope="respiration-belt waveform + derived RR",
         metric_scope="rate + aligned waveform + strict waveform + observability failure diagnostics",
-        paper_use="hard-regime / cross-environment benchmark",
+        release_use="hard-regime / cross-environment benchmark",
         claim_boundary="supports robustness analysis; low observability must be diagnosed explicitly",
     ),
     DatasetRole(
@@ -81,7 +81,7 @@ DATASET_ROLES = (
         real_or_synthetic="real",
         label_scope="frame-aligned HR/RR labels; no raw respiratory waveform",
         metric_scope="RR rate only",
-        paper_use="external rate-only validation",
+        release_use="external rate-only validation",
         claim_boundary="does not support waveform CCC/DTW or morphology claims",
     ),
     DatasetRole(
@@ -90,7 +90,7 @@ DATASET_ROLES = (
         real_or_synthetic="synthetic",
         label_scope="synthetic breathing signal d_br plus video arrays",
         metric_scope="controlled rate/waveform sanity checks and ablations",
-        paper_use="synthetic mechanism diagnostic / optional pretraining",
+        release_use="synthetic mechanism diagnostic / optional pretraining",
         claim_boundary="must not be mixed with real-data performance claims",
     ),
 )
@@ -104,7 +104,7 @@ ABLATION_ROWS = (
         "question": "Which observation operators actually expose respiratory information?",
         "comparison": "OF, OF_bridge, DoF, DoF_bridge, P1D_lin, P1D_quad, P1D_cub, P1D_cons",
         "metrics": "observation EDA, rate MAE/r, waveform CCC/DTW where waveform GT exists",
-        "paper_location": "T2, F2, supplementary observation overlays",
+        "release_location": "T2, F2, supplementary observation overlays",
     },
     {
         "block": "A1",
@@ -113,7 +113,7 @@ ABLATION_ROWS = (
         "question": "Do bridges/consensus add information beyond raw operators?",
         "comparison": "OF->OF_bridge, DoF->DoF_bridge, P1D_lin/quad/cub->P1D_cons",
         "metrics": "delta heatmaps, family summary, wrong-operator stress diagnostics",
-        "paper_location": "F2, F3, S_F13, S_F14",
+        "release_location": "F2, F3, S_F13, S_F14",
     },
     {
         "block": "A2",
@@ -122,7 +122,7 @@ ABLATION_ROWS = (
         "question": "What happens when the resonator and a standard Kalman filter are simply attached?",
         "comparison": "Base vs OSSM-KF vs PARH-OSSM",
         "metrics": "T3/T4/T4b/T4c/T6",
-        "paper_location": "main tables",
+        "release_location": "main tables",
     },
     {
         "block": "A3",
@@ -131,7 +131,7 @@ ABLATION_ROWS = (
         "question": "Can target-side reliability choose/weight evidence without GT at deployment?",
         "comparison": "fixed family, reliability-weighted family, adaptive law, decoupled output",
         "metrics": "rate MAE/r, confidence, consistency, observability failure taxonomy",
-        "paper_location": "T5, T6, T7, S_F10, S_F11",
+        "release_location": "T5, T6, T7, S_F10, S_F11",
     },
     {
         "block": "A4",
@@ -140,7 +140,7 @@ ABLATION_ROWS = (
         "question": "Why should z_osc timing and z_full morphology not be collapsed into one objective?",
         "comparison": "single output, rate expert, waveform expert, decoupled readouts",
         "metrics": "rate MAE/r, waveform CCC/DTW, strict waveform, cycle timing",
-        "paper_location": "T3, T4, T4b, T4c, F4",
+        "release_location": "T3, T4, T4b, T4c, F4",
     },
     {
         "block": "A5",
@@ -149,7 +149,7 @@ ABLATION_ROWS = (
         "question": "Does the final timing readout remain meaningful on a new real RR-rate dataset?",
         "comparison": "final z_osc RR readout vs available baselines/adapters",
         "metrics": "RR MAE, RMSE, Pearson r; no waveform metrics",
-        "paper_location": "external validation supplement",
+        "release_location": "external validation supplement",
     },
     {
         "block": "A6",
@@ -158,7 +158,7 @@ ABLATION_ROWS = (
         "question": "Under controlled video/respiration generation, do model components behave as designed?",
         "comparison": "known synthetic d_br against observation/state/readout variants",
         "metrics": "rate, waveform, component reliability, failure flags",
-        "paper_location": "synthetic diagnostic supplement",
+        "release_location": "synthetic diagnostic supplement",
     },
 )
 
@@ -265,7 +265,7 @@ def build_dataset_scope(dataset_dir: Path, link_rows: list[dict[str, object]]) -
                 "real_or_synthetic": role.real_or_synthetic,
                 "label_scope": role.label_scope,
                 "metric_scope": role.metric_scope,
-                "paper_use": role.paper_use,
+                "release_use": role.release_use,
                 "claim_boundary": role.claim_boundary,
                 "n_trials_or_label_files": c.get("n_trials", 0),
                 "n_video_files_or_mat_files": c.get("n_videos", 0),

@@ -194,10 +194,10 @@ def generate_t3(datasets, out_dir):
     """T3: Rate accuracy (MAE, RMSE, PearsonR) — median across trials per dataset×family.
 
     Policy lock:
-    - Base rows use the legacy signal-spectral rate path.
+    - Base rows use the compatibility signal-spectral rate path.
     - OSSM-KF / PARH rows use track_hz when present.
 
-    This keeps the exported paper table aligned with the evaluation design docs
+    This keeps the exported table aligned with the evaluation design docs
     even if future raw CSVs contain mixed rate_source rows for a single family.
     """
     rows = []

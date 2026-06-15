@@ -119,8 +119,8 @@ def _build_from_decoupled_table(decoupled_run: Path, shared_adaptive_run: str | 
     return rows
 
 
-def _paper_ready_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep the operator-alignment table focused on paper-facing metrics.
+def _table_ready_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep the operator-alignment table focused on release metrics.
 
     The strict raw MAE/DTW columns are native-scale dependent and are preserved
     in the dedicated strict companion artifacts, not in this ablation table.
@@ -174,7 +174,7 @@ def main():
         'adaptive plus resonator prior branch',
     )
 
-    df = _paper_ready_columns(pd.DataFrame(rows))
+    df = _table_ready_columns(pd.DataFrame(rows))
     out_csv = Path(args.out_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_csv, index=False)
@@ -189,8 +189,8 @@ def main():
         '- most rows come from the decoupled-system gate table so they share one live provenance',
         '- `shared_observation_law` is included when its live paired source run is available',
         '- unavailable historical latent/resonator rows are omitted rather than silently copied from stale artifacts',
-        '- native-scale strict raw MAE/DTW and fully empty diagnostic fields are omitted from this paper-facing ablation table',
-        '- this table is reviewer-facing and mechanistic, not a single unified leaderboard',
+        '- native-scale strict raw MAE/DTW and fully empty diagnostic fields are omitted from this release ablation table',
+        '- this table is diagnostic and mechanistic, not a single unified leaderboard',
         '',
         df.to_string(index=False),
         '',

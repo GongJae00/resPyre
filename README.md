@@ -6,11 +6,9 @@ The codebase is organized around two layers:
 - `components/`: dataset adapters, observation extractors, oscillator heads
 - `core/`: pipeline orchestration, evaluation, visualization, metadata/reporting
 
-The current repository is centered on chest-motion respiration experiments and the
-Base, OSSM-KF, and PARH-OSSM comparison workflow used in the paper artifacts.
-For the paper-facing PARH-OSSM validation path, use `execute.md`. Diagnostic
-scripts are retained only when they support the final paper package, public
-audits, or regression tests.
+The current repository is centered on chest-motion respiration experiments and
+the Base, OSSM-KF, and PARH-OSSM comparison workflow. Use `execute.md` for the
+full reproduction ledger.
 
 ## What Is In Scope
 
@@ -18,7 +16,7 @@ audits, or regression tests.
 - Base observation methods: `of_farneback`, `of_disp_bridge`, `dof`, `dof_disp_bridge`, `profile1d_linear`, `profile1d_quadratic`, `profile1d_cubic`, `profile1d_consensus`
 - Oscillator-wrapped methods via `<base>__<head>` naming
 - Publicly documented heads: `kfstd` (`OSSM-KF` comparator), `parh_ossm`, `simple_bandpass`
-- Legacy compatibility head: `narossm`
+- Compatibility head: `narossm`
 - End-to-end steps from one CLI: `estimate`, `evaluate`/`metrics`, `eda`, `visualize`, `metadata`
 
 The stable config examples currently in the repo:
@@ -26,17 +24,14 @@ The stable config examples currently in the repo:
 - `configs/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json`
 - `configs/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons.json`
 
-The final paper-facing full validation is intentionally driven by `execute.md`,
-because it also wires target-side priors, the adaptive observation law, and the
-post-run rate-source / observability audits.
+The full validation path is driven by `execute.md`, because it also wires
+target-side priors, the adaptive observation law, and post-run diagnostics.
 
 ## Citation and Archival Release
 
-This repository is prepared for the paper-submission snapshot
-`v1.0.0-paper-submission`. Citation metadata is provided in `CITATION.cff`, and
-Zenodo release metadata is provided in `.zenodo.json`. After the GitHub release
-is archived through Zenodo, cite the DOI-minted software record together with
-the accompanying paper.
+Citation metadata is provided in `CITATION.cff`, and Zenodo release metadata is
+provided in `.zenodo.json`. Cite the archived software release together with the
+accompanying paper.
 
 ## Repository Layout
 
@@ -48,7 +43,7 @@ resPyre/
 │   └── models/
 │       ├── core/          # Shared oscillator parameters and base helpers
 │       └── heads/         # OSSM-KF, PARH-OSSM, and other oscillator heads
-├── analysis/              # Released audit artifacts and compact priors
+├── analysis/              # Generated analysis outputs, ignored except README files
 ├── core/
 │   ├── evaluation/        # Metrics, plotting, frame-log utilities
 │   ├── pipeline/          # Runner, wrapper, evaluation, visualization, metadata
@@ -59,13 +54,13 @@ resPyre/
 ├── results/               # Generated run artifacts, ignored by Git
 ├── setup/                 # Environment bootstrap
 ├── tests/                 # Regression and pipeline tests
-├── execute.md             # Final paper-facing regeneration ledger
+├── execute.md             # Reproduction ledger
 └── main.py                # Primary CLI entry point
 ```
 
 ## Installation
 
-`setup/setup.sh` creates a minimal paper-build environment for the motion + oscillator stack.
+`setup/setup.sh` creates a minimal environment for the motion and oscillator stack.
 
 ```bash
 ./setup/setup.sh -n resPyre --verify
@@ -244,7 +239,7 @@ Run bookkeeping is handled in `core/pipeline/metadata_step.py`.
 Each run directory receives `run_status.json`, and `metadata.json` is emitted even when
 the pipeline fails part-way through.
 
-## Paper-Facing Final Path
+## PARH-OSSM Validation Path
 
 The final validation path is:
 
@@ -259,9 +254,9 @@ fixed observation classes
 `OSSM-KF` is a comparator and external timing-evidence source in the final
 materialization command. It is not a nested fallback that replaces PARH-OSSM.
 Run the commands in `execute.md` to regenerate the current COHFACE and MAHNOB
-tail-aligned validation bundles and required post-run audits. Manuscript source
-and rendered paper files live in the local `paper/` workspace and are not tracked
-in the public code repository.
+tail-aligned validation bundles and post-run diagnostics. Manuscript source and
+rendered paper files live in the local `paper/` workspace and are not tracked in
+this repository.
 
 ## Results Layout
 
@@ -307,11 +302,11 @@ methods run on that trial.
 
 `components/models/heads/parh_ossm.py` implements the current PARH-OSSM head.
 
-Current behavior relevant to downstream analysis:
+Current behavior:
 
 - the primary packaged `signal_hat` is the smoothed oscillatory reconstruction
 - PARH additionally stores `z_osc`, `z_full`, causal/smoothed variants, decomposition terms, and diagnostic arrays
-- waveform comparison code treats `z_full` as the main PARH waveform output for paper-style comparison
+- waveform comparison code treats `z_full` as the main PARH waveform output
 
 ## Extending The Framework
 

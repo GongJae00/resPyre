@@ -43,7 +43,7 @@ def test_current_mahnob_bottleneck_audit_classifies_trials(tmp_path: Path) -> No
             "video": ["v_ambiguous", "v_limited"],
             "oracle_method": ["of__kfstd", "dof__kfstd"],
             "oracle_family": ["OF", "DoF"],
-            "oracle_kind": ["legacy_filter", "legacy_filter"],
+            "oracle_kind": ["compat_filter", "compat_filter"],
             "oracle_MAE": [1.5, 3.5],
             "fixed_best_method": ["dof__kfstd", "dof__kfstd"],
             "fixed_best_method_median_MAE": [2.8, 2.8],

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate paper-facing component ablation evidence assets.
+"""Generate release component ablation evidence assets.
 
 The goal is not to invent another model variant. This script consolidates
-existing, persistent ablation/evaluation artifacts into a reviewer-facing
+existing, persistent ablation/evaluation artifacts into a diagnostic
 table and a compact figure that answer:
 
 1. Which detachable component was introduced?
@@ -117,7 +117,7 @@ def _component_row(
     reference: MetricRow,
     promoted: MetricRow,
     interpretation: str,
-    paper_use: str,
+    release_use: str,
     caveat: str = "",
 ) -> dict[str, object]:
     return {
@@ -143,17 +143,17 @@ def _component_row(
         "promoted_strict_CCC": _fmt(promoted.strict_ccc),
         "delta_strict_CCC": _fmt(_delta(promoted.strict_ccc, reference.strict_ccc)),
         "interpretation": interpretation,
-        "paper_use": paper_use,
+        "release_use": release_use,
         "caveat": caveat,
     }
 
 
 def _final_metric_row(t3: pd.DataFrame, t4: pd.DataFrame, *, dataset: str) -> MetricRow:
-    """Return the final PARH-OSSM row from the current paper package.
+    """Return the final PARH-OSSM row from the current reproduction package.
 
     The final full run exports the integrated model as a single method
     (`parh_ossm`) rather than as one row per observation family. That row is
-    the correct paper-facing PARH summary; family-level construction rows are
+    the correct release PARH summary; family-level construction rows are
     documented as design/claim-boundary evidence when the family ablation table
     is not present in the current package.
     """
@@ -181,7 +181,7 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
 
     # Observation construction is detachable at the family level.  Older
     # family-ablation packages contain direct OF/DoF/P1D family rows; the final
-    # paper package exports only the integrated PARH-OSSM row.  In that case,
+    # reproduction package exports only the integrated PARH-OSSM row.  In that case,
     # keep these rows as explicit construction-boundary evidence rather than
     # crashing or silently reusing stale family metrics.
     rows.append(
@@ -194,9 +194,9 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             promoted_name="OF_bridge + PARH",
             reference=_metric_row_from_family(t3, t4, dataset="COHFACE", family="OF", variant="PARH", required=False),
             promoted=_metric_row_from_family(t3, t4, dataset="COHFACE", family="OF_bridge", variant="PARH", required=False),
-            interpretation="Construction-level evidence: the final package uses OF/OF_bridge inside the joint observation law, while direct family rows are not regenerated in the integrated final run.",
-            paper_use="Observation-family construction evidence.",
-            caveat="Use T2 and observability audits for final-package interpretation; do not overclaim standalone OF_bridge dominance.",
+            interpretation="Construction-level evidence: the reproduction package uses OF/OF_bridge inside the joint observation law, while direct family rows are not regenerated in the integrated final run.",
+            release_use="Observation-family construction evidence.",
+            caveat="Use T2 and observability audits for release-package interpretation; do not overclaim standalone OF_bridge dominance.",
         )
     )
     rows.append(
@@ -210,7 +210,7 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             reference=_metric_row_from_family(t3, t4, dataset="MAHNOB", family="DoF", variant="PARH", required=False),
             promoted=_metric_row_from_family(t3, t4, dataset="MAHNOB", family="DoF_bridge", variant="PARH", required=False),
             interpretation="Construction-level evidence: DoF_bridge is retained as a hard-regime signed-motion probe, not as the main morphology path.",
-            paper_use="Hard-regime observation-construction evidence.",
+            release_use="Hard-regime observation-construction evidence.",
         )
     )
     rows.append(
@@ -224,7 +224,7 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             reference=_metric_row_from_family(t3, t4, dataset="COHFACE", family="P1D_quad", variant="PARH", required=False),
             promoted=_metric_row_from_family(t3, t4, dataset="COHFACE", family="P1D_cons", variant="PARH", required=False),
             interpretation="Construction-level evidence: P1D_cons is retained as a stable consensus observation inside the joint law, not as a claim that consensus alone dominates.",
-            paper_use="Constructed-family value and boundary.",
+            release_use="Constructed-family value and boundary.",
         )
     )
 
@@ -239,22 +239,22 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             promoted_name="best single OSSM-KF",
             reference=_metric_row_from_family(t3, t4, dataset="MAHNOB", family="DoF_bridge", variant="Base", required=False),
             promoted=_metric_row_from_family(t3, t4, dataset="MAHNOB", family="DoF_bridge", variant="OSSM-KF", required=False),
-            interpretation="Comparator-boundary evidence: OSSM-KF is a reference timing channel; the integrated final package does not treat it as the proposed adaptive observation law.",
-            paper_use="Comparator baseline and no-black-box-control boundary.",
+            interpretation="Comparator-boundary evidence: OSSM-KF is a reference timing channel; the integrated reproduction package does not treat it as the proposed adaptive observation law.",
+            release_use="Comparator baseline and no-black-box-control boundary.",
         )
     )
     rows.append(
         _component_row(
             component="integrated final PARH-OSSM package",
-            detachable_test="COHFACE final package vs MAHNOB hard-regime final package",
+            detachable_test="COHFACE reproduction package vs MAHNOB hard-regime reproduction package",
             dataset_scope="COHFACE; MAHNOB",
             why_included="Separates strong within-dataset behavior from hard-regime target limitations without hiding failures.",
             reference_name="COHFACE final PARH-OSSM",
             promoted_name="MAHNOB final PARH-OSSM",
             reference=_final_metric_row(t3, t4, dataset="COHFACE"),
             promoted=_final_metric_row(t3, t4, dataset="MAHNOB"),
-            interpretation="The final model is strong on COHFACE but still limited on MAHNOB; this row supports the paper's observability/target-shift claim boundary.",
-            paper_use="Final-package performance boundary.",
+            interpretation="The final model is strong on COHFACE but still limited on MAHNOB; this row supports the study's observability/target-shift claim boundary.",
+            release_use="Release-package performance boundary.",
             caveat="This is a dataset-shift comparison, not an ablation improvement row.",
         )
     )
@@ -269,7 +269,7 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             reference=_t5_row(t5, "shared_observation_law", required=False),
             promoted=_t5_row(t5, "adaptive_observation_law", required=False),
             interpretation="Rate and strict morphology improve when the observation law becomes local; waveform CCC tradeoff motivates decoupled readouts.",
-            paper_use="Core adaptive-law ablation.",
+            release_use="Core adaptive-law ablation.",
             caveat="If the paired shared-law row is unavailable, use this as a design-boundary row rather than a numeric delta.",
         )
     )
@@ -284,7 +284,7 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             reference=_t5_row(t5, "parh_rate_expert"),
             promoted=_t5_row(t5, "decoupled_system"),
             interpretation="The decoupled readout improves rate MAE, waveform CCC, and strict CCC together; this is the strongest evidence for the final architecture.",
-            paper_use="Main architecture ablation.",
+            release_use="Main architecture ablation.",
         )
     )
     rows.append(
@@ -297,8 +297,8 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             promoted_name="decoupled system",
             reference=_t5_row(t5, "waveform_expert_only"),
             promoted=_t5_row(t5, "decoupled_system"),
-            interpretation="Waveform-only is competitive for morphology but much worse for rate; this defends not collapsing the paper to a waveform fitter.",
-            paper_use="Readout specialization boundary.",
+            interpretation="Waveform-only is competitive for morphology but much worse for rate; this defends not collapsing the method to a waveform fitter.",
+            release_use="Readout specialization boundary.",
         )
     )
     rows.append(
@@ -311,8 +311,8 @@ def build_component_table(table_dir: Path) -> pd.DataFrame:
             promoted_name="robust fallback",
             reference=_t5_row(t5, "decoupled_system", required=False),
             promoted=_t5_row(t5, "robust_decoupled_consistency_first", required=False),
-            interpretation="No live final-package robust row is required for the promoted model; keep fallback as diagnostic/hard-regime policy, not the default claim.",
-            paper_use="Prevents overclaiming fallback variants.",
+            interpretation="No live release-package robust row is required for the promoted model; keep fallback as diagnostic/hard-regime policy, not the default claim.",
+            release_use="Prevents overclaiming fallback variants.",
         )
     )
     return pd.DataFrame(rows)
@@ -322,7 +322,7 @@ def write_markdown(table: pd.DataFrame, out_path: Path) -> None:
     lines = [
         "# Component Ablation Evidence",
         "",
-        "This file is generated from existing paper-ready metrics. Negative `delta_rate_MAE` and negative `delta_waveform_DTW` are improvements; positive `delta_waveform_CCC`, `delta_rate_R`, and `delta_strict_CCC` are improvements.",
+        "This file is generated from existing table-ready metrics. Negative `delta_rate_MAE` and negative `delta_waveform_DTW` are improvements; positive `delta_waveform_CCC`, `delta_rate_R`, and `delta_strict_CCC` are improvements.",
         "",
         "| component | detachable test | delta rate MAE | delta waveform CCC | delta strict CCC | interpretation |",
         "| --- | --- | ---: | ---: | ---: | --- |",

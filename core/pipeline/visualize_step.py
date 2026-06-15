@@ -105,7 +105,7 @@ def run_visualization(
         dataset_name = os.path.basename(d_dir)
         csv_path = os.path.join(d_dir, 'metrics', 'metrics_time_domain_raw.csv')
         if not os.path.exists(csv_path):
-            # Backward compatibility (legacy metrics filename)
+            # Backward compatibility for the older metrics filename.
             csv_path = os.path.join(d_dir, 'metrics', 'metrics_raw.csv')
         plot_dir = os.path.join(d_dir, 'plots')
         os.makedirs(plot_dir, exist_ok=True)
@@ -117,7 +117,7 @@ def run_visualization(
             try:
                 df = pd.read_csv(csv_path)
                 if 'MAE' in df.columns:
-                    print(f"   >> Generating paper-style summary plots for {dataset_name}...")
+                    print(f"   >> Generating summary plots for {dataset_name}...")
                     
                     boxplot_path = os.path.join(plot_dir, "summary_mae_boxplot.png")
                     

@@ -3,7 +3,7 @@
 
 This script does not decide performance. It records which constants and CLI
 arguments are structural, online-estimated, experimental, or ablation-only so
-paper-facing runs do not silently become dataset-specific sweeps.
+release runs do not silently become dataset-specific sweeps.
 """
 
 from __future__ import annotations
@@ -25,10 +25,7 @@ DEFAULT_SCRIPT_GLOBS = (
     "scripts/materialize_calibrated_multifamily_parh_system.py",
     "scripts/extract_target_reliability_graph_features.py",
     "scripts/audit_external_weak_evidence.py",
-    "scripts/audit_final_paper_full_package.py",
-    "scripts/audit_final_submission_readiness.py",
     "scripts/run_final_operating_point_sensitivity.py",
-    "scripts/run_final_baseline_comparator_refresh.py",
     "scripts/generate_table_ready.py",
 )
 
@@ -70,9 +67,9 @@ def _classify_constant(name: str) -> tuple[str, str]:
     if name in {"STATE_DIM", "_REF_FPS"} or name in {"HC1", "HS1", "HC2", "HS2", "B", "BDOT", "R", "RDOT"}:
         return "fixed_structure", "state-space structure or reference unit"
     if name.startswith("ENABLE_") or name in {"USE_HELPER_PATH", "USE_LIGHT_OBS_PATH"}:
-        return "ablation_flag", "must be locked for paper-facing runs"
+        return "ablation_flag", "must be locked for release runs"
     if name in {"P1D_FIXED_FAMILY_PRIOR"}:
-        return "ablation_flag", "legacy family-prior switch; off for paper-facing runs unless explicitly ablated"
+        return "ablation_flag", "compatibility family-prior switch; off for release runs unless explicitly ablated"
     if name.startswith("HARMONIC_"):
         return "frequency_harmonic_policy", "locked harmonic disambiguation policy; no target-dataset tuning"
     if name.startswith(("OUTPUT_RATE_", "PROFILE_RATE_", "FREQ_RESCUE_", "HELPER_TRUST_", "FAMILY_CONFIDENCE_", "DYNAMIC_MIXTURE_", "RATE_OBS_")):
@@ -109,14 +106,14 @@ def _classify_arg(arg: str) -> tuple[str, str]:
     if any(token in lowered for token in ("device", "jobs", "threads", "workers", "batch-size", "artifact-policy", "max-files", "max-trials")):
         return "runtime_resource", "hardware/runtime control; not a model claim"
     if any(token in lowered for token in ("epoch", "lr", "train-frac", "val-frac", "seed")):
-        return "training_protocol", "must be fixed before paper-facing training"
+        return "training_protocol", "must be fixed before release training"
     if any(token in lowered for token in ("threshold", "weight", "alpha", "gamma", "penalty", "bias", "fallback", "support", "frac", "margin", "temperature", "scale")):
         return "high_risk_tuning_arg", "candidate for no-sweep lock or ablation-only status"
     if any(token in lowered for token in ("lag", "freq", "window", "min", "max", "band", "rate")):
         return "model_or_metric_boundary_arg", "semantic parameter; justify and lock"
     if any(token in lowered for token in ("out", "dir", "label", "name", "report", "csv", "json", "raw", "source", "target")):
         return "io_or_dataset", "I/O, dataset, or reporting path"
-    return "other_arg", "manual review"
+    return "other_arg", "inspection"
 
 
 def _iter_script_args(paths: Iterable[Path]) -> list[AuditItem]:
@@ -146,7 +143,7 @@ def _markdown(items: list[AuditItem]) -> str:
     lines.append("- Fixed physiology/state definitions may be part of the method.")
     lines.append("- Online-estimated reliability may be part of the method.")
     lines.append("- Learned reliability must be trained without target GT selection.")
-    lines.append("- High-risk knobs cannot be tuned per dataset for paper-facing results.")
+    lines.append("- High-risk knobs cannot be tuned per dataset for release results.")
     lines.append("- Ablation-only knobs can appear in diagnostics, not as promoted defaults.")
     lines.append("")
     lines.append("## Summary")
@@ -173,7 +170,7 @@ def _markdown(items: list[AuditItem]) -> str:
     lines.append("")
     lines.append(f"High-risk tuning surfaces detected: `{risk}`.")
     lines.append("")
-    lines.append("A paper-facing run should either:")
+    lines.append("A release run should either:")
     lines.append("")
     lines.append("1. lock these values before looking at target performance; or")
     lines.append("2. move them into online estimation; or")

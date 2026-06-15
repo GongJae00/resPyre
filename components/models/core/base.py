@@ -43,11 +43,11 @@ class OscillatorParams:
     f_min: float = 0.08
     f_max: float = 0.50
     init_margin_hz: float = 0.01  # interior guard in Hz to prevent boundary-locked initialisation
-    rho: float = 0.0  # DEPRECATED: legacy manual damping override. Use tau_env instead.
+    rho: float = 0.0  # Compatibility damping override. Use tau_env instead.
     tau_env: float = 30.0
     qx: float = 1e-4  # baseline state noise (can be overridden if needed)
     qx_scale: float = 0.3
-    rv: float = 0.1  # DEPRECATED: legacy manual R override. Use rv_auto=True + rv_floor instead.
+    rv: float = 0.1  # Compatibility R override. Use rv_auto=True + rv_floor instead.
     rv_auto: bool = True
     rv_mad_scale: float = 1.2
     rv_floor: float = 0.03  # observation noise floor, typically 0.02-0.05
@@ -72,8 +72,8 @@ class OscillatorParams:
     spec_guidance_confidence_scale: float = 5.0
     spec_guidance_snr_scale: float = 3.5
     pll_autogain: bool = True
-    pll_kp: float = 0.0  # legacy manual override
-    pll_ki: float = 0.0  # legacy manual override
+    pll_kp: float = 0.0  # compatibility override
+    pll_ki: float = 0.0  # compatibility override
     pll_kp_min: float = 0.0
     pll_ki_min: float = 0.0
     pll_zeta: float = 0.9

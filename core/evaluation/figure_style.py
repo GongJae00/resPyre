@@ -15,7 +15,7 @@ VARIANT_COLORS = {
 
 VARIANT_LABELS = {
     "Base": "Base",
-    # Internal key remains KFstd for artifact compatibility. The paper-facing
+    # Internal key remains KFstd for artifact compatibility. The displayed
     # label makes the comparator's scope explicit: OSSM plus standard KF only.
     "KFstd": "OSSM-KF",
     "PARH": "PARH",

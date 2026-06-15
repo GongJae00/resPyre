@@ -34,7 +34,7 @@ def _config_family_blocks(path: str) -> list[list[str]]:
     return [names[i : i + len(EXPECTED)] for i in range(0, 24, len(EXPECTED))]
 
 
-def test_canonical_order_is_the_paper_facing_observation_order() -> None:
+def test_canonical_order_is_the_release_observation_order() -> None:
     display = [
         str(get_observation_family_semantics(name)["display_name"])
         for name in EXPECTED

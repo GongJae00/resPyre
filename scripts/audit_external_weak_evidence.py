@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Audit weak external RR evidence for the final paper execution path.
+"""Audit weak external RR evidence for the release execution path.
 
 V4V and SCAMPS are intentionally not pooled with COHFACE/MAHNOB-HCI real
 waveform benchmarks. This script makes that boundary executable: it checks the
-external manifests, writes a paper-facing supplementary table, and produces a
+external manifests, writes a release supplementary table, and produces a
 compact scope figure that documents exactly what evidence each dataset can and
 cannot support.
 """
@@ -85,7 +85,7 @@ def _v4v_row(df: pd.DataFrame) -> dict[str, object]:
             "label_summary": "manifest missing",
             "allowed_metrics": "RR rate only after a dedicated external adapter/readout is available",
             "prohibited_metrics": "waveform CCC/DTW; cycle morphology; real waveform reconstruction claims",
-            "paper_use": "blocked until manifest is regenerated",
+            "release_use": "blocked until manifest is regenerated",
             "claim_boundary": "No waveform claim can be made from V4V.",
         }
 
@@ -109,7 +109,7 @@ def _v4v_row(df: pd.DataFrame) -> dict[str, object]:
         "label_summary": label_summary,
         "allowed_metrics": "RR MAE/RMSE/Pearson only if a V4V rate-readout adapter is explicitly run",
         "prohibited_metrics": "waveform CCC/DTW; strict waveform; cycle morphology",
-        "paper_use": "supplementary external-rate evidence; not pooled with COHFACE/MAHNOB",
+        "release_use": "supplementary external-rate evidence; not pooled with COHFACE/MAHNOB",
         "claim_boundary": "Supports only timing/rate generalization, never morphology.",
     }
 
@@ -126,7 +126,7 @@ def _scamps_row(df: pd.DataFrame) -> dict[str, object]:
             "label_summary": "manifest missing",
             "allowed_metrics": "synthetic controlled sanity checks only",
             "prohibited_metrics": "real-data generalization performance claims",
-            "paper_use": "blocked until manifest is regenerated",
+            "release_use": "blocked until manifest is regenerated",
             "claim_boundary": "Synthetic evidence cannot replace real benchmark evidence.",
         }
 
@@ -153,7 +153,7 @@ def _scamps_row(df: pd.DataFrame) -> dict[str, object]:
         "label_summary": label_summary,
         "allowed_metrics": "controlled synthetic diagnostic/sanity checks; optional mechanism ablation",
         "prohibited_metrics": "real-data waveform/rate benchmark performance claims",
-        "paper_use": "supplementary mechanism-control evidence; not pooled with real data",
+        "release_use": "supplementary mechanism-control evidence; not pooled with real data",
         "claim_boundary": "Supports mechanism sanity, not real-world robustness by itself.",
     }
 
@@ -169,7 +169,7 @@ def build_audit(v4v: pd.DataFrame, scamps: pd.DataFrame) -> pd.DataFrame:
         "label_summary",
         "allowed_metrics",
         "prohibited_metrics",
-        "paper_use",
+        "release_use",
         "claim_boundary",
     ]
     return pd.DataFrame([_v4v_row(v4v), _scamps_row(scamps)], columns=columns)
@@ -179,7 +179,7 @@ def write_markdown(df: pd.DataFrame, out_path: Path) -> None:
     lines = [
         "# External Weak Evidence Audit",
         "",
-        "This audit is part of the final paper execution path. It prevents external",
+        "This audit is part of the release execution path. It prevents external",
         "datasets with weaker labels from being silently treated as full real waveform",
         "benchmarks.",
         "",
@@ -210,7 +210,7 @@ def write_markdown(df: pd.DataFrame, out_path: Path) -> None:
         lines.append("")
         lines.append(f"- Full inclusion stage: `{row['full_inclusion_stage']}`")
         lines.append(f"- Label summary: {row['label_summary']}")
-        lines.append(f"- Paper use: {row['paper_use']}")
+        lines.append(f"- Release use: {row['release_use']}")
         lines.append(f"- Claim boundary: {row['claim_boundary']}")
         lines.append("")
     out_path.parent.mkdir(parents=True, exist_ok=True)

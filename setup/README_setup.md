@@ -35,7 +35,7 @@ eval "$(python setup/auto_profile.py --mode balanced)"
 # CPU-heavy batch work such as trial/video-level audits, metrics, and figures.
 eval "$(python setup/auto_profile.py --mode cpu_batch)"
 
-# Final paper-package runs are CPU-batch oriented; pin CPU to avoid GPU contention.
+# Release-package runs are CPU-batch oriented; pin CPU to avoid GPU contention.
 eval "$(python setup/auto_profile.py --mode cpu_batch --device cpu --write-json analysis/final_resource_profile.json)"
 ```
 

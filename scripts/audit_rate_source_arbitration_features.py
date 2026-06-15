@@ -221,7 +221,7 @@ def _write_report(df: pd.DataFrame, out_md: Path) -> None:
             "",
             "This audit may use per-trial `best_source` labels from the rate-source",
             "decomposition CSV, so it is diagnostic. It is used to design a future",
-            "GT-free arbiter; it is not itself a promoted paper-facing readout.",
+            "GT-free arbiter; it is not itself a promoted release readout.",
         ]
     )
     out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")

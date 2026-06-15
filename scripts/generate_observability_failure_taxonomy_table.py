@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Generate a paper-ready observability failure taxonomy table.
+"""Generate a table-ready observability failure taxonomy table.
 
 The input is produced by ``audit_target_observability_failure_modes.py``.  This
 script does not create new evidence.  It compresses the diagnostic rows into a
-manuscript-facing table that separates current-bank limits, source-selection
+release table that separates current-bank limits, source-selection
 room, and video/reference-limited cases.
 """
 
@@ -20,7 +20,7 @@ import pandas as pd
 
 MODE_TEXT: Dict[str, Dict[str, str]] = {
     "bounded_or_no_clear_room": {
-        "paper_label": "Bounded by current observation bank",
+        "category_label": "Bounded by current observation bank",
         "interpretation": (
             "Current candidate sources have little oracle room; better source "
             "selection alone is unlikely to solve these trials."
@@ -28,7 +28,7 @@ MODE_TEXT: Dict[str, Dict[str, str]] = {
         "next_need": "Create richer respiratory observations or report low observability.",
     },
     "source_selection_room_posterior_available": {
-        "paper_label": "Source-selection room with posterior evidence",
+        "category_label": "Source-selection room with posterior evidence",
         "interpretation": (
             "A different source can help and the label-free posterior already "
             "contains some usable evidence."
@@ -36,7 +36,7 @@ MODE_TEXT: Dict[str, Dict[str, str]] = {
         "next_need": "Use posterior evidence cautiously as an adaptive-law diagnostic.",
     },
     "source_selection_room_agreement_available": {
-        "paper_label": "Source-selection room with agreement evidence",
+        "category_label": "Source-selection room with agreement evidence",
         "interpretation": (
             "A different source can help and cross-source agreement is partly "
             "informative."
@@ -44,7 +44,7 @@ MODE_TEXT: Dict[str, Dict[str, str]] = {
         "next_need": "Improve agreement-to-state trust without hard source switching.",
     },
     "oracle_room_but_gtfree_evidence_weak": {
-        "paper_label": "Oracle room but weak label-free evidence",
+        "category_label": "Oracle room but weak label-free evidence",
         "interpretation": (
             "A better source exists, but current label-free diagnostics "
             "do not identify it reliably."
@@ -52,7 +52,7 @@ MODE_TEXT: Dict[str, Dict[str, str]] = {
         "next_need": "Develop stronger observability features before promotion.",
     },
     "low_target_observability": {
-        "paper_label": "Very low label-free observability",
+        "category_label": "Very low label-free observability",
         "interpretation": (
             "Very low label-free support; retained as explicit hard-observability "
             "evidence rather than removed from the evaluation cohort."
@@ -60,7 +60,7 @@ MODE_TEXT: Dict[str, Dict[str, str]] = {
         "next_need": "Create richer respiratory observations or report low observability.",
     },
     "likely_video_or_reference_limited": {
-        "paper_label": "Likely video/reference limited",
+        "category_label": "Likely video/reference limited",
         "interpretation": (
             "Even the best current source remains poor, suggesting weak visual "
             "respiratory evidence or reference/scale/lag risk."
@@ -127,7 +127,7 @@ def main() -> int:
         rows.append(
             {
                 "failure_mode": str(mode),
-                "paper_label": text.get("paper_label", str(mode)),
+                "category_label": text.get("category_label", str(mode)),
                 "n_trials": int(len(sub)),
                 "fraction": float(len(sub) / max(n_total, 1)),
                 "median_final_mae_bpm": _median(sub, "final_mae"),
@@ -149,7 +149,7 @@ def main() -> int:
         "",
         f"- source: `{args.failure_csv}`",
         f"- trials: `{n_total}`",
-        "- boundary: paper-facing compression of a diagnostic audit; oracle-best columns are used only to interpret current observation-bank limits.",
+        "- boundary: release compression of a diagnostic audit; oracle-best columns are used only to interpret current observation-bank limits.",
         "",
         "## Table",
         "",

@@ -37,7 +37,7 @@ Quality score boundary:
   - Q_aper = Q_aper_0 * h(1 - q_osc): aperiodic absorbs non-oscillatory surprise.
   - λ_t from Student-t VB: posterior outlier downweighting.
   This is a conservative design: R_selfcal remains the main scale,
-  q_obs provides mild prior trust modulation. The paper narrative
+  q_obs provides mild prior trust modulation. The method description
   and code are aligned on this boundary.
 """
 
@@ -112,7 +112,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
     Q_APER_OBS_GAMMA: float = 0.0       # extra Q_aper boost from clean unexplained observation need
 
     # ── Legacy coupled Q (ablation only) ──
-    QX_ADAPT_GAMMA_LEGACY: float = 0.5
+    QX_ADAPT_GAMMA_COMPAT: float = 0.5
 
     # ── Frequency adaptation ──
     FREQ_UPDATE_INTERVAL_SEC: float = 2.0
@@ -192,7 +192,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
     ENABLE_RESIDUAL: bool = True
     ENABLE_ADAPT_R: bool = True
     ENABLE_DISENTANGLED_Q: bool = True   # v1 default: disentangled
-    ENABLE_LEGACY_COUPLED_Q: bool = False  # ablation: old R_t/R_init coupled
+    ENABLE_COMPAT_COUPLED_Q: bool = False  # ablation: coupled R_t/R_init scaling
     ENABLE_STUDENT_T: bool = True
     ENABLE_FREQ_ADAPT: bool = True
     USE_HELPER_PATH: bool = True
@@ -334,7 +334,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
             "ENABLE_RESIDUAL": self.ENABLE_RESIDUAL,
             "ENABLE_ADAPT_R": self.ENABLE_ADAPT_R,
             "ENABLE_DISENTANGLED_Q": self.ENABLE_DISENTANGLED_Q,
-            "ENABLE_LEGACY_COUPLED_Q": self.ENABLE_LEGACY_COUPLED_Q,
+            "ENABLE_COMPAT_COUPLED_Q": self.ENABLE_COMPAT_COUPLED_Q,
             "ENABLE_STUDENT_T": self.ENABLE_STUDENT_T,
             "ENABLE_FREQ_ADAPT": self.ENABLE_FREQ_ADAPT,
             "ENABLE_FREQ_RESCUE": self.ENABLE_FREQ_RESCUE,
@@ -1718,44 +1718,44 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
         if not base:
             return "light"
 
-        if policy == "legacy_all":
-            return "legacy"
+        if policy == "base_all":
+            return "base"
         if policy == "helper_all":
             return "helper"
         if policy == "all_p1d_helper":
             if base.startswith("profile1d_"):
                 return "helper"
             if base == "dof":
-                return "legacy"
+                return "base"
             return "light"
         if policy == "quadcub_blend":
             if base in {"profile1d_quadratic", "profile1d_cubic"}:
                 return "blend"
             if base.startswith("profile1d_") or base == "dof":
-                return "legacy"
+                return "base"
             return "light"
         if policy == "quadcub_dof_blend":
             if base in {"profile1d_quadratic", "profile1d_cubic", "dof"}:
                 return "blend"
             if base.startswith("profile1d_"):
-                return "legacy"
+                return "base"
             return "light"
         if policy == "quadcub_helper":
             if base in {"profile1d_quadratic", "profile1d_cubic"}:
                 return "helper"
             if base.startswith("profile1d_") or base == "dof":
-                return "legacy"
+                return "base"
             return "light"
         if policy == "quadcub_dof_helper":
             if base in {"profile1d_quadratic", "profile1d_cubic", "dof"}:
                 return "helper"
             if base.startswith("profile1d_"):
-                return "legacy"
+                return "base"
             return "light"
 
         # bridge_v1: current promoted scaffold.
         # The OF displacement bridge is closer to a displacement-like profile
-        # proxy than to raw OF velocity semantics, so keep it on the legacy
+        # proxy than to raw OF velocity semantics, so keep it on the base
         # inference stack rather than the light OF path.
         return str(sem.get("default_inference_mode", "light"))
 
@@ -2044,15 +2044,15 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
 
         obs_mode = self._observation_family_mode(base_method)
 
-        if obs_mode == "legacy":
+        if obs_mode == "base":
             y = super()._preprocess(signal, fs)
             preproc_meta = getattr(self, "_last_preproc_meta", {}) or {}
             preproc_meta["observation_preprocess"] = {
-                "mode": "family_aware_legacy_stack",
+                "mode": "family_aware_base_stack",
                 "family": base_method,
                 "policy": str(self.OBS_FAMILY_POLICY),
                 "lowpass_enabled": False,
-                "legacy_base_preprocess": True,
+                "base_preprocess": True,
             }
             self._last_preproc_meta = preproc_meta
             return y
@@ -2078,26 +2078,26 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
                     "policy": str(self.OBS_FAMILY_POLICY),
                     "helper_like": True,
                     "lowpass_enabled": False,
-                    "legacy_base_preprocess": False,
+                    "base_preprocess": False,
                 },
             }
             return y
 
         if obs_mode == "blend":
-            y_legacy = super()._preprocess(signal, fs)
+            y_base = super()._preprocess(signal, fs)
             y_helper = self._helper_preprocess(signal, fs)
-            if y_helper.size != y_legacy.size or y_helper.size == 0:
-                return y_legacy
-            if np.all(np.isfinite(y_legacy)) and np.all(np.isfinite(y_helper)) and y_legacy.size > 8:
-                corr = float(np.corrcoef(y_legacy, y_helper)[0, 1])
+            if y_helper.size != y_base.size or y_helper.size == 0:
+                return y_base
+            if np.all(np.isfinite(y_base)) and np.all(np.isfinite(y_helper)) and y_base.size > 8:
+                corr = float(np.corrcoef(y_base, y_helper)[0, 1])
                 if np.isfinite(corr) and corr < 0.0:
                     y_helper = -y_helper
-            legacy_std = float(np.std(y_legacy)) if y_legacy.size else 0.0
+            base_std = float(np.std(y_base)) if y_base.size else 0.0
             helper_std = float(np.std(y_helper)) if y_helper.size else 0.0
-            if np.isfinite(legacy_std) and legacy_std > 1e-8 and np.isfinite(helper_std) and helper_std > 1e-8:
-                y_helper = y_helper * (legacy_std / helper_std)
+            if np.isfinite(base_std) and base_std > 1e-8 and np.isfinite(helper_std) and helper_std > 1e-8:
+                y_helper = y_helper * (base_std / helper_std)
             alpha = float(np.clip(self.OBS_BLEND_ALPHA, 0.0, 1.0))
-            y = (1.0 - alpha) * y_legacy + alpha * y_helper
+            y = (1.0 - alpha) * y_base + alpha * y_helper
             sigma_hat = float(np.std(y)) if y.size else 0.0
             self._last_sigma_y = float(max(sigma_hat, 0.0))
             self._last_signal_std = float(np.std(y)) if y.size else 0.0
@@ -2116,10 +2116,10 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
                     "family": base_method,
                     "policy": str(self.OBS_FAMILY_POLICY),
                     "blend_alpha": float(alpha),
-                    "legacy_component": True,
+                    "base_component": True,
                     "helper_component": True,
                     "lowpass_enabled": False,
-                    "legacy_base_preprocess": False,
+                    "base_preprocess": False,
                 },
             }
             return y
@@ -2349,13 +2349,13 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
 
         return np.nan_to_num(Q, nan=0.0, posinf=0.0, neginf=0.0)
 
-    def _build_Q_legacy_coupled(
+    def _build_Q_compat_coupled(
         self, qx: float, dt: float, r_ratio: float,
     ) -> np.ndarray:
-        """Legacy coupled Q: all components scale with R_t/R_init ratio.
+        """Compatibility coupled Q: all components scale with R_t/R_init ratio.
         Kept for ablation comparison only.
         """
-        q_dyn_scale = 1.0 + self.QX_ADAPT_GAMMA_LEGACY * max(r_ratio - 1.0, 0.0)
+        q_dyn_scale = 1.0 + self.QX_ADAPT_GAMMA_COMPAT * max(r_ratio - 1.0, 0.0)
         q_res_scale = max(1.0, 2.0 - q_dyn_scale)
 
         Q = np.zeros((8, 8), dtype=np.float64)
@@ -4624,9 +4624,9 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
                         obs_nonosc_need=obs_nonosc_need_eff,
                         residual_prior_scale=residual_prior_eff_t,
                     )
-                elif self.ENABLE_LEGACY_COUPLED_Q:
+                elif self.ENABLE_COMPAT_COUPLED_Q:
                     r_ratio = float(np.mean(R_t)) / max(R_init, 1e-12) if multichannel else (R_t / max(R_init, 1e-12))
-                    Q = self._build_Q_legacy_coupled(qx, dt, r_ratio)
+                    Q = self._build_Q_compat_coupled(qx, dt, r_ratio)
                 # else: keep default Q (no adaptation)
 
                 # Re-predict with updated Q
@@ -5084,7 +5084,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
         active_modules = []
         if self.ENABLE_ADAPT_R: active_modules.append("adapt_R")
         if self.ENABLE_DISENTANGLED_Q: active_modules.append("disentangled_Q")
-        if self.ENABLE_LEGACY_COUPLED_Q: active_modules.append("legacy_coupled_Q")
+        if self.ENABLE_COMPAT_COUPLED_Q: active_modules.append("compat_coupled_Q")
         if self.ENABLE_STUDENT_T: active_modules.append("student_t")
         if self.ENABLE_FREQ_ADAPT: active_modules.append("freq_adapt")
         if freq_rescue_allowed:
@@ -5146,7 +5146,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
         meta_payload["model_version"] = MODEL_VERSION
         meta_payload["output_semantics"] = "smoothed"
         meta_payload["track_hz_semantics"] = (
-            "final_reported_rate_after_helper_assistant_and_external_readout_postprocess"
+            "final_reported_rate_after_helper_and_external_readout_postprocess"
         )
         meta_payload["track_hz_native_smoothed_semantics"] = (
             "native_PARH_OSSM_z_osc_frequency_after_RTS_and_post_smoothing_before_output_readout_postprocess"
@@ -5169,7 +5169,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
             enable_rate_source_arbiter_v1 or enable_rate_source_arbiter_v2 or enable_rate_source_arbiter_v3
         )
         meta_payload["rate_source_arbiter_mode"] = (
-            "diagnostic_legacy"
+            "diagnostic_compatibility"
             if (enable_rate_source_arbiter_v1 or enable_rate_source_arbiter_v2 or enable_rate_source_arbiter_v3)
             else "off"
         )
@@ -5351,7 +5351,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
                 else:
                     meta_payload["observation_model_type"] = (
                         f"fixed_sum_{str(self.OBS_FAMILY_POLICY)}" if self.USE_LIGHT_OBS_PATH
-                        else "fixed_sum_legacy_preprocess"
+                        else "fixed_sum_base_preprocess"
                     )
             meta_payload["observation_calibration"] = {
                 "enabled": bool(obs_cal["enabled"]),
@@ -5523,7 +5523,7 @@ class oscillator_PARH_OSSM(_BaseOscillatorHead):
                 enable_rate_source_arbiter_v1 or enable_rate_source_arbiter_v2 or enable_rate_source_arbiter_v3
             ),
             "rate_source_arbiter_mode": (
-                "diagnostic_legacy"
+                "diagnostic_compatibility"
                 if (enable_rate_source_arbiter_v1 or enable_rate_source_arbiter_v2 or enable_rate_source_arbiter_v3)
                 else "off"
             ),
