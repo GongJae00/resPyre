@@ -43,13 +43,12 @@ resPyre/
 │   └── models/
 │       ├── core/          # Shared oscillator parameters and base helpers
 │       └── heads/         # OSSM-KF, PARH-OSSM, and other oscillator heads
-├── analysis/              # Generated analysis outputs, ignored except README files
 ├── core/
 │   ├── evaluation/        # Metrics, plotting, frame-log utilities
 │   ├── pipeline/          # Runner, wrapper, evaluation, visualization, metadata
 │   └── utils/             # Config loader and shared utilities
 ├── configs/               # Experiment configs
-├── dataset/               # Public dataset notes and small metadata files
+├── dataset/               # Public dataset notes
 ├── paper/                 # Local manuscript workspace, ignored by Git
 ├── results/               # Generated run artifacts, ignored by Git
 ├── setup/                 # Environment bootstrap
@@ -95,8 +94,7 @@ The expected local dataset subdirectories are:
 - `dataset/SCAMPS`
 
 Raw datasets and local symlinks are intentionally ignored by Git. The tracked
-`dataset/` directory contains only dataset instructions and small metadata files
-needed by the loaders.
+`dataset/` directory contains only dataset instructions.
 
 ## Quick Start
 

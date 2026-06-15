@@ -45,14 +45,9 @@ ln -s /path/to/V4V dataset/V4V
 ln -s /path/to/SCAMPS dataset/SCAMPS
 ```
 
-The dataset helper can also create the expected local links when its default
-paths match your machine:
-
-```bash
-python scripts/build_rr_experiment_assets.py --create-symlinks
-```
-
-By default, that helper assumes `/mnt/hdd18t/rppg_dataset/raw`. Override it with:
+The dataset helper can also create the expected local links. By default, it
+looks under the ignored local directory `dataset/raw`; override this with
+`RESPYRE_RAW_DATA_ROOT` if the raw datasets live elsewhere:
 
 ```bash
 export RESPYRE_RAW_DATA_ROOT=/absolute/path/to/raw_dataset_root

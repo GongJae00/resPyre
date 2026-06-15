@@ -61,11 +61,7 @@ submission_package/
 submission_support/
 
 # --- Generated analysis artifacts ---
-analysis/*
-!analysis/
-!analysis/README.md
-!analysis/final_priors/
-!analysis/final_priors/README.md
+analysis/
 
 # --- Results (large data: PKL, NPZ, plots) ---
 results/
@@ -77,7 +73,6 @@ results_*.zip
 dataset/*
 !dataset/
 !dataset/README_dataset.md
-!dataset/*.tsv
 
 # --- Logs ---
 logs/

@@ -29,7 +29,7 @@ ANALYSIS_DIR = ROOT / "analysis"
 TABLE_DIR = ROOT / "paper" / "tables_ready"
 FIGURE_DIR = ROOT / "paper" / "figures"
 
-RAW_DATA_ROOT = Path(os.environ.get("RESPYRE_RAW_DATA_ROOT", "/mnt/hdd18t/rppg_dataset/raw"))
+RAW_DATA_ROOT = Path(os.environ.get("RESPYRE_RAW_DATA_ROOT", str(DATASET_DIR / "raw")))
 RAW_TARGETS = {
     "COHFACE": RAW_DATA_ROOT / "cohface",
     "MAHNOB": RAW_DATA_ROOT / "MAHNOB_HCI",
