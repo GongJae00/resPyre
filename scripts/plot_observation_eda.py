@@ -33,15 +33,6 @@ FAMILY_ORDER = ["OF", "OF_bridge", "DoF", "DoF_bridge", "P1D_lin", "P1D_quad", "
 MAIN_STAGE_ORDER = ["raw", "bandpass_only", "current_preprocess", "helper_preprocess"]
 MAIN_STAGE_LABELS = ["Raw", "Band", "Current", "Helper"]
 
-FALLBACK_DATASET_SUMMARY = pd.DataFrame(
-    [
-        {"dataset": "COHFACE", "n_units": 160},
-        {"dataset": "MAHNOB-HCI", "n_units": 525},
-        {"dataset": "V4V", "n_units": 724},
-        {"dataset": "SCAMPS", "n_units": 2800},
-    ]
-)
-
 FALLBACK_STAGE_VALUES = {
     "COHFACE": {
         "corr_wave_best_median": [0.33, 0.52, 0.64, 0.69],
@@ -76,16 +67,6 @@ def _parse_args():
         "--delta-csv-mahnob",
         type=Path,
         default=root / "analysis" / "mahnob_preproc_deltas.csv",
-    )
-    parser.add_argument(
-        "--dataset-rate-csv",
-        type=Path,
-        default=root / "analysis" / "dataset_rate_distribution_eda.csv",
-    )
-    parser.add_argument(
-        "--dataset-summary-csv",
-        type=Path,
-        default=root / "analysis" / "dataset_distribution_eda.csv",
     )
     parser.add_argument(
         "--out-main",
@@ -199,61 +180,7 @@ def _main_stage_values(summary: pd.DataFrame, dataset: str, metric: str) -> list
     return [fallback[i] if not np.isfinite(value) else value for i, value in enumerate(values)]
 
 
-def _draw_evidence_scope_panel(ax, dataset_summary: pd.DataFrame):
-    ax.set_axis_off()
-    ax.set_title("a  Evidence scope", fontsize=10.5, weight="bold", loc="left", pad=5)
-    n_lookup = dict(zip(dataset_summary["dataset"], dataset_summary["n_units"])) if not dataset_summary.empty else {}
-    rows = [
-        ("COHFACE", "waveform + rate", "clean benchmark", "#16746f"),
-        ("MAHNOB-HCI", "waveform + rate", "hard benchmark", "#16746f"),
-        ("V4V", "rate labels only", "auxiliary check", "#c9861f"),
-        ("SCAMPS", "synthetic signal", "diagnostic context", "#c9861f"),
-    ]
-    x0, x1 = 0.02, 0.96
-    y_top = 0.82
-    row_h = 0.17
-    ax.hlines(y_top + 0.055, x0, x1, color="#1f2933", linewidth=1.2, transform=ax.transAxes)
-    ax.text(x0, y_top + 0.095, "Dataset", fontsize=7.7, weight="bold", color="#26313b", transform=ax.transAxes)
-    ax.text(0.35, y_top + 0.095, "Evidence", fontsize=7.7, weight="bold", color="#26313b", transform=ax.transAxes)
-    ax.text(0.70, y_top + 0.095, "Role in analysis", fontsize=7.7, weight="bold", color="#26313b", transform=ax.transAxes)
-    for idx, (dataset, evidence, role, color) in enumerate(rows):
-        y = y_top - idx * row_h
-        ax.hlines(y - 0.058, x0, x1, color="#d5dbe1", linewidth=0.8, transform=ax.transAxes)
-        ax.vlines(x0, y - 0.050, y + 0.047, color=color, linewidth=2.4, transform=ax.transAxes)
-        n_value = n_lookup.get(dataset, FALLBACK_DATASET_SUMMARY.loc[FALLBACK_DATASET_SUMMARY["dataset"].eq(dataset), "n_units"].iloc[0])
-        ax.text(
-            x0 + 0.018,
-            y + 0.018,
-            dataset,
-            fontsize=8.1,
-            weight="bold",
-            color=color,
-            va="center",
-            transform=ax.transAxes,
-        )
-        ax.text(
-            x0 + 0.018,
-            y - 0.028,
-            f"N={int(n_value)}",
-            fontsize=7.6,
-            weight="bold",
-            color=color,
-            va="center",
-            transform=ax.transAxes,
-        )
-        ax.text(0.35, y - 0.004, evidence, fontsize=7.6, color="#26313b", va="center", transform=ax.transAxes)
-        ax.text(0.70, y - 0.004, role, fontsize=7.6, color="#26313b", va="center", transform=ax.transAxes)
-    ax.text(
-        x0,
-        0.035,
-        "Real waveform claims use COHFACE and MAHNOB-HCI only.",
-        fontsize=7.5,
-        color="#26313b",
-        transform=ax.transAxes,
-    )
-
-
-def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: pd.DataFrame, metric: str, title: str, panel_label: str, show_legend: bool = False):
+def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: pd.DataFrame, metric: str, title: str, panel_label: str):
     colors = {"COHFACE": "#256d85", "MAHNOB-HCI": "#b55a30"}
     x = np.arange(len(MAIN_STAGE_ORDER))
     for dataset, summary in [("COHFACE", cohface_summary), ("MAHNOB-HCI", mahnob_summary)]:
@@ -267,64 +194,40 @@ def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: p
             linewidth=1.7,
             label=dataset,
         )
-        for xi, yi in zip(x, values):
-            if metric == "highfreq_energy_ratio_median" and yi < 0.08:
-                continue
-            dy = 0.055 if dataset == "COHFACE" else 0.085
-            dx = 0.0
-            if yi < 0.08:
-                dx = -0.035 if dataset == "COHFACE" else 0.035
-            ax.text(xi + dx, min(yi + dy, 1.03), f"{yi:.2f}", ha="center", va="bottom", fontsize=6.3, color="#26313b")
-        if show_legend:
-            ax.text(
-                x[-1] + 0.12,
-                values[-1],
-                dataset,
-                fontsize=7.2,
-                color=colors[dataset],
-                va="center",
-                ha="left",
-                weight="bold",
-            )
-    ax.set_title(f"{panel_label}  {title}", fontsize=9.8, weight="bold", loc="left", pad=4)
-    ax.set_xlim(-0.25, len(x) - 0.45 if not show_legend else len(x) - 0.08)
+    ax.set_title(f"{panel_label}  {title}", fontsize=9.4, weight="bold", loc="left", pad=4)
+    ax.set_xlim(-0.25, len(x) - 0.75)
     ax.set_ylim(-0.02, 1.08)
     ax.set_xticks(x)
-    ax.set_xticklabels(MAIN_STAGE_LABELS, fontsize=7.1)
+    ax.set_xticklabels(MAIN_STAGE_LABELS, fontsize=7.4)
     ax.set_yticks([0.0, 0.5, 1.0])
-    ax.set_yticklabels(["0", "0.5", "1.0"], fontsize=7.1)
-    ax.grid(axis="y", linestyle="--", alpha=0.22)
+    ax.set_yticklabels(["0", "0.5", "1.0"], fontsize=7.4)
+    ax.grid(axis="y", linestyle="--", alpha=0.18)
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def _draw_main_figure(out_path: Path, dataset_summary: pd.DataFrame, datasets: list[tuple[str, pd.DataFrame, pd.DataFrame]]):
+def _draw_main_figure(out_path: Path, datasets: list[tuple[str, pd.DataFrame, pd.DataFrame]]):
     summary_lookup = {label: summary for label, summary, _delta in datasets}
-    fig = plt.figure(figsize=(7.25, 3.35), constrained_layout=True)
-    grid = fig.add_gridspec(1, 2, width_ratios=[1.22, 1.0], wspace=0.22)
-    scope_ax = fig.add_subplot(grid[0, 0])
-    right_grid = grid[0, 1].subgridspec(2, 1, hspace=0.33)
-    waveform_ax = fig.add_subplot(right_grid[0, 0])
-    burden_ax = fig.add_subplot(right_grid[1, 0])
-    _draw_evidence_scope_panel(scope_ax, dataset_summary)
+    fig, axes = plt.subplots(1, 2, figsize=(7.25, 2.15), constrained_layout=True, sharey=True)
     cohface = summary_lookup.get("COHFACE", _fallback_stage_summary("COHFACE"))
     mahnob = summary_lookup.get("MAHNOB-HCI", _fallback_stage_summary("MAHNOB-HCI"))
     _draw_metric_line_panel(
-        waveform_ax,
+        axes[0],
         cohface,
         mahnob,
         "corr_wave_best_median",
         "Waveform evidence",
-        "b",
-        show_legend=True,
+        "a",
     )
     _draw_metric_line_panel(
-        burden_ax,
+        axes[1],
         cohface,
         mahnob,
         "highfreq_energy_ratio_median",
         "High-frequency burden",
-        "c",
+        "b",
     )
+    axes[0].set_ylabel("Median value", fontsize=7.8)
+    axes[0].legend(frameon=False, loc="upper left", fontsize=7.2, handlelength=1.6)
     save_figure(fig, out_path)
 
 
@@ -350,10 +253,7 @@ def main():
 
     set_manuscript_style("paper")
 
-    summary_df = _load_csv_or_empty(args.dataset_summary_csv)
-    if summary_df.empty:
-        summary_df = FALLBACK_DATASET_SUMMARY.copy()
-    _draw_main_figure(args.out_main, summary_df, datasets)
+    _draw_main_figure(args.out_main, datasets)
 
     metrics_delta = [
         ("corr_wave_best_delta_median", "Waveform Corr Δ vs Raw", "RdYlGn", -0.4, 0.4, "{:+.2f}"),
