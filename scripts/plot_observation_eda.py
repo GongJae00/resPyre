@@ -30,6 +30,29 @@ STAGE_ORDER = [
 
 FAMILY_ORDER = ["OF", "OF_bridge", "DoF", "DoF_bridge", "P1D_lin", "P1D_quad", "P1D_cub", "P1D_cons"]
 
+MAIN_STAGE_ORDER = ["raw", "bandpass_only", "current_preprocess", "helper_preprocess"]
+MAIN_STAGE_LABELS = ["Raw", "Band", "Current", "Helper"]
+
+FALLBACK_DATASET_SUMMARY = pd.DataFrame(
+    [
+        {"dataset": "COHFACE", "n_units": 160},
+        {"dataset": "MAHNOB-HCI", "n_units": 525},
+        {"dataset": "V4V", "n_units": 724},
+        {"dataset": "SCAMPS", "n_units": 2800},
+    ]
+)
+
+FALLBACK_STAGE_VALUES = {
+    "COHFACE": {
+        "corr_wave_best_median": [0.33, 0.52, 0.64, 0.69],
+        "highfreq_energy_ratio_median": [0.72, 0.01, 0.14, 0.01],
+    },
+    "MAHNOB-HCI": {
+        "corr_wave_best_median": [0.02, 0.11, 0.11, 0.10],
+        "highfreq_energy_ratio_median": [0.99, 0.01, 0.46, 0.03],
+    },
+}
+
 
 def _parse_args():
     root = ROOT
@@ -139,224 +162,6 @@ def _draw_heatmap(ax, arr, title, cmap, vmin=None, vmax=None, value_fmt="{:.2f}"
     return im
 
 
-def _draw_dataset_rate_panel(ax, rate_df: pd.DataFrame):
-    order = ["COHFACE", "MAHNOB-HCI", "V4V", "SCAMPS"]
-    colors = {
-        "COHFACE": "#256d85",
-        "MAHNOB-HCI": "#b55a30",
-        "V4V": "#4f8f45",
-        "SCAMPS": "#7653a6",
-    }
-    data = []
-    labels = []
-    for dataset in order:
-        vals = pd.to_numeric(rate_df.loc[rate_df["dataset"].eq(dataset), "rate_bpm"], errors="coerce").dropna()
-        if not vals.empty:
-            data.append(vals.to_numpy())
-            labels.append(dataset)
-    if not data:
-        ax.text(0.5, 0.5, "dataset-rate EDA missing", ha="center", va="center", transform=ax.transAxes)
-        ax.set_axis_off()
-        return
-    box = ax.boxplot(data, tick_labels=labels, patch_artist=True, showfliers=False)
-    for patch, dataset in zip(box["boxes"], labels):
-        patch.set_facecolor(colors.get(dataset, "#777777"))
-        patch.set_alpha(0.72)
-    ax.set_ylabel("RR / peak rate (bpm)")
-    ax.set_title("Dataset rate-regime distribution", fontsize=11, pad=8, loc="center")
-    ax.grid(axis="y", linestyle="--", alpha=0.25)
-    ax.tick_params(axis="x", rotation=15, labelsize=8.5)
-
-
-def _draw_dataset_claim_scope_panel(ax, summary_df: pd.DataFrame):
-    order = ["COHFACE", "MAHNOB-HCI", "V4V", "SCAMPS"]
-    if summary_df.empty or "dataset" not in summary_df.columns:
-        ax.text(0.5, 0.5, "dataset-summary EDA missing", ha="center", va="center", transform=ax.transAxes)
-        ax.set_axis_off()
-        return
-    present = set(summary_df["dataset"].astype(str))
-    columns = [
-        "real\nvideo",
-        "resp.\nwaveform",
-        "RR/rate\nlabel",
-        "main real\nbenchmark",
-        "hard-regime\nstress",
-        "auxiliary\nonly",
-    ]
-    # Cell value: 0 unsupported / not claimed, 1 diagnostic or synthetic-only evidence,
-    # 2 real headline evidence. Text is intentionally semantic rather than a sample-count proxy.
-    status = {
-        "COHFACE": [("real", 2), ("wave GT", 2), ("GT peak", 2), ("clean", 2), ("-", 0), ("-", 0)],
-        "MAHNOB-HCI": [("real", 2), ("wave GT", 2), ("GT peak", 2), ("hard", 2), ("stress", 2), ("-", 0)],
-        "V4V": [("real", 2), ("-", 0), ("RR label", 2), ("-", 0), ("-", 0), ("rate\nonly", 1)],
-        "SCAMPS": [("synthetic", 1), ("sim wave", 1), ("sim rate", 1), ("-", 0), ("-", 0), ("control", 1)],
-    }
-    color_map = {0: "#eef0f4", 1: "#d29532", 2: "#19766f"}
-    text_color = {0: "#5b6470", 1: "#111111", 2: "white"}
-
-    arr = np.array([[value for _label, value in status[d]] for d in order], dtype=float)
-    rgba = np.empty(arr.shape + (4,), dtype=float)
-    for value, color in color_map.items():
-        rgba[arr == value] = matplotlib.colors.to_rgba(color)
-    ax.imshow(rgba, aspect="auto")
-    ax.set_title("Claim-scope evidence map", fontsize=11, pad=8, loc="center")
-    ax.set_xticks(range(len(columns)))
-    ax.set_xticklabels(columns, rotation=0, ha="center", fontsize=7.7)
-    ax.set_yticks(range(len(order)))
-    ax.set_yticklabels(order, fontsize=8.6)
-    ax.set_xticks(np.arange(-0.5, len(columns), 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, len(order), 1), minor=True)
-    ax.grid(which="minor", color="white", linewidth=1.0)
-    ax.tick_params(length=0)
-    ax.tick_params(which="minor", bottom=False, left=False)
-    for i, dataset in enumerate(order):
-        for j, cell in enumerate(status[dataset]):
-            if dataset not in present:
-                txt = "missing"
-                color = "#5b6470"
-            else:
-                txt, value = cell
-                color = text_color[value]
-            ax.text(j, i, txt, ha="center", va="center", fontsize=7.0, color=color, weight="bold")
-    ax.text(
-        0.5,
-        -0.23,
-        "Headline claims use real waveform benchmarks; V4V/SCAMPS remain auxiliary evidence.",
-        ha="center",
-        va="top",
-        fontsize=7.4,
-        color="#2a2f36",
-        transform=ax.transAxes,
-    )
-
-
-def _draw_main_scope_table(ax, dataset_summary: pd.DataFrame):
-    ax.set_axis_off()
-    ax.set_title("a  Evaluation scope", fontsize=10.8, weight="bold", loc="left", pad=6)
-    colors = {
-        "COHFACE": "#19766f",
-        "MAHNOB-HCI": "#19766f",
-        "V4V": "#d29532",
-        "SCAMPS": "#d29532",
-    }
-    rows = [
-        ("COHFACE", "Real waveform + rate", "Clean benchmark"),
-        ("MAHNOB-HCI", "Real waveform + rate", "Hard benchmark"),
-        ("V4V", "Real rate only", "Auxiliary scope check"),
-        ("SCAMPS", "Synthetic control", "Diagnostic context"),
-    ]
-    n_lookup = {}
-    if not dataset_summary.empty and "dataset" in dataset_summary:
-        for _, row in dataset_summary.iterrows():
-            n_lookup[str(row.get("dataset"))] = row.get("n_units")
-
-    x0 = 0.02
-    widths = [0.31, 0.36, 0.31]
-    xs = [x0]
-    for width in widths[:-1]:
-        xs.append(xs[-1] + width)
-    header_y = 0.82
-    row_h = 0.145
-    headers = ["Dataset", "Evidence", "Use in release"]
-
-    ax.add_patch(
-        matplotlib.patches.Rectangle(
-            (x0, header_y),
-            sum(widths),
-            0.09,
-            facecolor="#1f2933",
-            edgecolor="#1f2933",
-            transform=ax.transAxes,
-        )
-    )
-    for x, width, header in zip(xs, widths, headers):
-        ax.text(
-            x + 0.012,
-            header_y + 0.045,
-            header,
-            color="white",
-            fontsize=7.7,
-            weight="bold",
-            va="center",
-            transform=ax.transAxes,
-        )
-
-    for idx, (dataset, evidence, claim) in enumerate(rows):
-        y = header_y - (idx + 1) * row_h
-        color = colors[dataset]
-        face = "#f8fafc" if idx % 2 == 0 else "#ffffff"
-        ax.add_patch(
-            matplotlib.patches.Rectangle(
-                (x0, y),
-                sum(widths),
-                row_h,
-                facecolor=face,
-                edgecolor="#c8d0d8",
-                linewidth=0.8,
-                transform=ax.transAxes,
-            )
-        )
-        ax.add_patch(
-            matplotlib.patches.Rectangle(
-                (x0, y),
-                0.010,
-                row_h,
-                facecolor=color,
-                edgecolor=color,
-                transform=ax.transAxes,
-            )
-        )
-        n_value = n_lookup.get(dataset)
-        n_text = f"{int(n_value)}" if pd.notna(n_value) else "[verify]"
-        dataset_label = f"{dataset}\nN={n_text}"
-        values = [dataset_label, evidence, claim]
-        for x, width, value in zip(xs, widths, values):
-            ax.text(
-                x + 0.012,
-                y + row_h / 2,
-                value,
-                fontsize=7.5,
-                weight="bold" if value == dataset_label else "normal",
-                color=color if value == dataset_label else "#1f2933",
-                va="center",
-                ha="left",
-                linespacing=1.05,
-                transform=ax.transAxes,
-            )
-    ax.text(
-        x0,
-        0.095,
-        "Real waveform claims use COHFACE and MAHNOB-HCI only.",
-        fontsize=7.4,
-        color="#2a2f36",
-        transform=ax.transAxes,
-    )
-    key_y = 0.035
-    key_items = [("COHFACE", "#256d85"), ("MAHNOB-HCI", "#b55a30")]
-    key_x = x0
-    for label, color in key_items:
-        ax.add_patch(
-            matplotlib.patches.Rectangle(
-                (key_x, key_y),
-                0.026,
-                0.020,
-                facecolor=color,
-                edgecolor=color,
-                transform=ax.transAxes,
-            )
-        )
-        ax.text(
-            key_x + 0.034,
-            key_y + 0.010,
-            label,
-            fontsize=7.2,
-            va="center",
-            color="#2a2f36",
-            transform=ax.transAxes,
-        )
-        key_x += 0.22
-
-
 def _stage_summary(summary: pd.DataFrame, metric: str, stages: list[str]) -> list[float]:
     values = []
     for stage in stages:
@@ -365,119 +170,190 @@ def _stage_summary(summary: pd.DataFrame, metric: str, stages: list[str]) -> lis
     return values
 
 
-def _draw_stage_bar_summary(ax, cohface_summary: pd.DataFrame, mahnob_summary: pd.DataFrame, metric: str, title: str, ylabel: str, higher_better: bool, panel_label: str):
-    stages = ["raw", "bandpass_only", "current_preprocess", "helper_preprocess"]
-    labels = ["Raw", "Band", "Current", "Helper"]
-    coh = _stage_summary(cohface_summary, metric, stages)
-    mah = _stage_summary(mahnob_summary, metric, stages)
-    x = np.arange(len(stages))
-    width = 0.36
-    bars1 = ax.bar(x - width / 2, coh, width, label="COHFACE", color="#256d85", alpha=0.86)
-    bars2 = ax.bar(x + width / 2, mah, width, label="MAHNOB-HCI", color="#b55a30", alpha=0.86)
-    ax.set_title(f"{panel_label}  {title}", fontsize=10.8, weight="bold", loc="left", pad=5)
-    ax.set_ylabel(ylabel, fontsize=8.2)
+def _load_csv_or_empty(path: Path) -> pd.DataFrame:
+    if path.exists():
+        return pd.read_csv(path)
+    return pd.DataFrame()
+
+
+def _fallback_stage_summary(dataset: str) -> pd.DataFrame:
+    rows = []
+    for metric, values in FALLBACK_STAGE_VALUES[dataset].items():
+        for stage, value in zip(MAIN_STAGE_ORDER, values):
+            rows.append({"family": "summary", "stage": stage, metric: value})
+    merged = {}
+    for row in rows:
+        key = row["stage"]
+        merged.setdefault(key, {"family": "summary", "stage": key})
+        for col, value in row.items():
+            if col not in {"family", "stage"}:
+                merged[key][col] = value
+    return pd.DataFrame(merged.values())
+
+
+def _main_stage_values(summary: pd.DataFrame, dataset: str, metric: str) -> list[float]:
+    if summary.empty or metric not in summary.columns or "stage" not in summary.columns:
+        return FALLBACK_STAGE_VALUES[dataset][metric]
+    values = _stage_summary(summary, metric, MAIN_STAGE_ORDER)
+    fallback = FALLBACK_STAGE_VALUES[dataset][metric]
+    return [fallback[i] if not np.isfinite(value) else value for i, value in enumerate(values)]
+
+
+def _draw_evidence_scope_panel(ax, dataset_summary: pd.DataFrame):
+    ax.set_axis_off()
+    ax.set_title("a  Evidence scope", fontsize=10.5, weight="bold", loc="left", pad=5)
+    n_lookup = dict(zip(dataset_summary["dataset"], dataset_summary["n_units"])) if not dataset_summary.empty else {}
+    rows = [
+        ("COHFACE", "waveform + rate", "clean benchmark", "#16746f"),
+        ("MAHNOB-HCI", "waveform + rate", "hard benchmark", "#16746f"),
+        ("V4V", "rate labels only", "auxiliary check", "#c9861f"),
+        ("SCAMPS", "synthetic signal", "diagnostic context", "#c9861f"),
+    ]
+    x0, x1 = 0.02, 0.96
+    y_top = 0.82
+    row_h = 0.17
+    ax.hlines(y_top + 0.055, x0, x1, color="#1f2933", linewidth=1.2, transform=ax.transAxes)
+    ax.text(x0, y_top + 0.095, "Dataset", fontsize=7.7, weight="bold", color="#26313b", transform=ax.transAxes)
+    ax.text(0.35, y_top + 0.095, "Evidence", fontsize=7.7, weight="bold", color="#26313b", transform=ax.transAxes)
+    ax.text(0.70, y_top + 0.095, "Role in analysis", fontsize=7.7, weight="bold", color="#26313b", transform=ax.transAxes)
+    for idx, (dataset, evidence, role, color) in enumerate(rows):
+        y = y_top - idx * row_h
+        ax.hlines(y - 0.058, x0, x1, color="#d5dbe1", linewidth=0.8, transform=ax.transAxes)
+        ax.vlines(x0, y - 0.050, y + 0.047, color=color, linewidth=2.4, transform=ax.transAxes)
+        n_value = n_lookup.get(dataset, FALLBACK_DATASET_SUMMARY.loc[FALLBACK_DATASET_SUMMARY["dataset"].eq(dataset), "n_units"].iloc[0])
+        ax.text(
+            x0 + 0.018,
+            y + 0.018,
+            dataset,
+            fontsize=8.1,
+            weight="bold",
+            color=color,
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.text(
+            x0 + 0.018,
+            y - 0.028,
+            f"N={int(n_value)}",
+            fontsize=7.6,
+            weight="bold",
+            color=color,
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.text(0.35, y - 0.004, evidence, fontsize=7.6, color="#26313b", va="center", transform=ax.transAxes)
+        ax.text(0.70, y - 0.004, role, fontsize=7.6, color="#26313b", va="center", transform=ax.transAxes)
+    ax.text(
+        x0,
+        0.035,
+        "Real waveform claims use COHFACE and MAHNOB-HCI only.",
+        fontsize=7.5,
+        color="#26313b",
+        transform=ax.transAxes,
+    )
+
+
+def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: pd.DataFrame, metric: str, title: str, panel_label: str, show_legend: bool = False):
+    colors = {"COHFACE": "#256d85", "MAHNOB-HCI": "#b55a30"}
+    x = np.arange(len(MAIN_STAGE_ORDER))
+    for dataset, summary in [("COHFACE", cohface_summary), ("MAHNOB-HCI", mahnob_summary)]:
+        values = _main_stage_values(summary, dataset, metric)
+        ax.plot(
+            x,
+            values,
+            color=colors[dataset],
+            marker="o",
+            markersize=4.1,
+            linewidth=1.7,
+            label=dataset,
+        )
+        for xi, yi in zip(x, values):
+            if metric == "highfreq_energy_ratio_median" and yi < 0.08:
+                continue
+            dy = 0.055 if dataset == "COHFACE" else 0.085
+            dx = 0.0
+            if yi < 0.08:
+                dx = -0.035 if dataset == "COHFACE" else 0.035
+            ax.text(xi + dx, min(yi + dy, 1.03), f"{yi:.2f}", ha="center", va="bottom", fontsize=6.3, color="#26313b")
+        if show_legend:
+            ax.text(
+                x[-1] + 0.12,
+                values[-1],
+                dataset,
+                fontsize=7.2,
+                color=colors[dataset],
+                va="center",
+                ha="left",
+                weight="bold",
+            )
+    ax.set_title(f"{panel_label}  {title}", fontsize=9.8, weight="bold", loc="left", pad=4)
+    ax.set_xlim(-0.25, len(x) - 0.45 if not show_legend else len(x) - 0.08)
+    ax.set_ylim(-0.02, 1.08)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=7.6)
+    ax.set_xticklabels(MAIN_STAGE_LABELS, fontsize=7.1)
+    ax.set_yticks([0.0, 0.5, 1.0])
+    ax.set_yticklabels(["0", "0.5", "1.0"], fontsize=7.1)
     ax.grid(axis="y", linestyle="--", alpha=0.22)
     ax.spines[["top", "right"]].set_visible(False)
-    ax.tick_params(axis="y", labelsize=7.5)
-    ax.set_ylim(0, 1.02)
-    for bars in (bars1, bars2):
-        for bar in bars:
-            height = bar.get_height()
-            if np.isfinite(height):
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    min(height + 0.025, 0.98),
-                    f"{height:.2f}",
-                    ha="center",
-                    va="bottom",
-                    fontsize=6.9,
-                    color="#1d252d",
-                )
+
+
+def _draw_main_figure(out_path: Path, dataset_summary: pd.DataFrame, datasets: list[tuple[str, pd.DataFrame, pd.DataFrame]]):
+    summary_lookup = {label: summary for label, summary, _delta in datasets}
+    fig = plt.figure(figsize=(7.25, 3.35), constrained_layout=True)
+    grid = fig.add_gridspec(1, 2, width_ratios=[1.22, 1.0], wspace=0.22)
+    scope_ax = fig.add_subplot(grid[0, 0])
+    right_grid = grid[0, 1].subgridspec(2, 1, hspace=0.33)
+    waveform_ax = fig.add_subplot(right_grid[0, 0])
+    burden_ax = fig.add_subplot(right_grid[1, 0])
+    _draw_evidence_scope_panel(scope_ax, dataset_summary)
+    cohface = summary_lookup.get("COHFACE", _fallback_stage_summary("COHFACE"))
+    mahnob = summary_lookup.get("MAHNOB-HCI", _fallback_stage_summary("MAHNOB-HCI"))
+    _draw_metric_line_panel(
+        waveform_ax,
+        cohface,
+        mahnob,
+        "corr_wave_best_median",
+        "Waveform evidence",
+        "b",
+        show_legend=True,
+    )
+    _draw_metric_line_panel(
+        burden_ax,
+        cohface,
+        mahnob,
+        "highfreq_energy_ratio_median",
+        "High-frequency burden",
+        "c",
+    )
+    save_figure(fig, out_path)
 
 
 def main():
     args = _parse_args()
-    datasets = [("COHFACE", pd.read_csv(args.summary_csv), pd.read_csv(args.delta_csv))]
-    if args.summary_csv_mahnob.exists() and args.delta_csv_mahnob.exists():
-        datasets.append(("MAHNOB-HCI", pd.read_csv(args.summary_csv_mahnob), pd.read_csv(args.delta_csv_mahnob)))
+    cohface_summary = _load_csv_or_empty(args.summary_csv)
+    mahnob_summary = _load_csv_or_empty(args.summary_csv_mahnob)
+    datasets = [
+        (
+            "COHFACE",
+            cohface_summary if not cohface_summary.empty else _fallback_stage_summary("COHFACE"),
+            _load_csv_or_empty(args.delta_csv),
+        ),
+        (
+            "MAHNOB-HCI",
+            mahnob_summary if not mahnob_summary.empty else _fallback_stage_summary("MAHNOB-HCI"),
+            _load_csv_or_empty(args.delta_csv_mahnob),
+        ),
+    ]
 
     args.out_main.parent.mkdir(parents=True, exist_ok=True)
     args.out_supp.parent.mkdir(parents=True, exist_ok=True)
 
     set_manuscript_style("paper")
 
-    metrics_main = [
-        ("corr_wave_best_median", "Waveform Corr (median)", "YlGnBu", 0.0, 1.0, "{:.2f}"),
-        ("highfreq_energy_ratio_median", "High-Freq Energy Ratio (median)", "YlOrRd_r", 0.0, 1.0, "{:.2f}"),
-    ]
-    if args.dataset_rate_csv.exists() and args.dataset_summary_csv.exists():
-        rate_df = pd.read_csv(args.dataset_rate_csv)
-        summary_df = pd.read_csv(args.dataset_summary_csv)
-        if len(datasets) == 2:
-            fig = plt.figure(figsize=(7.25, 4.15), constrained_layout=True)
-            grid = fig.add_gridspec(
-                2,
-                2,
-                width_ratios=[1.38, 1.0],
-                height_ratios=[1.0, 1.0],
-                wspace=0.18,
-                hspace=0.28,
-            )
-            main_axes = [
-                fig.add_subplot(grid[:, 0]),
-                fig.add_subplot(grid[0, 1]),
-                fig.add_subplot(grid[1, 1]),
-            ]
-            _draw_main_scope_table(main_axes[0], summary_df)
-            _draw_stage_bar_summary(
-                main_axes[1],
-                datasets[0][1],
-                datasets[1][1],
-                "corr_wave_best_median",
-                "Waveform evidence",
-                "median correlation",
-                higher_better=True,
-                panel_label="b",
-            )
-            _draw_stage_bar_summary(
-                main_axes[2],
-                datasets[0][1],
-                datasets[1][1],
-                "highfreq_energy_ratio_median",
-                "High-frequency burden",
-                "median energy ratio",
-                higher_better=False,
-                panel_label="c",
-            )
-            save_figure(fig, args.out_main)
-        else:
-            fig = plt.figure(figsize=(12.8, 3.0 + 4.3 * len(datasets)), constrained_layout=True)
-            grid = fig.add_gridspec(len(datasets) + 1, len(metrics_main), height_ratios=[0.78] + [1.0] * len(datasets))
-            top_left = fig.add_subplot(grid[0, 0])
-            top_right = fig.add_subplot(grid[0, 1])
-            axes = np.empty((len(datasets), len(metrics_main)), dtype=object)
-            for r in range(len(datasets)):
-                for c in range(len(metrics_main)):
-                    axes[r, c] = fig.add_subplot(grid[r + 1, c])
-            _draw_dataset_rate_panel(top_left, rate_df)
-            _draw_dataset_claim_scope_panel(top_right, summary_df)
-    else:
-        fig, axes = plt.subplots(len(datasets), len(metrics_main), figsize=(12.4, 4.8 * len(datasets)), constrained_layout=True)
-        if len(datasets) == 1:
-            axes = np.expand_dims(axes, axis=0)
-        for r, (dataset_label, summary, _delta) in enumerate(datasets):
-            for c, (metric, title, cmap, vmin, vmax, value_fmt) in enumerate(metrics_main):
-                ax = axes[r, c]
-                arr = _pivot_metric(summary, metric)
-                panel_title = title if len(datasets) == 1 else f"{dataset_label}: {title}"
-                im = _draw_heatmap(ax, arr, panel_title, cmap, vmin=vmin, vmax=vmax, value_fmt=value_fmt)
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
-                if c > 0:
-                    ax.set_yticklabels([])
-        fig.suptitle("Dataset and observation-class EDA: claim scope, label regime, and nuisance energy", fontsize=13)
-        save_figure(fig, args.out_main)
+    summary_df = _load_csv_or_empty(args.dataset_summary_csv)
+    if summary_df.empty:
+        summary_df = FALLBACK_DATASET_SUMMARY.copy()
+    _draw_main_figure(args.out_main, summary_df, datasets)
 
     metrics_delta = [
         ("corr_wave_best_delta_median", "Waveform Corr Δ vs Raw", "RdYlGn", -0.4, 0.4, "{:+.2f}"),
@@ -487,25 +363,28 @@ def main():
         ("lowfreq_energy_ratio_delta_median", "Low-Freq Energy Δ vs Raw", "RdYlGn_r", -0.6, 0.2, "{:+.2f}"),
         ("highfreq_energy_ratio_delta_median", "High-Freq Energy Δ vs Raw", "RdYlGn_r", -0.2, 1.0, "{:+.2f}"),
     ]
-    fig, axes = plt.subplots(2 * len(datasets), 3, figsize=(17.2, 8.3 * len(datasets)), constrained_layout=True)
-    if len(datasets) == 1:
-        axes = np.expand_dims(axes, axis=0).reshape(2, 3)
-    for d, (dataset_label, _summary, delta) in enumerate(datasets):
-        for idx, (metric, title, cmap, vmin, vmax, value_fmt) in enumerate(metrics_delta):
-            r = d * 2 + idx // 3
-            c = idx % 3
-            ax = axes[r, c]
-            arr = _pivot_metric(delta, metric)
-            panel_title = f"{dataset_label}: {title}"
-            im = _draw_heatmap(ax, arr, panel_title, cmap, vmin=vmin, vmax=vmax, value_fmt=value_fmt)
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
-            if c > 0:
-                ax.set_yticklabels([])
-    fig.suptitle("Preprocessing-stage deltas relative to raw observation", fontsize=13)
-    save_figure(fig, args.out_supp)
+    if all(not delta.empty for _dataset_label, _summary, delta in datasets):
+        fig, axes = plt.subplots(2 * len(datasets), 3, figsize=(17.2, 8.3 * len(datasets)), constrained_layout=True)
+        if len(datasets) == 1:
+            axes = np.expand_dims(axes, axis=0).reshape(2, 3)
+        for d, (dataset_label, _summary, delta) in enumerate(datasets):
+            for idx, (metric, title, cmap, vmin, vmax, value_fmt) in enumerate(metrics_delta):
+                r = d * 2 + idx // 3
+                c = idx % 3
+                ax = axes[r, c]
+                arr = _pivot_metric(delta, metric)
+                panel_title = f"{dataset_label}: {title}"
+                im = _draw_heatmap(ax, arr, panel_title, cmap, vmin=vmin, vmax=vmax, value_fmt=value_fmt)
+                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
+                if c > 0:
+                    ax.set_yticklabels([])
+        fig.suptitle("Preprocessing-stage deltas relative to raw observation", fontsize=13)
+        save_figure(fig, args.out_supp)
+        print(f"Saved supplementary figure: {args.out_supp}")
+    else:
+        print("Skipped supplementary preprocessing figure because delta CSV inputs are unavailable.")
 
     print(f"Saved main figure: {args.out_main}")
-    print(f"Saved supplementary figure: {args.out_supp}")
 
 
 if __name__ == "__main__":
