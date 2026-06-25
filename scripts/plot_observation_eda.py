@@ -180,7 +180,7 @@ def _main_stage_values(summary: pd.DataFrame, dataset: str, metric: str) -> list
     return [fallback[i] if not np.isfinite(value) else value for i, value in enumerate(values)]
 
 
-def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: pd.DataFrame, metric: str, title: str, panel_label: str):
+def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: pd.DataFrame, metric: str, title: str):
     colors = {"COHFACE": "#256d85", "MAHNOB-HCI": "#b55a30"}
     x = np.arange(len(MAIN_STAGE_ORDER))
     for dataset, summary in [("COHFACE", cohface_summary), ("MAHNOB-HCI", mahnob_summary)]:
@@ -194,7 +194,7 @@ def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: p
             linewidth=1.7,
             label=dataset,
         )
-    ax.set_title(f"{panel_label}  {title}", fontsize=9.4, weight="bold", loc="left", pad=4)
+    ax.set_title(title, fontsize=9.4, weight="bold", loc="left", pad=4)
     ax.set_xlim(-0.25, len(x) - 0.75)
     ax.set_ylim(-0.02, 1.08)
     ax.set_xticks(x)
@@ -207,7 +207,7 @@ def _draw_metric_line_panel(ax, cohface_summary: pd.DataFrame, mahnob_summary: p
 
 def _draw_main_figure(out_path: Path, datasets: list[tuple[str, pd.DataFrame, pd.DataFrame]]):
     summary_lookup = {label: summary for label, summary, _delta in datasets}
-    fig, axes = plt.subplots(1, 2, figsize=(7.25, 2.15), constrained_layout=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(7.25, 2.30), constrained_layout=True, sharey=True)
     cohface = summary_lookup.get("COHFACE", _fallback_stage_summary("COHFACE"))
     mahnob = summary_lookup.get("MAHNOB-HCI", _fallback_stage_summary("MAHNOB-HCI"))
     _draw_metric_line_panel(
@@ -216,7 +216,6 @@ def _draw_main_figure(out_path: Path, datasets: list[tuple[str, pd.DataFrame, pd
         mahnob,
         "corr_wave_best_median",
         "Waveform evidence",
-        "a",
     )
     _draw_metric_line_panel(
         axes[1],
@@ -224,7 +223,6 @@ def _draw_main_figure(out_path: Path, datasets: list[tuple[str, pd.DataFrame, pd
         mahnob,
         "highfreq_energy_ratio_median",
         "High-frequency burden",
-        "b",
     )
     axes[0].set_ylabel("Median value", fontsize=7.8)
     axes[0].legend(frameon=False, loc="upper left", fontsize=7.2, handlelength=1.6)
