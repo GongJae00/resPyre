@@ -61,7 +61,9 @@ submission_package/
 submission_support/
 
 # --- Generated analysis artifacts ---
-analysis/
+analysis/*
+!analysis/
+!analysis/publication_figure_manifest.json
 
 # --- Results (large data: PKL, NPZ, plots) ---
 results/

@@ -1,0 +1,279 @@
+[
+  {
+    "figure_id": "Figure 2",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "scripts/plot_observation_eda.py:FALLBACK_STAGE_VALUES"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/F2_dataset_and_observation_regime.pdf",
+      "png": "paper/figures/F2_dataset_and_observation_regime.png",
+      "svg": "paper/figures/F2_dataset_and_observation_regime.svg"
+    },
+    "width_class": "double"
+  },
+  {
+    "figure_id": "Supplementary Fig. S1",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/metrics/metrics_freq_domain_raw.csv"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/F3_rate_observation_class_summary.pdf",
+      "png": "paper/figures/F3_rate_observation_class_summary.png",
+      "svg": "paper/figures/F3_rate_observation_class_summary.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S2",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/metrics/metrics_freq_domain_raw.csv"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F6_of_construction_comparison.pdf",
+      "png": "paper/figures/S_F6_of_construction_comparison.png",
+      "svg": "paper/figures/S_F6_of_construction_comparison.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S3",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "scripts/plot_observation_eda.py:FALLBACK_STAGE_VALUES"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F5_preproc_delta_heatmaps.pdf",
+      "png": "paper/figures/S_F5_preproc_delta_heatmaps.png",
+      "svg": "paper/figures/S_F5_preproc_delta_heatmaps.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S4",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F13_of_construction_overlay_grid.pdf",
+      "png": "paper/figures/S_F13_of_construction_overlay_grid.png",
+      "svg": "paper/figures/S_F13_of_construction_overlay_grid.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S5",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F14_dof_construction_overlay_grid.pdf",
+      "png": "paper/figures/S_F14_dof_construction_overlay_grid.png",
+      "svg": "paper/figures/S_F14_dof_construction_overlay_grid.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S6",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/final_operating_point_sensitivity/*"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F_component_ablation_evidence.pdf",
+      "png": "paper/figures/S_F_component_ablation_evidence.png",
+      "svg": "paper/figures/S_F_component_ablation_evidence.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S7",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/full_decoupled_validation_suite_v2/cohface_within",
+      "results/full_decoupled_validation_suite_v2/cohface_within__robust",
+      "results/full_decoupled_validation_suite_v2/cohface_to_mahnob",
+      "results/full_decoupled_validation_suite_v2/cohface_to_mahnob__robust"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F12_within_transfer_compact_comparison.pdf",
+      "png": "paper/figures/S_F12_within_transfer_compact_comparison.png",
+      "svg": "paper/figures/S_F12_within_transfer_compact_comparison.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S8",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/final_full_validation/cohface/data/cohface_17_1.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F9_state_bundle_diagnostics.pdf",
+      "png": "paper/figures/S_F9_state_bundle_diagnostics.png",
+      "svg": "paper/figures/S_F9_state_bundle_diagnostics.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S9",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/full_decoupled_validation_suite_v2/cohface_within__robust/metrics/consistency_raw.csv"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F10_decoupled_system_diagnostics.pdf",
+      "png": "paper/figures/S_F10_decoupled_system_diagnostics.png",
+      "svg": "paper/figures/S_F10_decoupled_system_diagnostics.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S10",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/full_decoupled_validation_suite_v2/cohface_to_mahnob__robust/metrics/consistency_raw.csv"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F11_robust_fallback_diagnostics.pdf",
+      "png": "paper/figures/S_F11_robust_fallback_diagnostics.png",
+      "svg": "paper/figures/S_F11_robust_fallback_diagnostics.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S11",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
+      "results/final_full_validation/cohface",
+      "results/final_full_validation/mahnob_tailaligned"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/F4_waveform_overlay_grid_part1.pdf",
+      "png": "paper/figures/F4_waveform_overlay_grid_part1.png",
+      "svg": "paper/figures/F4_waveform_overlay_grid_part1.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S12",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
+      "results/final_full_validation/cohface",
+      "results/final_full_validation/mahnob_tailaligned"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/F4_waveform_overlay_grid_part2.pdf",
+      "png": "paper/figures/F4_waveform_overlay_grid_part2.png",
+      "svg": "paper/figures/F4_waveform_overlay_grid_part2.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S13",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons",
+      "results/final_full_validation/cohface",
+      "results/final_full_validation/mahnob_tailaligned"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/F5_mechanism_activation.pdf",
+      "png": "paper/figures/F5_mechanism_activation.png",
+      "svg": "paper/figures/F5_mechanism_activation.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S14",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/final_full_validation/mahnob_tailaligned/data/mahnob_1042.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/F6_failure_cases.pdf",
+      "png": "paper/figures/F6_failure_cases.png",
+      "svg": "paper/figures/F6_failure_cases.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S15",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F15_cohface_observation_class_overlay_atlas_part1.pdf",
+      "png": "paper/figures/S_F15_cohface_observation_class_overlay_atlas_part1.png",
+      "svg": "paper/figures/S_F15_cohface_observation_class_overlay_atlas_part1.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S16",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl",
+      "results/20260409_cohface_prod_ofbridge_dofbridge_p1dcons_e2e_policy_narrow/cohface_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/cohface_17_1.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F15_cohface_observation_class_overlay_atlas_part2.pdf",
+      "png": "paper/figures/S_F15_cohface_observation_class_overlay_atlas_part2.png",
+      "svg": "paper/figures/S_F15_cohface_observation_class_overlay_atlas_part2.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S17",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F16_mahnob_observation_class_overlay_atlas_part1.pdf",
+      "png": "paper/figures/S_F16_mahnob_observation_class_overlay_atlas_part1.png",
+      "svg": "paper/figures/S_F16_mahnob_observation_class_overlay_atlas_part1.svg"
+    },
+    "width_class": "supp"
+  },
+  {
+    "figure_id": "Supplementary Fig. S18",
+    "generation": "scripts/make_publication_figures.py",
+    "inputs": [
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl",
+      "results/20260409_mahnob_prod_ofbridge_dofbridge_p1dcons_e2e/mahnob_parh_ossm_prod_ofbridge_dofbridge_p1dcons/data/mahnob_1042.pkl"
+    ],
+    "outputs": {
+      "pdf": "paper/figures/S_F16_mahnob_observation_class_overlay_atlas_part2.pdf",
+      "png": "paper/figures/S_F16_mahnob_observation_class_overlay_atlas_part2.png",
+      "svg": "paper/figures/S_F16_mahnob_observation_class_overlay_atlas_part2.svg"
+    },
+    "width_class": "supp"
+  }
+]

@@ -256,6 +256,50 @@ tail-aligned validation bundles and post-run diagnostics. Manuscript source and
 rendered paper files live in the local `paper/` workspace and are not tracked in
 this repository.
 
+## Publication Figure Regeneration
+
+The public repository includes the reproducible figure-production pipeline used
+for the PARH-OSSM manuscript. The manuscript workspace itself (`paper/`) and
+rendered outputs remain ignored by Git, but the scripts can regenerate every
+publication figure except Figure 1 from the released result artifact bundle.
+
+Set the path to the result artifact zip:
+
+```bash
+export RESPYRE_RESULTS_ZIP=/path/to/results_20260613.zip
+```
+
+Audit the expected inputs and outputs:
+
+```bash
+python scripts/make_publication_figures.py --audit
+```
+
+Regenerate all redesigned manuscript and supplementary figures except Figure 1:
+
+```bash
+python scripts/make_publication_figures.py --all
+```
+
+The command writes vector PDFs, SVG files, and 600 dpi PNG previews under
+`paper/figures/`, and records the expected outputs in
+`analysis/publication_figure_manifest.json`. To verify the generated figure
+files:
+
+```bash
+python scripts/verify_publication_figures.py
+```
+
+The figure code is organized under `paperfig/`:
+
+- `paperfig/style.py`: shared journal-style visual defaults and export helpers
+- `paperfig/io.py`: zip-backed artifact reader
+- `paperfig/panels.py`: reusable dot plot, dumbbell, and heatmap panels
+- `paperfig/waveforms.py`: waveform-windowing and overlay helpers
+
+The pipeline is intentionally data-preserving: it does not change reported
+metrics, trial definitions, statistical tests, or manuscript conclusions.
+
 ## Results Layout
 
 Single-dataset runs normally resolve to:
