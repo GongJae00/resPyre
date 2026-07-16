@@ -815,12 +815,15 @@ def plot_s13_allbase(store: ArtifactStore, entries: list[dict]) -> None:
     df = pd.concat([method_metric_rows(store, "COHFACE"), method_metric_rows(store, "MAHNOB-HCI")], ignore_index=True)
     order = [FAMILY_LABEL[f] for f in FAMILY_ORDER] + ["OSSM-KF\n(P1D quadratic)", "PARH-OSSM"]
     out = FIG_DIR / "F5_mechanism_activation.pdf"
-    fig, axes = plt.subplots(1, 3, figsize=figure_size(SUPP_WIDTH_MM, 102))
-    fig.subplots_adjust(left=0.22, right=0.98, bottom=0.13, top=0.89, wspace=0.30)
+    # Panels A (rate) and B (aligned waveform) only. Strict span-NMAE is a native-scale
+    # metric defined in the released summary only for PARH-OSSM; the direct observations
+    # are not amplitude-comparable, so the strict comparison is given in the main-text
+    # tables (Table 2) rather than as a sparse, easily-misread panel here.
+    fig, axes = plt.subplots(1, 2, figsize=figure_size(SUPP_WIDTH_MM, 102))
+    fig.subplots_adjust(left=0.22, right=0.98, bottom=0.13, top=0.82, wspace=0.42)
     for ax, metric, title, xlabel, note, letter in [
         (axes[0], "rate_mae", "Rate error", "MAE (bpm)", "lower is better", "A"),
         (axes[1], "wave_ccc", "Aligned waveform", "CCC", "higher is better", "B"),
-        (axes[2], "strict_nmae", "Strict reconstruction", "NMAE / GT span", "lower is better", "C"),
     ]:
         horizontal_dotplot(
             ax,
@@ -835,11 +838,17 @@ def plot_s13_allbase(store: ArtifactStore, entries: list[dict]) -> None:
         )
         for coll, color in zip(ax.collections, [PALETTE["cohface"], PALETTE["mahnob"]]):
             coll.set_color(color)
-        if metric == "strict_nmae":
-            ax.set_xscale("log")
         ax.set_title(title, loc="left")
-        panel_label(ax, letter, -0.23, 1.06)
-    axes[-1].legend(loc="lower right", frameon=False)
+        panel_label(ax, letter, -0.23, 1.10)
+    # Single shared legend at the top center, clear of the data and the
+    # "higher/lower is better" notes (previously overlapped panel B's dots).
+    from matplotlib.lines import Line2D
+    legend_handles = [
+        Line2D([0], [0], marker="o", linestyle="", color=PALETTE["cohface"], label="COHFACE"),
+        Line2D([0], [0], marker="o", linestyle="", color=PALETTE["mahnob"], label="MAHNOB-HCI"),
+    ]
+    fig.legend(handles=legend_handles, loc="upper center", ncol=2, frameon=False,
+               bbox_to_anchor=(0.60, 1.005), columnspacing=1.6, handletextpad=0.4)
     save_all(fig, out)
     register(entries, "Supplementary Fig. S13", out, [BASE_COH, BASE_MAH, FINAL_COH, FINAL_MAH], "supp")
 
